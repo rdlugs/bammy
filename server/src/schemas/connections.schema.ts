@@ -32,6 +32,27 @@ export const gitlabConnectSchema = z.object({
   token: z.string().trim().min(1, "Token is required"),
 });
 
+// GitHub.com connects through the GitHub App; a token is for Enterprise Server.
+export const githubConnectSchema = z.object({
+  host: z
+    .string()
+    .trim()
+    .min(1, "Host is required")
+    .transform((value, ctx) => {
+      const host = normalizeHost(value);
+      if (!host) {
+        ctx.addIssue({ code: "custom", message: "Enter a host such as github.example.com" });
+        return z.NEVER;
+      }
+      if (host === "github.com") {
+        ctx.addIssue({ code: "custom", message: "Use the GitHub App to connect github.com" });
+        return z.NEVER;
+      }
+      return host;
+    }),
+  token: z.string().trim().min(1, "Token is required"),
+});
+
 export const githubCallbackSchema = z.object({
   installation_id: z.string().regex(/^\d+$/).optional(),
   setup_action: z.string().optional(),

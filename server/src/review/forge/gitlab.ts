@@ -10,8 +10,10 @@ import {
   type CommitStatus,
   type ForgeAccount,
   type ForgeAdapter,
+  type ForgeHooks,
   type ForgePublisher,
   type ForgeRepo,
+  type HookTarget,
   type InlineComment,
   type InlineResult,
 } from "./types.ts";
@@ -103,7 +105,7 @@ const GITLAB_STATE: Record<CommitState, string> = {
   error: "failed",
 };
 
-export class GitLabAdapter implements ForgeAdapter, ForgePublisher {
+export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
   readonly provider = "gitlab" as const;
   readonly host: string;
   private http: ForgeHttp;
@@ -275,8 +277,8 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher {
 
   // Project hooks need Maintainer access; callers treat a failure as "automatic
   // reviews unavailable" rather than an error.
-  async createProjectHook(project: string, url: string, token: string): Promise<string> {
-    const hook = await this.http.json<{ id: number }>(`${this.project(project)}/hooks`, {
+  async createHook(repo: HookTarget, url: string, token: string): Promise<string> {
+    const hook = await this.http.json<{ id: number }>(`${this.project(repo.externalId)}/hooks`, {
       method: "POST",
       body: JSON.stringify({
         url,
@@ -290,9 +292,9 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher {
     return String(hook.id);
   }
 
-  async deleteProjectHook(project: string, hookId: string): Promise<void> {
+  async deleteHook(repo: HookTarget, hookId: string): Promise<void> {
     try {
-      await this.http.request(`${this.project(project)}/hooks/${encodeURIComponent(hookId)}`, { method: "DELETE" });
+      await this.http.request(`${this.project(repo.externalId)}/hooks/${encodeURIComponent(hookId)}`, { method: "DELETE" });
     } catch (err) {
       if (!isNotFound(err)) throw err;
     }

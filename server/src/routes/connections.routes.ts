@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  connectGitlab,
+  connectWithToken,
   deleteConnection,
   githubCallback,
   githubInstall,
@@ -12,7 +12,7 @@ export const connectionsRouter = Router();
 
 connectionsRouter.use(requireAuth);
 connectionsRouter.get("/", listConnections);
-connectionsRouter.post("/gitlab", connectGitlab);
 connectionsRouter.get("/github/install", githubInstall);
 connectionsRouter.get("/github/callback", githubCallback);
+connectionsRouter.post("/:provider", connectWithToken);
 connectionsRouter.delete("/:id", deleteConnection);

@@ -53,11 +53,37 @@ async function gitlabRepo() {
   });
 }
 
-function sendGithub(event: string, payload: unknown, secret = SECRET) {
+async function githubTokenRepo(enabled = true) {
+  const connection = await prisma.forgeConnection.create({
+    data: {
+      userId,
+      provider: "github",
+      host: "ghe.acme.com",
+      kind: "token",
+      accountLogin: "dev",
+      encryptedToken: encrypt("ghp"),
+    },
+  });
+  return prisma.repository.create({
+    data: {
+      connectionId: connection.id,
+      provider: "github",
+      host: "ghe.acme.com",
+      fullPath: "acme/api",
+      externalId: "901",
+      defaultBranch: "main",
+      enabled,
+      webhookId: "h2",
+      encryptedWebhookSecret: encrypt("gh-repo-secret"),
+    },
+  });
+}
+
+function sendGithub(event: string, payload: unknown, secret = SECRET, path = "/api/webhooks/github") {
   const body = JSON.stringify(payload);
   const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
   return request(app)
-    .post("/api/webhooks/github")
+    .post(path)
     .set("Content-Type", "application/json")
     .set("X-GitHub-Event", event)
     .set("X-Hub-Signature-256", signature)
@@ -197,6 +223,57 @@ function sendGitlab(repoId: string, event: string, payload: unknown, token = "gl
 const mrEvent = (action: string, extra: Record<string, unknown> = {}) => ({
   object_kind: "merge_request",
   object_attributes: { action, iid: 7, last_commit: { id: "glsha" }, ...extra },
+});
+
+describe("POST /api/webhooks/github/:repoId", () => {
+  const sendRepo = (repoId: string, event: string, payload: unknown, secret = "gh-repo-secret") =>
+    sendGithub(event, payload, secret, `/api/webhooks/github/${repoId}`);
+  const repoPrEvent = (action: string) => ({ action, repository: { id: 901 }, pull_request: { number: 8, head: { sha: "ghsha" } } });
+
+  it("rejects a wrong signature and an unknown repository alike", async () => {
+    const repo = await githubTokenRepo();
+    expect((await sendRepo(repo.id, "pull_request", repoPrEvent("opened"), "nope")).status).toBe(401);
+    expect((await sendRepo("00000000-0000-4000-8000-000000000000", "pull_request", repoPrEvent("opened"))).status).toBe(401);
+    expect(await prisma.reviewJob.count()).toBe(0);
+  });
+
+  it("answers the ping GitHub sends when the hook is created", async () => {
+    const repo = await githubTokenRepo();
+    expect((await sendRepo(repo.id, "ping", { zen: "Hi" })).body.outcome).toBe("pong");
+  });
+
+  it("queues a review for a pull request without an installation", async () => {
+    const repo = await githubTokenRepo();
+
+    const res = await sendRepo(repo.id, "pull_request", repoPrEvent("opened"));
+
+    expect(res.status).toBe(202);
+    expect(res.body.outcome).toBe("queued");
+    expect(await prisma.reviewJob.findMany({ select: { repositoryId: true, number: true, headSha: true } })).toEqual([
+      { repositoryId: repo.id, number: 8, headSha: "ghsha" },
+    ]);
+  });
+
+  it("refuses a hook delivered under another provider's path or an unknown provider", async () => {
+    const repo = await githubTokenRepo();
+    const res = await request(app)
+      .post(`/api/webhooks/gitlab/${repo.id}`)
+      .set("Content-Type", "application/json")
+      .set("X-Gitlab-Event", "Merge Request Hook")
+      .set("X-Gitlab-Token", "gh-repo-secret")
+      .send(JSON.stringify({ object_attributes: { action: "open", iid: 1, last_commit: { id: "x" } } }));
+    expect(res.status).toBe(401);
+    expect((await sendGithub("pull_request", repoPrEvent("opened"), "gh-repo-secret", `/api/webhooks/bitbucket/${repo.id}`)).status).toBe(404);
+    expect(await prisma.reviewJob.count()).toBe(0);
+  });
+
+  it("ignores a disabled repository and unhandled events", async () => {
+    const disabled = await githubTokenRepo(false);
+    expect((await sendRepo(disabled.id, "pull_request", repoPrEvent("opened"))).body.outcome).toBe("not_enabled");
+    await prisma.repository.update({ where: { id: disabled.id }, data: { enabled: true } });
+    expect((await sendRepo(disabled.id, "pull_request", repoPrEvent("closed"))).body.outcome).toBe("ignored");
+    expect(await prisma.reviewJob.count()).toBe(0);
+  });
 });
 
 describe("POST /api/webhooks/gitlab/:repoId", () => {

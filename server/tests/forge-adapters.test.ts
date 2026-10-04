@@ -109,6 +109,36 @@ describe("GitHubAdapter", () => {
       { externalId: "9", fullPath: "acme/web", defaultBranch: "main", private: true, webUrl: "u" },
     ]);
   });
+
+  it("lists the user's repositories for a token connection", async () => {
+    const stub = fetchStub([
+      {
+        url: /\/user\/repos\?per_page=100&affiliation=/,
+        body: [{ id: 9, full_name: "acme/web", default_branch: "main", private: false, html_url: "u" }],
+      },
+    ]);
+    const gh = new GitHubAdapter({ host: "ghe.acme.com", token: async () => "tok", repoSource: "user", fetch: stub.fetch });
+
+    expect(await gh.listRepos()).toEqual([
+      { externalId: "9", fullPath: "acme/web", defaultBranch: "main", private: false, webUrl: "u" },
+    ]);
+    expect(stub.calls[0]!.url).toMatch(/^https:\/\/ghe\.acme\.com\/api\/v3\/user\/repos/);
+  });
+
+  it("creates a repository hook and tolerates deleting one that is gone", async () => {
+    const repo = { externalId: "9", fullPath: "acme/web" };
+    const { adapter: gh, calls } = adapter([
+      { method: "POST", url: /\/repos\/acme\/web\/hooks$/, body: { id: 77 } },
+      { method: "DELETE", url: /\/repos\/acme\/web\/hooks\/77$/, status: 404, body: { message: "Not Found" } },
+    ]);
+
+    expect(await gh.createHook(repo, "https://bammy.example.com/hook", "s3cret")).toBe("77");
+    expect(JSON.parse(calls[0]!.body!)).toMatchObject({
+      events: ["pull_request", "issue_comment"],
+      config: { url: "https://bammy.example.com/hook", secret: "s3cret", content_type: "json" },
+    });
+    await expect(gh.deleteHook(repo, "77")).resolves.toBeUndefined();
+  });
 });
 
 describe("GitHubApp", () => {

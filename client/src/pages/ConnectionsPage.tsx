@@ -2,23 +2,40 @@ import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useSearchParams } from "react-router"
-import { Loader2 } from "lucide-react"
+import { Loader2, Plug, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { z } from "zod"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Field, FieldGroup } from "@/components/ui/field"
+import { Separator } from "@/components/ui/separator"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { TextField } from "@/features/auth/TextField"
 import { applyServerErrors } from "@/features/auth/applyServerErrors"
-import { useConnectGitlab, useConnections, useDeleteConnection, type Connection } from "@/features/forge/api"
+import {
+  useConnectToken,
+  useConnections,
+  useDeleteConnection,
+  type Connection,
+  type TokenConnectInput,
+} from "@/features/forge/api"
+import { PROVIDER_IDS, PROVIDERS, type TokenMethod } from "@/features/forge/providers"
+import type { Provider } from "@/features/reviews/types"
+import { cn } from "cn"
 
-const gitlabSchema = z.object({
-  host: z.string().trim(),
-  token: z.string().trim().min(1, "Token is required"),
-})
-type GitlabInput = z.infer<typeof gitlabSchema>
+function tokenSchema(method: TokenMethod) {
+  const shape: Record<string, z.ZodString> = {
+    host: method.fixedHost ? z.string().trim() : z.string().trim().min(1, "Host is required"),
+    token: z.string().trim().min(1, "Token is required"),
+  }
+  for (const field of method.extraFields ?? []) {
+    shape[field.name] = z.string().trim().min(1, `${field.label} is required`)
+  }
+  return z.object(shape)
+}
 
 const RETURN_MESSAGES: Record<string, string> = {
   github_install_failed: "GitHub installation could not be completed",
@@ -39,18 +56,33 @@ function useReturnToast() {
   }, [params, setParams])
 }
 
-function GitlabForm() {
-  const connect = useConnectGitlab()
-  const form = useForm<GitlabInput>({
-    resolver: zodResolver(gitlabSchema),
-    defaultValues: { host: "gitlab.com", token: "" },
+function TokenForm({
+  provider,
+  method,
+  onConnected,
+}: {
+  provider: Provider
+  method: TokenMethod
+  onConnected?: () => void
+}) {
+  const connect = useConnectToken(provider)
+  const label = PROVIDERS[provider].label
+  const extraFields = method.extraFields ?? []
+  const form = useForm<TokenConnectInput>({
+    resolver: zodResolver(tokenSchema(method)),
+    defaultValues: {
+      host: method.fixedHost ?? "",
+      token: "",
+      ...Object.fromEntries(extraFields.map((field) => [field.name, ""])),
+    },
   })
 
-  async function onSubmit(values: GitlabInput) {
+  async function onSubmit(values: TokenConnectInput) {
     try {
       const { connection } = await connect.mutateAsync(values)
-      toast.success(`Connected GitLab as ${connection.accountLogin}`)
-      form.reset({ host: values.host, token: "" })
+      toast.success(`Connected ${label} as ${connection.accountLogin}`)
+      form.reset({ ...values, token: "" })
+      onConnected?.()
     } catch (error) {
       applyServerErrors(error, form.setError)
     }
@@ -59,23 +91,71 @@ function GitlabForm() {
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
       <FieldGroup>
-        <TextField control={form.control} name="host" label="Host" placeholder="gitlab.com" />
+        {!method.fixedHost && (
+          <TextField control={form.control} name="host" label="Host" placeholder={method.hostPlaceholder} />
+        )}
+        {extraFields.map((field) => (
+          <TextField
+            key={field.name}
+            control={form.control}
+            name={field.name}
+            label={field.label}
+            type={field.type ?? "text"}
+            autoComplete="off"
+            placeholder={field.placeholder}
+          />
+        ))}
         <TextField
           control={form.control}
           name="token"
           label="Access token"
           type="password"
           autoComplete="off"
-          placeholder="glpat-..."
+          placeholder={method.tokenPlaceholder}
         />
         <Field>
           <Button type="submit" disabled={form.formState.isSubmitting}>
             {form.formState.isSubmitting && <Loader2 className="animate-spin" />}
-            Connect GitLab
+            Connect {label}
           </Button>
         </Field>
       </FieldGroup>
     </form>
+  )
+}
+
+function Choice<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-medium">{label}</span>
+      <div
+        role="group"
+        aria-label={label}
+        className={cn("grid grid-cols-2 gap-2", options.length > 2 && "sm:grid-cols-3")}
+      >
+        {options.map((option) => (
+          <Button
+            key={option.value}
+            type="button"
+            variant={value === option.value ? "default" : "outline"}
+            aria-pressed={value === option.value}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -110,76 +190,153 @@ function RemoveButton({ connection }: { connection: Connection }) {
   )
 }
 
+function AddConnectionSheet({
+  open,
+  onOpenChange,
+  availableApps,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  availableApps: Provider[]
+}) {
+  const [providerId, setProviderId] = useState<Provider>(PROVIDER_IDS[0]!)
+  const [hostingId, setHostingId] = useState<string>("")
+
+  const provider = PROVIDERS[providerId]
+  // A hosting choice made for another provider falls back to this one's first.
+  const hosting = provider.hosting.find((option) => option.id === hostingId) ?? provider.hosting[0]!
+  const method = hosting.method
+
+  function handleOpenChange(next: boolean) {
+    if (!next) {
+      setProviderId(PROVIDER_IDS[0]!)
+      setHostingId("")
+    }
+    onOpenChange(next)
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={handleOpenChange}>
+      <SheetContent className="overflow-y-auto sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle>Add connection</SheetTitle>
+          <SheetDescription>Connect a code host to choose repositories to review.</SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col gap-6 px-4 pb-4">
+          <Choice
+            label="Provider"
+            value={providerId}
+            onChange={setProviderId}
+            options={PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDERS[id].label }))}
+          />
+          {provider.hosting.length > 1 && (
+            <Choice
+              label="Hosting"
+              value={hosting.id}
+              onChange={setHostingId}
+              options={provider.hosting.map((option) => ({ value: option.id, label: option.label }))}
+            />
+          )}
+          <Separator />
+          <section className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">{hosting.hint}</p>
+            {method.type === "app" ? (
+              availableApps.includes(providerId) ? (
+                <Button asChild>
+                  <a href={method.installHref}>Install {method.name}</a>
+                </Button>
+              ) : (
+                <p className="text-sm text-muted-foreground">The {method.name} is not configured on this server.</p>
+              )
+            ) : (
+              <TokenForm
+                key={`${providerId}-${hosting.id}`}
+                provider={providerId}
+                method={method}
+                onConnected={() => handleOpenChange(false)}
+              />
+            )}
+          </section>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 export function ConnectionsPage() {
   useReturnToast()
   const { data, isPending } = useConnections()
+  const [adding, setAdding] = useState(false)
+
+  const sheet = <AddConnectionSheet open={adding} onOpenChange={setAdding} availableApps={data?.availableApps ?? []} />
+
+  if (isPending) return null
+
+  if (!data?.connections.length) {
+    return (
+      <main className="flex flex-1 flex-col p-6">
+        <Empty className="flex-1 border border-dashed">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Plug />
+            </EmptyMedia>
+            <EmptyTitle>No connections yet</EmptyTitle>
+            <EmptyDescription>Connect GitHub or GitLab to start reviewing.</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button onClick={() => setAdding(true)}>
+              <Plus />
+              Add connection
+            </Button>
+          </EmptyContent>
+        </Empty>
+        {sheet}
+      </main>
+    )
+  }
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-6">
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>GitHub</CardTitle>
-            <CardDescription>Install the Bammy GitHub App on the accounts and repositories to review.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {data?.githubAvailable === false ? (
-              <p className="text-sm text-muted-foreground">GitHub is not configured on this server.</p>
-            ) : (
-              <Button asChild disabled={!data}>
-                <a href="/api/connections/github/install">Install GitHub App</a>
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>GitLab</CardTitle>
-            <CardDescription>
-              A personal, project or group token with the <code>api</code> scope and at least Developer access.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <GitlabForm />
-          </CardContent>
-        </Card>
-      </div>
-
       <Card>
         <CardHeader>
           <CardTitle>Connected accounts</CardTitle>
+          <CardAction>
+            <Button size="sm" onClick={() => setAdding(true)}>
+              <Plus />
+              Add connection
+            </Button>
+          </CardAction>
         </CardHeader>
         <CardContent>
-          {isPending ? null : !data?.connections.length ? (
-            <p className="text-sm text-muted-foreground">Nothing connected yet.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Account</TableHead>
-                  <TableHead>Forge</TableHead>
-                  <TableHead>Host</TableHead>
-                  <TableHead />
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Account</TableHead>
+                <TableHead>Forge</TableHead>
+                <TableHead>Host</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.connections.map((connection) => (
+                <TableRow key={connection.id}>
+                  <TableCell className="font-medium">{connection.accountLogin}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline">
+                        {PROVIDERS[connection.provider].kindLabel[connection.kind] ?? connection.kind}
+                      </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{connection.host}</TableCell>
+                  <TableCell className="text-right">
+                    <RemoveButton connection={connection} />
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.connections.map((connection) => (
-                  <TableRow key={connection.id}>
-                    <TableCell className="font-medium">{connection.accountLogin}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{connection.provider === "github" ? "GitHub App" : "GitLab token"}</Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{connection.host}</TableCell>
-                    <TableCell className="text-right">
-                      <RemoveButton connection={connection} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+              ))}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
+      {sheet}
     </main>
   )
 }
