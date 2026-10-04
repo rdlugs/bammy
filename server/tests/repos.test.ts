@@ -68,6 +68,7 @@ describe("GET /api/repos", () => {
       ["team/web", false],
       ["team/api", true],
     ]);
+    expect(res.body.repos[0].settings).toEqual({});
   });
 
   it("reports revoked credentials as a broken connection", async () => {

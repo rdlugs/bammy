@@ -1,5 +1,5 @@
-import { Outlet, useNavigate } from "react-router"
-import { ChevronsUpDown, LayoutDashboard, LogOut } from "lucide-react"
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router"
+import { ChevronsUpDown, FolderGit2, GitPullRequest, LayoutDashboard, LogOut, Plug } from "lucide-react"
 import { toast } from "sonner"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -27,6 +27,18 @@ import {
 } from "@/components/ui/sidebar"
 import { useAuth } from "@/features/auth/useAuth"
 
+const NAV = [
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/reviews", label: "Reviews", icon: GitPullRequest },
+  { to: "/repositories", label: "Repositories", icon: FolderGit2 },
+  { to: "/connections", label: "Connections", icon: Plug },
+]
+
+function pageTitle(pathname: string) {
+  if (pathname.startsWith("/reviews/")) return "Review"
+  return NAV.find((item) => pathname.startsWith(item.to))?.label ?? "Dashboard"
+}
+
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -39,6 +51,7 @@ function initials(name: string) {
 export function DashboardLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const { pathname } = useLocation()
 
   async function handleLogout() {
     try {
@@ -69,12 +82,16 @@ export function DashboardLayout() {
         <SidebarContent>
           <SidebarGroup>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton isActive tooltip="Dashboard">
-                  <LayoutDashboard />
-                  <span>Dashboard</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {NAV.map((item) => (
+                <SidebarMenuItem key={item.to}>
+                  <SidebarMenuButton asChild isActive={pathname.startsWith(item.to)} tooltip={item.label}>
+                    <NavLink to={item.to}>
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
             </SidebarMenu>
           </SidebarGroup>
         </SidebarContent>
@@ -119,7 +136,7 @@ export function DashboardLayout() {
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
-          <h1 className="text-sm font-medium">Dashboard</h1>
+          <h1 className="text-sm font-medium">{pageTitle(pathname)}</h1>
           <div className="ml-auto">
             <ModeToggle />
           </div>

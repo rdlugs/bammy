@@ -14,12 +14,19 @@ describe("routing and auth", () => {
     expect(await screen.findByText("Welcome back")).toBeInTheDocument()
   })
 
-  it("shows the dashboard for an authenticated user", async () => {
-    mockFetch(() => jsonResponse(200, { user }))
+  it("shows the dashboard with setup steps for a new user", async () => {
+    mockFetch((url) =>
+      url.includes("/connections")
+        ? jsonResponse(200, { connections: [], githubAvailable: true })
+        : url.includes("/reviews")
+          ? jsonResponse(200, { reviews: [], nextCursor: null })
+          : jsonResponse(200, { user }),
+    )
     renderWithProviders(<App />, { route: "/dashboard" })
 
     expect(await screen.findByText("Welcome, Ada Lovelace")).toBeInTheDocument()
-    expect(screen.getByText("Nothing here yet")).toBeInTheDocument()
+    expect(await screen.findByText("Get started")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Connect GitHub or GitLab" })).toHaveAttribute("href", "/connections")
   })
 
   it("redirects a logged-in user away from /login", async () => {
