@@ -1,4 +1,4 @@
-import { markersIn, SUMMARY_MARKER } from "../core/markers.ts";
+import { markersIn, SUMMARY_MARKER, withoutDescriptionBlock } from "../core/markers.ts";
 import type { ChangeSet, ChangeType, ForgeRef } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
 import { ForgeHttp, isNotFound, type FetchLike } from "./http.ts";
@@ -42,6 +42,8 @@ interface GlMergeRequest {
   draft?: boolean;
   work_in_progress?: boolean;
   web_url: string;
+  author?: { username: string };
+  labels?: string[];
   source_branch: string;
   target_branch: string;
   diff_refs: { base_sha: string; start_sha: string; head_sha: string } | null;
@@ -164,10 +166,12 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
         webUrl: mr.web_url,
       },
       title: mr.title,
-      description: mr.description ?? "",
+      description: withoutDescriptionBlock(mr.description ?? ""),
       baseRef: mr.target_branch,
       headRef: mr.source_branch,
       isDraft: mr.draft ?? mr.work_in_progress ?? false,
+      author: mr.author?.username,
+      labels: mr.labels ?? [],
       files: diffs.map((diff) =>
         toChangedFile({
           path: diff.deleted_file ? diff.old_path : diff.new_path,
@@ -251,9 +255,13 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     );
   }
 
-  async upsertSummaryComment(ref: ForgeRef, body: string): Promise<string> {
+  upsertSummaryComment(ref: ForgeRef, body: string): Promise<string> {
+    return this.upsertComment(ref, SUMMARY_MARKER, body);
+  }
+
+  async upsertComment(ref: ForgeRef, marker: string, body: string): Promise<string> {
     const notes = await this.http.paginate<GlNote>(`${this.mergeRequest(ref)}/notes?per_page=100&sort=asc`, nextPage);
-    const existing = notes.filter((n) => this.isSelf(n) && n.body.includes(SUMMARY_MARKER)).at(-1);
+    const existing = notes.filter((n) => this.isSelf(n) && n.body.includes(marker)).at(-1);
     const saved = existing
       ? await this.http.json<GlNote>(`${this.mergeRequest(ref)}/notes/${existing.id}`, {
           method: "PUT",
@@ -261,6 +269,25 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
         })
       : await this.http.json<GlNote>(`${this.mergeRequest(ref)}/notes`, { method: "POST", body: JSON.stringify({ body }) });
     return String(saved.id);
+  }
+
+  // Read just before writing so an edit the author made since the change was
+  // fetched is kept.
+  async updateDescription(ref: ForgeRef, transform: (description: string) => string): Promise<void> {
+    const mr = await this.http.json<GlMergeRequest>(this.mergeRequest(ref));
+    const description = mr.description ?? "";
+    const next = transform(description);
+    if (next === description) return;
+    await this.http.request(this.mergeRequest(ref), { method: "PUT", body: JSON.stringify({ description: next }) });
+  }
+
+  // One request; GitLab ignores labels it cannot remove and creates missing ones.
+  async setLabels(ref: ForgeRef, add: string[], remove: string[]): Promise<void> {
+    if (!add.length && !remove.length) return;
+    await this.http.request(this.mergeRequest(ref), {
+      method: "PUT",
+      body: JSON.stringify({ add_labels: add.join(","), remove_labels: remove.join(",") }),
+    });
   }
 
   async setCommitStatus(ref: ForgeRef, status: CommitStatus): Promise<void> {

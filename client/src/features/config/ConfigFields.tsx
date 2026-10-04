@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { Link } from "react-router"
 import { Plus, RotateCcw, Trash2 } from "lucide-react"
 import { SearchableSelect } from "@/components/SearchableSelect"
+import { TagInput } from "@/components/TagInput"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,6 +15,7 @@ import {
   FieldGroup,
   FieldLabel,
   FieldLegend,
+  FieldSeparator,
   FieldSet,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -29,11 +31,14 @@ import { ReviewPreview, type PreviewSettings } from "./ReviewPreview"
 import { CONFIG_TABS, TAB_ERRORS, type ConfigTab } from "./tabs"
 import {
   AUTO,
+  CHOICES,
   FLAGS,
   INHERIT,
   MAX_FALLBACK_MODELS,
   NUMBERS,
+  type ChoiceName,
   type FlagName,
+  type ListName,
   type FormErrors,
   type FormState,
   type NumberName,
@@ -58,15 +63,27 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Committable suggestions",
     description: "Offer fixes as suggestions that can be applied from the forge.",
   },
-  walkthrough: { label: "Walkthrough", description: "Summarise what the change does in the summary comment." },
+  walkthrough: {
+    label: "Walkthrough",
+    description: "Summarise what the change does. Where it is posted is set on the Triggers tab.",
+  },
   postInline: { label: "Post inline comments", description: "Comment on the lines each finding refers to." },
   postSummary: { label: "Post summary comment", description: "Post the review summary as a comment on the change." },
   postCheck: { label: "Post commit status", description: "Report the verdict as the bammy/review status." },
-  onPush: {
-    label: "Review automatically on push",
-    description: "Review when a pull or merge request is opened or receives new commits.",
+  blastRadiusLabel: {
+    label: "Publish blast radius label",
+    description:
+      'Add a native PR/MR label with the estimated blast radius (e.g. "Large blast radius"). Supported on GitHub and GitLab.',
   },
-  drafts: { label: "Review drafts automatically", description: "Include drafts in automatic reviews." },
+  effortLabel: {
+    label: "Publish review time estimate label",
+    description:
+      'Add a native PR/MR label with the estimated review effort (e.g. "10-20 Minutes"). Supported on GitHub and GitLab.',
+  },
+  reviewOnPush: {
+    label: "Review automatically on push",
+    description: "Review the new commits on every push to the PR/MR.",
+  },
   command: {
     label: "Allow review command",
     description: (
@@ -85,6 +102,81 @@ function configuredConnectionLabel(llm: EffectiveConfig["llm"]) {
   if (llm.connection) return connectionLabel(llm.connection)
   if (llm.baseUrl) return llm.endpointKey ? `${connectionLabel(llm.endpointKey)} (legacy)` : "custom endpoint (legacy)"
   return "not configured"
+}
+
+const CHOICE_INFO: Record<ChoiceName, { label: string; description: string; options: { value: string; label: string }[] }> = {
+  review: {
+    label: "Code review trigger",
+    description: "Which pull and merge requests are reviewed automatically when opened or marked ready.",
+    options: [
+      { value: "manual", label: "Manual only" },
+      { value: "published", label: "Published PRs" },
+      { value: "all", label: "Draft and published PRs" },
+    ],
+  },
+  summary: {
+    label: "PR summary trigger",
+    description: "When automatic reviews include the PR summary. Requested reviews always do while the walkthrough is on.",
+    options: [
+      { value: "manual", label: "Manual only" },
+      { value: "published", label: "Published PRs" },
+    ],
+  },
+  summaryLocation: {
+    label: "Comment location",
+    description:
+      "Populate the native PR/MR description or publish the PR summary as a standalone comment. Dynamic uses the description when the author left it empty.",
+    options: [
+      { value: "dynamic", label: "Dynamic location" },
+      { value: "description", label: "Native PR/MR description" },
+      { value: "comment", label: "Standalone comment" },
+    ],
+  },
+}
+
+const LIST_INFO: Record<ListName, { label: string; description: string; placeholder: string }> = {
+  ignoreTitles: {
+    label: "Ignore by title",
+    description: "Titles containing any of these phrases, ignoring case.",
+    placeholder: "WIP",
+  },
+  skipAuthors: {
+    label: "Skip by author",
+    description: "Logins of whoever opened or pushed the PR/MR.",
+    placeholder: "dependabot[bot]",
+  },
+  skipLabels: {
+    label: "Skip by label",
+    description: "Labels on the PR/MR, matched exactly and case-sensitively.",
+    placeholder: "no-review",
+  },
+  skipSourceBranches: {
+    label: "Skip by source branch",
+    description: "Opened from a branch whose name contains any of these.",
+    placeholder: "release/",
+  },
+  skipTargetBranches: {
+    label: "Skip by target branch",
+    description: "Targeting a branch whose name contains any of these.",
+    placeholder: "legacy",
+  },
+}
+
+// A titled group of fields within a tab.
+function Section(props: { title: string; description: ReactNode; children: ReactNode }) {
+  return (
+    // The legend stays a direct child so it names the fieldset.
+    <FieldSet>
+      <FieldLegend>{props.title}</FieldLegend>
+      <FieldDescription className="-mt-3">{props.description}</FieldDescription>
+      {props.children}
+    </FieldSet>
+  )
+}
+
+// Switches as rows of one bordered list, so a run of them reads as a group.
+function ToggleList(props: { children: ReactNode }) {
+  return <div className="divide-y rounded-lg border *:px-4 *:py-3">{props.children}</div>
 }
 
 const NUMBER_INFO: Record<NumberName, { label: string; description: string }> = {
@@ -533,7 +625,7 @@ export function ConfigFields(props: {
 
   function inheritedFlag(name: FlagName) {
     const { section } = FLAGS.find((flag) => flag.name === name)!
-    return inherited ? (inherited[section] as Record<string, boolean>)[name] : undefined
+    return inherited ? (inherited[section] as Record<string, unknown>)[name] as boolean : undefined
   }
 
   function toggles(names: FlagName[]) {
@@ -550,7 +642,7 @@ export function ConfigFields(props: {
           onChange={setFlag(name)}
           resettable={isRepo}
           inheritedHint={inheritedHint(path, fallback)}
-          effective={config && effective(path, (config[section] as Record<string, boolean>)[name])}
+          effective={config && effective(path, (config[section] as Record<string, unknown>)[name])}
           disabled={disabled}
         />
       )
@@ -561,6 +653,57 @@ export function ConfigFields(props: {
   function emptyHint(path: string, value: unknown) {
     if (isRepo) return `Leave empty to inherit${inherited ? ` ${inheritedHint(path, value)}` : ""}.`
     return `Leave empty to use the default${inherited ? ` (${describe(value, undefined)})` : ""}.`
+  }
+
+  function choiceField(name: ChoiceName) {
+    const { section } = CHOICES.find((choice) => choice.name === name)!
+    const path = `${section}.${name}`
+    const fallback = inherited ? ((inherited[section] as Record<string, unknown>)[name] as string) : undefined
+    const info = CHOICE_INFO[name]
+    const label = (value: unknown) => info.options.find((option) => option.value === value)?.label ?? value
+    return (
+      <ChoiceField
+        id={`choice-${name}`}
+        label={info.label}
+        value={form.choices[name]}
+        onChange={(value) => props.onChange({ ...form, choices: { ...form.choices, [name]: value } })}
+        options={info.options}
+        // The global config selects the fallback itself, so it stays the raw value.
+        {...(isRepo ? { inherit: { description: inheritedHint(path, fallback && label(fallback)) } } : { fallback })}
+        description={info.description}
+        effective={config && effective(path, label((config[section] as Record<string, unknown>)[name]))}
+        disabled={disabled}
+      />
+    )
+  }
+
+  function listField(name: ListName) {
+    const path = `triggers.${name}`
+    const fallback = inherited?.triggers[name]
+    const info = LIST_INFO[name]
+    const id = `list-${name}`
+    const error = errors[name]
+    // Only worth a hint when leaving it empty actually inherits something.
+    const hint = isRepo && fallback?.length ? ` ${emptyHint(path, fallback)}` : ""
+    return (
+      <Field data-disabled={disabled} data-invalid={error ? true : undefined}>
+        <FieldLabel htmlFor={id}>{info.label}</FieldLabel>
+        <TagInput
+          id={id}
+          value={form.lists[name]}
+          onChange={(value) => props.onChange({ ...form, lists: { ...form.lists, [name]: value } })}
+          placeholder={fallback?.length ? fallback.join(", ") : `e.g. ${info.placeholder}, then Enter`}
+          disabled={disabled}
+          aria-invalid={error ? true : undefined}
+        />
+        <FieldDescription>
+          {info.description}
+          {hint}
+        </FieldDescription>
+        {config && <FieldDescription className="text-xs">{effective(path, config.triggers[name])}</FieldDescription>}
+        {error && <FieldError>{error}</FieldError>}
+      </Field>
+    )
   }
 
   function numberField(name: NumberName) {
@@ -778,7 +921,35 @@ export function ConfigFields(props: {
       </>
     ),
     display: toggles(["walkthrough", "postInline", "postSummary", "postCheck"]),
-    triggers: toggles(["onPush", "drafts", "command"]),
+    triggers: (
+      <>
+        <Section title="Code reviews" description="When Bammy reviews a pull or merge request on its own.">
+          <div className="grid gap-4 @md/field-group:grid-cols-2">{choiceField("review")}</div>
+          <ToggleList>{toggles(["reviewOnPush", "command"])}</ToggleList>
+        </Section>
+        <FieldSeparator />
+        <Section title="PR summary" description="When the summary is written, where it goes, and the labels it adds.">
+          <div className="grid gap-4 @md/field-group:grid-cols-2">
+            {choiceField("summary")}
+            {choiceField("summaryLocation")}
+          </div>
+          <ToggleList>{toggles(["blastRadiusLabel", "effortLabel"])}</ToggleList>
+        </Section>
+        <FieldSeparator />
+        <Section
+          title="Skip rules"
+          description="Automatic reviews skip a PR/MR that matches any rule. Manual reviews and /bammy review always run."
+        >
+          <div className="grid gap-x-4 gap-y-5 @md/field-group:grid-cols-2">
+            {listField("ignoreTitles")}
+            {listField("skipAuthors")}
+            {listField("skipSourceBranches")}
+            {listField("skipTargetBranches")}
+            {listField("skipLabels")}
+          </div>
+        </Section>
+      </>
+    ),
     guidance: (
       <>
         <Field data-disabled={disabled}>

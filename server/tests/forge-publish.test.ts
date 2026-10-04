@@ -141,6 +141,28 @@ describe("GitHub publishing", () => {
       target_url: "http://app/r/1",
     });
   });
+
+  it("replaces the estimate labels, ignoring one the PR does not carry", async () => {
+    const { gh, calls } = github([
+      { method: "DELETE", url: /\/issues\/42\/labels\/Large%20blast%20radius$/, status: 404, body: { message: "Label does not exist" } },
+      { method: "POST", url: /\/issues\/42\/labels$/, body: [] },
+    ]);
+    await gh.setLabels(ghRef, ["Small blast radius"], ["Large blast radius"]);
+    expect(calls.map((c) => c.method)).toEqual(["DELETE", "POST"]);
+    expect(body(calls[1]!)).toEqual({ labels: ["Small blast radius"] });
+  });
+
+  it("rewrites the description from its current text, and skips an unchanged one", async () => {
+    const { gh, calls } = github([
+      { url: /\/pulls\/42$/, body: { body: "Author text" } },
+      { method: "PATCH", url: /\/pulls\/42$/, body: {} },
+    ]);
+    await gh.updateDescription(ghRef, (text) => `${text}\n\nmore`);
+    expect(body(calls[1]!)).toEqual({ body: "Author text\n\nmore" });
+
+    await gh.updateDescription(ghRef, (text) => text);
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
+  });
 });
 
 describe("GitLab publishing", () => {
@@ -212,5 +234,20 @@ describe("GitLab publishing", () => {
     await gl.setCommitStatus(glRef, { state: "pending", description: "Review in progress" });
     expect(calls.map((c) => body(c).state)).toEqual(["failed", "running"]);
     expect(body(calls[0]!).name).toBe("bammy/review");
+  });
+
+  it("adds and removes labels in one update", async () => {
+    const { gl, calls } = gitlab([{ method: "PUT", url: /\/merge_requests\/42$/, body: {} }]);
+    await gl.setLabels(glRef, ["1-5 Minutes"], ["5-10 Minutes", "40+ Minutes"]);
+    expect(body(calls[0]!)).toEqual({ add_labels: "1-5 Minutes", remove_labels: "5-10 Minutes,40+ Minutes" });
+  });
+
+  it("writes the description through the merge request", async () => {
+    const { gl, calls } = gitlab([
+      { url: /\/merge_requests\/42$/, body: { description: null } },
+      { method: "PUT", url: /\/merge_requests\/42$/, body: {} },
+    ]);
+    await gl.updateDescription(glRef, (text) => `${text}summary`);
+    expect(body(calls[1]!)).toEqual({ description: "summary" });
   });
 });

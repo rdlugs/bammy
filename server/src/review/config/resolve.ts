@@ -61,6 +61,17 @@ function recordLeaves(value: unknown, layer: LayerName, sources: Record<string, 
   }
 }
 
+// Settings saved before `triggers.review` existed: `onPush: false` meant no
+// automatic reviews at all and `drafts: true` included drafts. A layer that
+// sets them without `review` keeps that meaning, attributed to the same layer.
+export function withLegacyTriggers<T extends ConfigOverride>(layer: T): T {
+  const triggers = layer.triggers;
+  if (!triggers || triggers.review !== undefined) return layer;
+  if (triggers.onPush === false) return { ...layer, triggers: { ...triggers, review: "manual" } };
+  if (triggers.drafts === true) return { ...layer, triggers: { ...triggers, review: "all" } };
+  return layer;
+}
+
 // Precedence, lowest first: defaults, profile preset, global config,
 // repository settings, repository file, trigger. The profile itself is chosen by the highest layer
 // that names one.
@@ -87,7 +98,7 @@ export function resolveConfig(layers: ConfigLayers): ResolvedConfig {
 
   const stack: [LayerName, DashboardOverride][] = [["profile", { ...PROFILES[profile], profile }]];
   for (const [name, layer] of ordered) {
-    if (layer) stack.push([name, layer]);
+    if (layer) stack.push([name, withLegacyTriggers(layer)]);
   }
   for (const [name, layer] of stack) {
     merged = merge(merged, layer as Plain);

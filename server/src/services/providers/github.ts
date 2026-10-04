@@ -11,6 +11,7 @@ import { enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
 import { getGitHubApp, githubConfigured } from "../githubApp.ts";
 import type { HeaderReader, ProviderDefinition, RepoWithConnection, WebhookOutcome } from "./types.ts";
 
+// "synchronize" brings new commits; the rest make a change reviewable.
 const PR_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
 // Who may ask for a review in a comment: people who can already push.
 const TRUSTED = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
@@ -21,7 +22,8 @@ export interface GitHubPayload {
   repository?: { id: number };
   pull_request?: { number: number; head: { sha: string } };
   issue?: { number: number; pull_request?: unknown };
-  comment?: { body: string; author_association: string };
+  comment?: { body: string; author_association: string; user?: { login: string } };
+  sender?: { login: string };
 }
 
 function adapterFor(connection: ForgeConnection): GitHubAdapter {
@@ -88,6 +90,8 @@ export async function handleGithubEvent(
       number: pull.number,
       headSha: pull.head.sha,
       trigger: "webhook",
+      event: payload.action === "synchronize" ? "push" : "open",
+      actor: payload.sender?.login,
     });
     return { body: result.queued ? { outcome: "queued", reviewId: result.job.id } : { outcome: result.reason } };
   }
@@ -97,7 +101,13 @@ export async function handleGithubEvent(
   }
   const number = payload.issue!.number;
   const head = await adapterFor(repo.connection).getChangeHead(repo.fullPath, number);
-  const job = await enqueue({ repositoryId: repo.id, number, headSha: head.headSha, trigger: "comment" });
+  const job = await enqueue({
+    repositoryId: repo.id,
+    number,
+    headSha: head.headSha,
+    trigger: "comment",
+    actor: payload.comment!.user?.login ?? payload.sender?.login,
+  });
   return { body: { outcome: "queued", reviewId: job.id } };
 }
 

@@ -1,8 +1,10 @@
 import type { Config } from "../config/schema.ts";
 import type { ChangeSet, ReviewResult } from "../core/models.ts";
 import type { ForgePublisher, PostedComment } from "../forge/types.ts";
-import { toMarkdown } from "../render/markdown.ts";
+import { WALKTHROUGH_MARKER, withDescriptionBlock } from "../core/markers.ts";
+import { toMarkdown, walkthroughMarkdown } from "../render/markdown.ts";
 import { inlineComments } from "./inline.ts";
+import { labelChanges } from "./labels.ts";
 import { commitStatus } from "./status.ts";
 
 export interface PublishInput {
@@ -22,6 +24,9 @@ export interface Publication {
   inlineFailed: { fingerprint: string; error: string }[];
   summaryCommentId: string | null;
   statusState: string | null;
+  // Where the walkthrough went, when it was published.
+  walkthroughLocation?: "description" | "comment" | null;
+  labels?: string[];
   errors: string[];
 }
 
@@ -41,8 +46,11 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
     inlineFailed: [],
     summaryCommentId: null,
     statusState: null,
+    walkthroughLocation: null,
+    labels: [],
     errors: [],
   };
+  const walkthrough = walkthroughMarkdown(result);
 
   if (config.output.postInline) {
     try {
@@ -64,9 +72,43 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
 
   if (config.output.postSummary) {
     try {
-      publication.summaryCommentId = await publisher.upsertSummaryComment(ref, toMarkdown(result));
+      // The walkthrough is published on its own below.
+      publication.summaryCommentId = await publisher.upsertSummaryComment(ref, toMarkdown(result, { walkthrough: false }));
     } catch (err) {
       publication.errors.push(`Summary comment failed: ${message(err)}`);
+    }
+  }
+
+  if (walkthrough) {
+    // Dynamic fills the description only when the author left it empty (the
+    // change set's description already excludes Bammy's earlier block).
+    const location =
+      config.output.summaryLocation === "dynamic"
+        ? changeSet.description.trim()
+          ? "comment"
+          : "description"
+        : config.output.summaryLocation;
+    try {
+      if (location === "description") {
+        await publisher.updateDescription(ref, (description) => withDescriptionBlock(description, walkthrough));
+      } else {
+        await publisher.upsertComment(ref, WALKTHROUGH_MARKER, `${walkthrough}\n${WALKTHROUGH_MARKER}\n`);
+      }
+      publication.walkthroughLocation = location;
+    } catch (err) {
+      publication.errors.push(`Summary ${location === "description" ? "description" : "comment"} failed: ${message(err)}`);
+    }
+  }
+
+  if (result.walkthrough) {
+    const { add, remove } = labelChanges(result.walkthrough, config.output);
+    if (add.length || remove.length) {
+      try {
+        await publisher.setLabels(ref, add, remove);
+        publication.labels = add;
+      } catch (err) {
+        publication.errors.push(`Labels failed: ${message(err)}`);
+      }
     }
   }
 
@@ -84,5 +126,13 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
 }
 
 export function publishes(config: Config): boolean {
-  return config.output.postInline || config.output.postSummary || config.output.postCheck;
+  const { output } = config;
+  return (
+    output.postInline ||
+    output.postSummary ||
+    output.postCheck ||
+    output.walkthrough ||
+    output.blastRadiusLabel ||
+    output.effortLabel
+  );
 }

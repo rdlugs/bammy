@@ -11,7 +11,7 @@ const DEVELOPER = 30;
 
 interface GitLabPayload {
   object_kind?: string;
-  user?: { id: number };
+  user?: { id: number; username?: string };
   object_attributes?: {
     action?: string;
     iid?: number;
@@ -20,6 +20,7 @@ interface GitLabPayload {
     note?: string;
     last_commit?: { id: string };
   };
+  changes?: { draft?: { previous: boolean; current: boolean } };
   merge_request?: { iid: number; last_commit: { id: string } };
 }
 
@@ -58,15 +59,19 @@ export const gitlabProvider: ProviderDefinition = {
       const attrs = payload.object_attributes ?? {};
 
       if (event === "Merge Request Hook") {
-        // An update only matters when it brought new commits (oldrev is set).
-        const relevant =
-          attrs.action === "open" || attrs.action === "reopen" || (attrs.action === "update" && attrs.oldrev);
-        if (!relevant || !attrs.iid || !attrs.last_commit) return { body: { outcome: "ignored" } };
+        // An update only matters when it brought new commits (oldrev is set) or
+        // took the MR out of draft, GitLab's equivalent of "ready for review".
+        const pushed = attrs.action === "update" && Boolean(attrs.oldrev);
+        const ready = attrs.action === "update" && payload.changes?.draft?.current === false;
+        const opened = attrs.action === "open" || attrs.action === "reopen" || ready;
+        if (!(opened || pushed) || !attrs.iid || !attrs.last_commit) return { body: { outcome: "ignored" } };
         const result = await enqueueFromWebhook({
           repositoryId: repo.id,
           number: attrs.iid,
           headSha: attrs.last_commit.id,
           trigger: "webhook",
+          event: opened ? "open" : "push",
+          actor: payload.user?.username,
         });
         return { body: result.queued ? { outcome: "queued", reviewId: result.job.id } : { outcome: result.reason } };
       }
@@ -77,7 +82,13 @@ export const gitlabProvider: ProviderDefinition = {
         // GitLab's note payload does not say what the author may do; ask.
         const level = await adapterFor(repo.connection).memberAccessLevel(repo.externalId, payload.user.id);
         if (level < DEVELOPER) return { body: { outcome: "not_allowed" } };
-        const job = await enqueue({ repositoryId: repo.id, number: mr.iid, headSha: mr.last_commit.id, trigger: "comment" });
+        const job = await enqueue({
+          repositoryId: repo.id,
+          number: mr.iid,
+          headSha: mr.last_commit.id,
+          trigger: "comment",
+          actor: payload.user.username,
+        });
         return { body: { outcome: "queued", reviewId: job.id } };
       }
 

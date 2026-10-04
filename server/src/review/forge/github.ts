@@ -1,4 +1,4 @@
-import { markersIn, SUMMARY_MARKER } from "../core/markers.ts";
+import { markersIn, SUMMARY_MARKER, withoutDescriptionBlock } from "../core/markers.ts";
 import type { ChangeSet, ChangeType, ForgeRef } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
 import { ForgeError, ForgeHttp, isNotFound, linkHeaderNext, type FetchLike } from "./http.ts";
@@ -46,6 +46,8 @@ interface GhPull {
   body: string | null;
   draft?: boolean;
   html_url: string;
+  user?: { login: string } | null;
+  labels?: { name: string }[];
   base: { sha: string; ref: string };
   head: { sha: string; ref: string };
 }
@@ -174,10 +176,12 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
         webUrl: pull.html_url,
       },
       title: pull.title,
-      description: pull.body ?? "",
+      description: withoutDescriptionBlock(pull.body ?? ""),
       baseRef: pull.base.ref,
       headRef: pull.head.ref,
       isDraft: pull.draft ?? false,
+      author: pull.user?.login,
+      labels: (pull.labels ?? []).map((label) => label.name),
       files: files.map((file) =>
         toChangedFile({
           path: file.filename,
@@ -273,10 +277,14 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return new Set(comments.filter((c) => this.isSelf(c)).flatMap((c) => markersIn(c.body)));
   }
 
-  async upsertSummaryComment(ref: ForgeRef, body: string): Promise<string> {
+  upsertSummaryComment(ref: ForgeRef, body: string): Promise<string> {
+    return this.upsertComment(ref, SUMMARY_MARKER, body);
+  }
+
+  async upsertComment(ref: ForgeRef, marker: string, body: string): Promise<string> {
     const issue = `${repoApiPath(ref.project)}/issues/${ref.number}`;
     const comments = await this.http.paginate<GhComment>(`${issue}/comments?per_page=100`, linkHeaderNext);
-    const existing = comments.filter((c) => this.isSelf(c) && c.body.includes(SUMMARY_MARKER)).at(-1);
+    const existing = comments.filter((c) => this.isSelf(c) && c.body.includes(marker)).at(-1);
     const saved = existing
       ? await this.http.json<GhComment>(`${repoApiPath(ref.project)}/issues/comments/${existing.id}`, {
           method: "PATCH",
@@ -284,6 +292,31 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
         })
       : await this.http.json<GhComment>(`${issue}/comments`, { method: "POST", body: JSON.stringify({ body }) });
     return String(saved.id);
+  }
+
+  // Read just before writing so an edit the author made since the change was
+  // fetched is kept.
+  async updateDescription(ref: ForgeRef, transform: (description: string) => string): Promise<void> {
+    const pulls = `${repoApiPath(ref.project)}/pulls/${ref.number}`;
+    const pull = await this.http.json<GhPull>(pulls);
+    const body = pull.body ?? "";
+    const next = transform(body);
+    if (next === body) return;
+    await this.http.request(pulls, { method: "PATCH", body: JSON.stringify({ body: next }) });
+  }
+
+  // Pull request labels live on the issue API.
+  async setLabels(ref: ForgeRef, add: string[], remove: string[]): Promise<void> {
+    const labels = `${repoApiPath(ref.project)}/issues/${ref.number}/labels`;
+    for (const name of remove) {
+      try {
+        await this.http.request(`${labels}/${encodeURIComponent(name)}`, { method: "DELETE" });
+      } catch (err) {
+        // Not on the change, which is the usual case.
+        if (!isNotFound(err)) throw err;
+      }
+    }
+    if (add.length) await this.http.request(labels, { method: "POST", body: JSON.stringify({ labels: add }) });
   }
 
   async setCommitStatus(ref: ForgeRef, status: CommitStatus): Promise<void> {

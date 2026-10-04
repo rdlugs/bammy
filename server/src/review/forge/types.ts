@@ -94,5 +94,11 @@ export interface ForgePublisher {
   listPostedFingerprints(ref: ForgeRef): Promise<Set<string>>;
   // Creates Bammy's summary comment, or edits the one it posted before.
   upsertSummaryComment(ref: ForgeRef, body: string): Promise<string>;
+  // The same for any comment Bammy owns, found by the hidden marker in its body.
+  upsertComment(ref: ForgeRef, marker: string, body: string): Promise<string>;
+  // Rewrites the PR/MR description from its current text.
+  updateDescription(ref: ForgeRef, transform: (description: string) => string): Promise<void>;
+  // Adds and removes labels; removing one the change does not carry is not an error.
+  setLabels(ref: ForgeRef, add: string[], remove: string[]): Promise<void>;
   setCommitStatus(ref: ForgeRef, status: CommitStatus): Promise<void>;
 }

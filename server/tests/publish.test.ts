@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../src/review/config/resolve.ts";
 import type { ConfigOverride } from "../src/review/config/schema.ts";
-import { markersIn } from "../src/review/core/markers.ts";
+import { WALKTHROUGH_MARKER, markersIn, withDescriptionBlock } from "../src/review/core/markers.ts";
 import type { Finding, ReviewResult } from "../src/review/core/models.ts";
 import type { CommitStatus, ForgePublisher, InlineComment } from "../src/review/forge/types.ts";
 import { inlineBody, inlineComments } from "../src/review/publish/inline.ts";
 import { publishReview } from "../src/review/publish/publisher.ts";
 import { commitStatus } from "../src/review/publish/status.ts";
-import { toMarkdown } from "../src/review/render/markdown.ts";
+import { toMarkdown, walkthroughMarkdown } from "../src/review/render/markdown.ts";
 import { makeChangeSet } from "./helpers/changeSet.ts";
 import { sampleResult } from "./helpers/result.ts";
 
@@ -70,8 +70,15 @@ describe("commitStatus", () => {
   });
 });
 
-function recordingPublisher(options: { onForge?: string[]; failInline?: boolean } = {}) {
-  const calls = { inline: [] as InlineComment[], summaries: [] as string[], statuses: [] as CommitStatus[] };
+function recordingPublisher(options: { onForge?: string[]; failInline?: boolean; description?: string } = {}) {
+  const calls = {
+    inline: [] as InlineComment[],
+    summaries: [] as string[],
+    statuses: [] as CommitStatus[],
+    comments: [] as { marker: string; body: string }[],
+    descriptions: [] as string[],
+    labels: [] as { add: string[]; remove: string[] }[],
+  };
   const publisher: ForgePublisher = {
     listPostedFingerprints: async () => new Set(options.onForge ?? []),
     postInlineComments: async (_ref, comments) => {
@@ -82,6 +89,16 @@ function recordingPublisher(options: { onForge?: string[]; failInline?: boolean 
     upsertSummaryComment: async (_ref, body) => {
       calls.summaries.push(body);
       return "s1";
+    },
+    upsertComment: async (_ref, marker, body) => {
+      calls.comments.push({ marker, body });
+      return "w1";
+    },
+    updateDescription: async (_ref, transform) => {
+      calls.descriptions.push(transform(options.description ?? ""));
+    },
+    setLabels: async (_ref, add, remove) => {
+      calls.labels.push({ add, remove });
     },
     setCommitStatus: async (_ref, status) => {
       calls.statuses.push(status);
@@ -103,7 +120,7 @@ describe("publishReview", () => {
       postedFingerprints: new Set(),
     });
 
-    expect(calls.summaries).toEqual([toMarkdown(result)]);
+    expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: false })]);
     expect(calls.inline).toHaveLength(2);
     expect(calls.statuses.map((s) => s.state)).toEqual(["failure"]);
     expect(publication).toMatchObject({ summaryCommentId: "s1", statusState: "failure", errors: [], inlineSkipped: 0 });
@@ -156,5 +173,62 @@ describe("publishReview", () => {
     expect(calls.inline).toEqual([]);
     expect(calls.statuses).toEqual([]);
     expect(calls.summaries).toHaveLength(1);
+  });
+});
+
+describe("walkthrough placement and labels", () => {
+  async function publish(output: ConfigOverride["output"], description = "", forgeDescription = description) {
+    const result = await sampleResult();
+    const { publisher, calls } = recordingPublisher({ description: forgeDescription });
+    const publication = await publishReview({
+      publisher,
+      changeSet: { ...makeChangeSet(), description },
+      result,
+      config: config({ output }),
+      postedFingerprints: new Set(),
+    });
+    return { result, calls, publication };
+  }
+
+  it("fills an empty description and comments when the author wrote one (dynamic)", async () => {
+    const empty = await publish({});
+    expect(empty.calls.descriptions).toHaveLength(1);
+    expect(empty.calls.descriptions[0]).toBe(withDescriptionBlock("", walkthroughMarkdown(empty.result)));
+    expect(empty.calls.comments).toEqual([]);
+    expect(empty.publication.walkthroughLocation).toBe("description");
+
+    const written = await publish({}, "Fixes the login bug.");
+    expect(written.calls.descriptions).toEqual([]);
+    expect(written.calls.comments).toEqual([
+      { marker: WALKTHROUGH_MARKER, body: `${walkthroughMarkdown(written.result)}\n${WALKTHROUGH_MARKER}\n` },
+    ]);
+    expect(written.publication.walkthroughLocation).toBe("comment");
+  });
+
+  it("keeps the author's text and replaces only Bammy's earlier block", async () => {
+    const earlier = withDescriptionBlock("Fixes the login bug.", "## Bammy summary\n\nOld.");
+    const { calls } = await publish({ summaryLocation: "description" }, "Fixes the login bug.", earlier);
+    expect(calls.descriptions[0]).toMatch(/^Fixes the login bug\.\n\n<!-- bammy:walkthrough:start -->/);
+    expect(calls.descriptions[0]).not.toContain("Old.");
+    expect(calls.descriptions[0]!.match(/bammy:walkthrough:start/g)).toHaveLength(1);
+  });
+
+  it("posts a standalone comment when asked to", async () => {
+    const { calls } = await publish({ summaryLocation: "comment" });
+    expect(calls.descriptions).toEqual([]);
+    expect(calls.comments).toHaveLength(1);
+  });
+
+  it("sets the estimate labels and takes off the family's other values", async () => {
+    const { calls, publication } = await publish({ blastRadiusLabel: true, effortLabel: true });
+    expect(calls.labels).toHaveLength(1);
+    expect(calls.labels[0]!.add).toEqual(["Small blast radius", "1-5 Minutes"]);
+    expect(calls.labels[0]!.remove).toContain("Large blast radius");
+    expect(calls.labels[0]!.remove).toContain("10-20 Minutes");
+    expect(calls.labels[0]!.remove).not.toContain("1-5 Minutes");
+    expect(publication.labels).toEqual(["Small blast radius", "1-5 Minutes"]);
+
+    const off = await publish({});
+    expect(off.calls.labels).toEqual([]);
   });
 });

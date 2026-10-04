@@ -159,6 +159,31 @@ describe("resolveConfig", () => {
   });
 });
 
+describe("legacy trigger settings", () => {
+  it("maps onPush: false to manual-only reviews, from the layer that set it", () => {
+    const { config, sources } = resolveConfig({ global: { triggers: { onPush: false } } });
+    expect(config.triggers.review).toBe("manual");
+    expect(sources["triggers.review"]).toBe("global");
+  });
+
+  it("maps drafts: true to reviewing drafts too", () => {
+    expect(resolveConfig({ repoFile: { triggers: { drafts: true } } }).config.triggers.review).toBe("all");
+  });
+
+  it("lets an explicit review setting win over the legacy keys", () => {
+    const { config } = resolveConfig({ repoSettings: { triggers: { onPush: false, review: "published" } } });
+    expect(config.triggers.review).toBe("published");
+  });
+
+  it("leaves a higher layer's review alone when a lower one turned onPush off", () => {
+    const { config } = resolveConfig({
+      global: { triggers: { onPush: false } },
+      repoSettings: { triggers: { review: "all" } },
+    });
+    expect(config.triggers.review).toBe("all");
+  });
+});
+
 describe("parseRepoFile", () => {
   it("maps snake_case YAML onto the schema, leaving language names alone", () => {
     const { override, warnings } = parseRepoFile(
@@ -190,6 +215,40 @@ describe("parseRepoFile", () => {
     const { override, warnings } = parseRepoFile(".bammy.yaml", "triggers:\n  on_push: false\n  drafts: true\n");
     expect(warnings).toEqual([]);
     expect(override).toEqual({ triggers: { onPush: false, drafts: true } });
+  });
+
+  it("reads the review, summary and skip settings", () => {
+    const yaml = [
+      "triggers:",
+      "  review: all",
+      "  review_on_push: false",
+      "  summary: manual",
+      "  ignore_titles: [WIP]",
+      "  skip_authors: [dependabot]",
+      "  skip_labels: [no-review]",
+      "  skip_source_branches: [release/]",
+      "  skip_target_branches: [legacy]",
+      "output:",
+      "  summary_location: comment",
+      "  blast_radius_label: true",
+      "  effort_label: true",
+      "",
+    ].join("\n");
+    const { override, warnings } = parseRepoFile(".bammy.yaml", yaml);
+    expect(warnings).toEqual([]);
+    expect(override).toEqual({
+      triggers: {
+        review: "all",
+        reviewOnPush: false,
+        summary: "manual",
+        ignoreTitles: ["WIP"],
+        skipAuthors: ["dependabot"],
+        skipLabels: ["no-review"],
+        skipSourceBranches: ["release/"],
+        skipTargetBranches: ["legacy"],
+      },
+      output: { summaryLocation: "comment", blastRadiusLabel: true, effortLabel: true },
+    });
   });
 
     it("treats an empty file as no overrides", () => {

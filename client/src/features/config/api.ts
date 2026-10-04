@@ -3,6 +3,9 @@ import { api } from "@/lib/api"
 import type { ForgeRepo, SavedRepo } from "@/features/forge/api"
 
 export type LlmProviderName = "anthropic" | "openai" | "google" | "ollama"
+export type ReviewTrigger = "manual" | "published" | "all"
+export type SummaryTrigger = "manual" | "published"
+export type SummaryLocation = "dynamic" | "description" | "comment"
 
 // A partial review config; mirrors server/src/review/config/schema.ts.
 export interface ConfigOverride {
@@ -30,8 +33,29 @@ export interface ConfigOverride {
     fullFile?: boolean
     committableSuggestions?: boolean
   }
-  output?: { walkthrough?: boolean; postInline?: boolean; postSummary?: boolean; postCheck?: boolean }
-  triggers?: { onPush?: boolean; drafts?: boolean; command?: boolean }
+  output?: {
+    walkthrough?: boolean
+    postInline?: boolean
+    postSummary?: boolean
+    postCheck?: boolean
+    summaryLocation?: SummaryLocation
+    blastRadiusLabel?: boolean
+    effortLabel?: boolean
+  }
+  triggers?: {
+    review?: ReviewTrigger
+    reviewOnPush?: boolean
+    summary?: SummaryTrigger
+    command?: boolean
+    ignoreTitles?: string[]
+    skipAuthors?: string[]
+    skipLabels?: string[]
+    skipSourceBranches?: string[]
+    skipTargetBranches?: string[]
+    // Legacy, replaced by `review`: still read so older settings show what they mean.
+    onPush?: boolean
+    drafts?: boolean
+  }
   ignorePaths?: string[]
   instructions?: string
   languageInstructions?: Record<string, string>
@@ -65,8 +89,28 @@ export interface EffectiveConfig {
     fullFile: boolean
     committableSuggestions: boolean
   }
-  output: { walkthrough: boolean; postInline: boolean; postSummary: boolean; postCheck: boolean }
-  triggers: { onPush: boolean; drafts: boolean; command: boolean }
+  output: {
+    walkthrough: boolean
+    postInline: boolean
+    postSummary: boolean
+    postCheck: boolean
+    summaryLocation: SummaryLocation
+    blastRadiusLabel: boolean
+    effortLabel: boolean
+  }
+  triggers: {
+    review: ReviewTrigger
+    reviewOnPush: boolean
+    summary: SummaryTrigger
+    command: boolean
+    ignoreTitles: string[]
+    skipAuthors: string[]
+    skipLabels: string[]
+    skipSourceBranches: string[]
+    skipTargetBranches: string[]
+    onPush: boolean
+    drafts: boolean
+  }
   ignorePaths: string[]
   instructions: string
   languageInstructions: Record<string, string>

@@ -21,7 +21,12 @@ export const CONFIG_TABS = [
     icon: MessageSquare,
     description: "What Bammy posts back to the pull or merge request.",
   },
-  { value: "triggers", label: "Triggers", icon: Zap, description: "When a review starts without being queued by hand." },
+  {
+    value: "triggers",
+    label: "Triggers",
+    icon: Zap,
+    description: "When reviews and summaries run on their own, what they label, and which changes are skipped.",
+  },
   {
     value: "guidance",
     label: "Guidance",
@@ -44,6 +49,6 @@ export const TAB_ERRORS: Record<ConfigTab, (keyof FormErrors)[]> = {
   findings: ["categories", "maxFindings", "minConfidence"],
   files: ["ignorePaths", "maxChunks"],
   display: [],
-  triggers: [],
+  triggers: ["ignoreTitles", "skipAuthors", "skipLabels", "skipSourceBranches", "skipTargetBranches"],
   guidance: ["instructions", "languageInstructions"],
 }
