@@ -58,17 +58,19 @@ export async function claimNext(): Promise<ReviewJob | null> {
 }
 
 export interface CompleteInput {
-  status: "completed" | "partial";
+  status: "completed" | "partial" | "failed";
   verdict: ReviewJob["verdict"];
   result: unknown;
   resolvedConfig?: unknown;
   error?: string | null;
 }
 
-export async function complete(id: string, input: CompleteInput): Promise<void> {
+export async function complete(id: string, input: CompleteInput & Partial<Pick<ReviewJob, "headSha" | "baseSha">>): Promise<void> {
   await prisma.reviewJob.update({
     where: { id },
     data: {
+      headSha: input.headSha,
+      baseSha: input.baseSha,
       status: input.status,
       verdict: input.verdict,
       result: input.result as object,

@@ -1,0 +1,183 @@
+import type { Config } from "./config/schema.ts";
+import { verdictFor, blockingFindings } from "./core/verdict.ts";
+import {
+  RESULT_SCHEMA_VERSION,
+  type ChangeSet,
+  type LlmUsage,
+  type Omission,
+  type OmissionReason,
+  type ReviewResult,
+  type ReviewStatus,
+  type Walkthrough,
+} from "./core/models.ts";
+import { estimateTokens, diffTokenBudget } from "./context/budget.ts";
+import { planChunks } from "./context/chunk.ts";
+import { classifyFiles } from "./context/ignore.ts";
+import { reviewSystemPrompt } from "./llm/prompt.ts";
+import type { Generate } from "./llm/providers.ts";
+import { reviewChunk } from "./llm/review.ts";
+import type { ModelFinding } from "./llm/schemas.ts";
+import { generateWalkthrough } from "./llm/walkthrough.ts";
+import { validateFindings } from "./validate/validator.ts";
+
+export interface ReviewDeps {
+  generate: Generate;
+  now?: () => Date;
+  // Passes run concurrently up to this many at once.
+  concurrency?: number;
+}
+
+export interface RunReviewInput {
+  changeSet: ChangeSet;
+  config: Config;
+  // Carried into the result, e.g. an ignored repository config file.
+  warnings?: string[];
+}
+
+// Omissions that mean the change was not fully reviewed. Ignored, binary and
+// deleted files were never meant to be.
+const INCOMPLETE: ReadonlySet<OmissionReason> = new Set([
+  "budget",
+  "too_large",
+  "patch_unavailable",
+  "chunk_failed",
+]);
+
+// The title, description and guidance are bounded but not counted exactly, so
+// they get a generous fixed allowance next to the measured system prompt.
+const USER_PROMPT_ALLOWANCE = 3_000;
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function lineCounts(changeSet: ChangeSet): ReviewResult["files"] {
+  return changeSet.files.map((file) => {
+    let additions = 0;
+    let deletions = 0;
+    for (const hunk of file.hunks) {
+      for (const line of hunk.content.split("\n").slice(1)) {
+        if (line.startsWith("+")) additions += 1;
+        else if (line.startsWith("-")) deletions += 1;
+      }
+    }
+    return {
+      path: file.path,
+      ...(file.previousPath ? { previousPath: file.previousPath } : {}),
+      changeType: file.changeType,
+      additions,
+      deletions,
+    };
+  });
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// One review, start to finish, with no I/O but the model calls. Every failure
+// below the top is recorded in the result rather than thrown: a failed pass
+// makes the review partial, a failed walkthrough is a warning.
+export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promise<ReviewResult> {
+  const now = deps.now ?? (() => new Date());
+  const startedAt = now().toISOString();
+  const { changeSet, config } = input;
+  const errors: string[] = [];
+  const warnings = [...(input.warnings ?? [])];
+  const usage: LlmUsage[] = [];
+
+  const { reviewable, omissions: classified } = classifyFiles(changeSet.files, config.ignorePaths);
+  const overhead = estimateTokens(reviewSystemPrompt(config)) + USER_PROMPT_ALLOWANCE;
+  const plan = planChunks(reviewable, diffTokenBudget(config, overhead), config.review.maxChunks);
+  const omissions: Omission[] = [...classified, ...plan.omissions];
+
+  const walkthroughTask: Promise<Walkthrough | undefined> =
+    config.output.walkthrough && reviewable.length > 0
+      ? generateWalkthrough(deps.generate, changeSet, reviewable, config).then(
+          ({ walkthrough, usage: callUsage }) => {
+            usage.push(callUsage);
+            return walkthrough;
+          },
+          (err: unknown) => {
+            warnings.push(`Walkthrough failed: ${errorMessage(err)}`);
+            return undefined;
+          },
+        )
+      : Promise.resolve(undefined);
+
+  const raw: ModelFinding[] = [];
+  let failedPasses = 0;
+  const outcomes = await mapLimit(plan.chunks, deps.concurrency ?? 3, async (chunk) => {
+    try {
+      return { chunk, review: await reviewChunk(deps.generate, changeSet, chunk, plan.chunks.length, config) };
+    } catch (err) {
+      return { chunk, error: errorMessage(err) };
+    }
+  });
+  for (const outcome of outcomes) {
+    if (outcome.review) {
+      raw.push(...outcome.review.findings);
+      usage.push(outcome.review.usage);
+      continue;
+    }
+    failedPasses += 1;
+    errors.push(`Review pass ${outcome.chunk.index} failed: ${outcome.error}`);
+    for (const part of outcome.chunk.parts) {
+      omissions.push({ path: part.file.path, reason: "chunk_failed", detail: `pass ${outcome.chunk.index}` });
+    }
+  }
+  const walkthrough = await walkthroughTask;
+
+  // Files only count as reviewed if a pass that included them succeeded and
+  // none of their hunks were left out.
+  const incomplete = new Set(omissions.filter((o) => INCOMPLETE.has(o.reason)).map((o) => o.path));
+  const succeeded = outcomes.filter((outcome) => outcome.review).flatMap((outcome) => outcome.chunk.parts);
+  const reviewedFiles = [...new Set(succeeded.map((part) => part.file.path))].filter((path) => !incomplete.has(path));
+  const validation = validateFindings(
+    raw,
+    changeSet,
+    reviewable.filter((file) => succeeded.some((part) => part.file === file)),
+    config,
+  );
+
+  let status: ReviewStatus = "completed";
+  if (plan.chunks.length > 0 && failedPasses === plan.chunks.length) status = "failed";
+  else if (omissions.some((omission) => INCOMPLETE.has(omission.reason))) status = "partial";
+
+  const blockOn = config.review.blockOn;
+  return {
+    schemaVersion: RESULT_SCHEMA_VERSION,
+    status,
+    errors,
+    warnings,
+    change: {
+      ...changeSet.forgeRef,
+      title: changeSet.title,
+      ...(changeSet.baseRef ? { baseRef: changeSet.baseRef } : {}),
+      ...(changeSet.headRef ? { headRef: changeSet.headRef } : {}),
+      isDraft: changeSet.isDraft,
+    },
+    files: lineCounts(changeSet),
+    findings: validation.findings,
+    ...(walkthrough ? { walkthrough } : {}),
+    coverage: { reviewedFiles, omissions, passes: plan.chunks.length },
+    validation: { dropped: validation.dropped, demoted: validation.demoted },
+    usage,
+    verdict: {
+      verdict: verdictFor(status, validation.findings, blockOn),
+      blockOn,
+      blocking: blockingFindings(validation.findings, blockOn).map((finding) => finding.fingerprint),
+    },
+    startedAt,
+    finishedAt: now().toISOString(),
+  };
+}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { categorySchema, effortSchema, evidenceSchema, kindSchema, severitySchema } from "./severity.ts";
 
 // The intermediate representation every forge produces and every later stage
 // reads. Line numbers are new-file coordinates everywhere; only publishers
@@ -76,3 +77,123 @@ export function diffPosition(file: ChangedFile, newLine: number): number | undef
 export function isAddedLine(file: ChangedFile, newLine: number): boolean {
   return file.hunks.some((hunk) => hunk.addedLines.includes(newLine));
 }
+
+// ---------------------------------------------------------------------------
+// Review result. Stored as JSONB on the job and rendered by every surface.
+// ---------------------------------------------------------------------------
+
+export const RESULT_SCHEMA_VERSION = 1;
+
+export const bucketSchema = z.enum(["actionable", "outside_diff", "nitpick", "requirement_gap"]);
+export type Bucket = z.infer<typeof bucketSchema>;
+
+export const findingSchema = z.object({
+  file: z.string(),
+  startLine: z.number().int().positive(),
+  endLine: z.number().int().positive(),
+  severity: severitySchema,
+  category: categorySchema,
+  kind: kindSchema,
+  effort: effortSchema,
+  title: z.string(),
+  body: z.string(),
+  // Verbatim replacement for startLine..endLine.
+  suggestion: z.string().optional(),
+  confidence: z.number().min(0).max(1),
+  evidence: evidenceSchema,
+  evidenceNote: z.string(),
+  evidenceFiles: z.array(z.string()),
+  source: z.enum(["llm", "static", "rule"]),
+  ruleId: z.string().optional(),
+  fingerprint: z.string(),
+  // Decided once by core/buckets.ts so no surface can disagree about it.
+  bucket: bucketSchema,
+});
+export type Finding = z.infer<typeof findingSchema>;
+
+export const omissionReasonSchema = z.enum([
+  "ignored",
+  "binary",
+  "deleted",
+  "patch_unavailable",
+  "too_large",
+  "budget",
+  "chunk_failed",
+]);
+export type OmissionReason = z.infer<typeof omissionReasonSchema>;
+
+export const omissionSchema = z.object({
+  path: z.string(),
+  reason: omissionReasonSchema,
+  detail: z.string().optional(),
+});
+export type Omission = z.infer<typeof omissionSchema>;
+
+export const llmUsageSchema = z.object({
+  purpose: z.enum(["review", "walkthrough"]),
+  model: z.string(),
+  inputTokens: z.number().int().min(0),
+  outputTokens: z.number().int().min(0),
+  latencyMs: z.number().int().min(0),
+  chunk: z.number().int().positive().optional(),
+});
+export type LlmUsage = z.infer<typeof llmUsageSchema>;
+
+export const walkthroughSchema = z.object({
+  overview: z.string(),
+  fileSummaries: z.array(z.object({ path: z.string(), summary: z.string() })),
+  labels: z.array(z.string()),
+  estimatedEffort: z.number().int().min(1).max(5),
+});
+export type Walkthrough = z.infer<typeof walkthroughSchema>;
+
+export const reviewStatusSchema = z.enum(["completed", "partial", "failed"]);
+export type ReviewStatus = z.infer<typeof reviewStatusSchema>;
+
+export const verdictSchema = z.enum(["pass", "blocked", "error"]);
+export type Verdict = z.infer<typeof verdictSchema>;
+
+export const reviewResultSchema = z.object({
+  schemaVersion: z.literal(RESULT_SCHEMA_VERSION),
+  status: reviewStatusSchema,
+  // Why the review is partial or failed.
+  errors: z.array(z.string()),
+  // Non-fatal: an ignored config file, a failed walkthrough.
+  warnings: z.array(z.string()),
+  change: forgeRefSchema.extend({
+    title: z.string(),
+    baseRef: z.string().optional(),
+    headRef: z.string().optional(),
+    isDraft: z.boolean(),
+  }),
+  files: z.array(
+    z.object({
+      path: z.string(),
+      previousPath: z.string().optional(),
+      changeType: changeTypeSchema,
+      additions: z.number().int().min(0),
+      deletions: z.number().int().min(0),
+    }),
+  ),
+  findings: z.array(findingSchema),
+  walkthrough: walkthroughSchema.optional(),
+  coverage: z.object({
+    reviewedFiles: z.array(z.string()),
+    omissions: z.array(omissionSchema),
+    passes: z.number().int().min(0),
+  }),
+  validation: z.object({
+    // Reason to how many model findings it removed.
+    dropped: z.record(z.string(), z.number().int().min(0)),
+    demoted: z.number().int().min(0),
+  }),
+  usage: z.array(llmUsageSchema),
+  verdict: z.object({
+    verdict: verdictSchema,
+    blockOn: severitySchema,
+    blocking: z.array(z.string()),
+  }),
+  startedAt: z.string(),
+  finishedAt: z.string(),
+});
+export type ReviewResult = z.infer<typeof reviewResultSchema>;
