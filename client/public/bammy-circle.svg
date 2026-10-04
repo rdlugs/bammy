@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Bammy">
-  <rect width="512" height="512" rx="116" fill="#3949AB"/>
+  <rect width="512" height="512" rx="256" fill="#3949AB"/>
   <g transform="translate(0 10)" opacity="0.22">
     <rect x="136" y="102" width="56" height="308" rx="28" fill="#000"/>
     <circle cx="256" cy="290" r="92" fill="none" stroke="#000" stroke-width="56"/>

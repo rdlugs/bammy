@@ -1,5 +1,5 @@
 import { Outlet, useNavigate } from "react-router"
-import { ChevronsUpDown, Cloud, LayoutDashboard, LogOut } from "lucide-react"
+import { ChevronsUpDown, LayoutDashboard, LogOut } from "lucide-react"
 import { toast } from "sonner"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -60,9 +60,7 @@ export function DashboardLayout() {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                  <Cloud className="size-4" />
-                </div>
+                <img src="/bammy.svg" alt="" className="size-8 shrink-0 rounded-lg" />
                 <span className="truncate font-medium">Bammy</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
