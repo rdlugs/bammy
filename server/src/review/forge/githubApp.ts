@@ -97,7 +97,9 @@ export class GitHubApp {
     return installations.some((installation) => String(installation.id) === installationId);
   }
 
-  async installation(installationId: string): Promise<{ id: number; account: { login: string } }> {
+  async installation(
+    installationId: string,
+  ): Promise<{ id: number; account: { login: string }; suspended_at?: string | null }> {
     return this.http.json(`/app/installations/${encodeURIComponent(installationId)}`);
   }
 }

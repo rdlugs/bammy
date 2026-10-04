@@ -38,6 +38,10 @@ function adapterFor(connection: ForgeConnection): GitLabAdapter {
 export const gitlabProvider: ProviderDefinition = {
   adapterFor,
 
+  async checkCredentials(connection) {
+    await adapterFor(connection).currentAccount();
+  },
+
   tokenConnect: {
     schema: gitlabConnectSchema,
     account: (host, token) => new GitLabAdapter({ host, token: async () => token }).currentAccount(),
