@@ -7,8 +7,10 @@ import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
 import { ForgeError } from "../review/forge/http.ts";
 import { FORGE_PROVIDERS, forgeName } from "../review/forge/providers.ts";
+import { hostOrigin } from "../review/forge/types.ts";
+import { loadOwnedConnection } from "../services/forge.ts";
 import { getGitHubApp, githubInstallUrl } from "../services/githubApp.ts";
-import { isForgeProvider, PROVIDERS } from "../services/providers/index.ts";
+import { isForgeProvider, PROVIDERS, providerFor } from "../services/providers/index.ts";
 import { removeWebhook } from "../services/webhooks.ts";
 import { githubCallbackSchema } from "../schemas/connections.schema.ts";
 
@@ -31,6 +33,76 @@ export async function listConnections(req: Request, res: Response) {
   });
   const availableApps = FORGE_PROVIDERS.filter((provider) => PROVIDERS[provider].appAvailable?.());
   res.json({ connections, availableApps });
+}
+
+const RECENT_REVIEWS = 5;
+
+// Everything the details sheet shows, from the database only; credential
+// health is the separate (slower) status check.
+export async function getConnection(req: Request, res: Response) {
+  const connection = await loadOwnedConnection(req.userId!, String(req.params.id));
+  const provider = providerFor(connection.provider);
+  const reviewScope = { repository: { connectionId: connection.id } };
+
+  const [repositories, total, recent] = await Promise.all([
+    prisma.repository.findMany({
+      where: { connectionId: connection.id, enabled: true },
+      orderBy: { fullPath: "asc" },
+    }),
+    prisma.reviewJob.count({ where: reviewScope }),
+    prisma.reviewJob.findMany({
+      where: reviewScope,
+      orderBy: { createdAt: "desc" },
+      take: RECENT_REVIEWS,
+      select: {
+        id: true,
+        number: true,
+        status: true,
+        verdict: true,
+        createdAt: true,
+        repository: { select: { fullPath: true, provider: true } },
+      },
+    }),
+  ]);
+
+  // Same rule as ensureWebhook: an app delivers events for every repository,
+  // otherwise a repository needs its own hook. Hook ids and secrets stay here.
+  const appWebhook = provider.appWebhook?.(connection) ?? null;
+  res.json({
+    connection: {
+      id: connection.id,
+      provider: connection.provider,
+      host: connection.host,
+      kind: connection.kind,
+      accountLogin: connection.accountLogin,
+      installationId: connection.installationId,
+      createdAt: connection.createdAt,
+      updatedAt: connection.updatedAt,
+    },
+    repositories: repositories.map((repo) => ({
+      id: repo.id,
+      fullPath: repo.fullPath,
+      defaultBranch: repo.defaultBranch,
+      webUrl: `${hostOrigin(connection.host)}/${repo.fullPath}`,
+      webhook: appWebhook ?? { active: Boolean(repo.webhookId) },
+    })),
+    reviews: { total, recent },
+  });
+}
+
+// Asks the forge whether the stored credentials still work. Always 200: a
+// refused or unreachable forge is the answer, not a failure of this request.
+export async function connectionStatus(req: Request, res: Response) {
+  const connection = await loadOwnedConnection(req.userId!, String(req.params.id));
+  let status: "active" | "revoked" | "unreachable";
+  try {
+    await providerFor(connection.provider).checkCredentials(connection);
+    status = "active";
+  } catch (err) {
+    const refused = err instanceof ForgeError && [401, 403, 404].includes(err.status);
+    status = refused ? "revoked" : "unreachable";
+  }
+  res.json({ status });
 }
 
 // Any forge whose provider definition accepts a pasted host and token.

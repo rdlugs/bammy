@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import type { Provider } from "@/features/reviews/types"
+import type { JobStatus, Provider, Verdict } from "@/features/reviews/types"
 
 export interface Connection {
   id: string
@@ -9,6 +9,30 @@ export interface Connection {
   kind: "github_app" | "token"
   accountLogin: string
   createdAt: string
+}
+
+export type ConnectionStatus = "active" | "revoked" | "unreachable"
+
+export interface ConnectionDetails {
+  connection: Connection & { installationId: string | null; updatedAt: string }
+  repositories: {
+    id: string
+    fullPath: string
+    defaultBranch: string
+    webUrl: string
+    webhook: WebhookState
+  }[]
+  reviews: {
+    total: number
+    recent: {
+      id: string
+      number: number
+      status: JobStatus
+      verdict: Verdict | null
+      createdAt: string
+      repository: { fullPath: string; provider: Provider }
+    }[]
+  }
 }
 
 export interface ForgeRepo {
@@ -71,6 +95,45 @@ export function useConnections() {
     queryKey: ["connections"],
     queryFn: () => api<{ connections: Connection[]; availableApps: Provider[] }>("/connections"),
   })
+}
+
+export function useConnectionDetails(id: string | null) {
+  return useQuery({
+    queryKey: ["connections", id, "details"],
+    queryFn: () => api<ConnectionDetails>(`/connections/${id}`),
+    enabled: Boolean(id),
+  })
+}
+
+// Shared by the table and the details sheet, so re-checking in one updates both.
+function connectionStatusQuery(id: string) {
+  return {
+    queryKey: ["connections", id, "status"],
+    queryFn: () => api<{ status: ConnectionStatus }>(`/connections/${id}/status`),
+    staleTime: 60_000,
+    retry: false,
+  }
+}
+
+// One live credential check per connection, so a slow forge only delays its
+// own row. Undefined while a check is still running.
+export function useConnectionStatuses(connections: Connection[]): Record<string, ConnectionStatus | undefined> {
+  return useQueries({
+    queries: connections.map((connection) => connectionStatusQuery(connection.id)),
+    combine: (results) =>
+      Object.fromEntries(
+        results.map((result, index) => [
+          connections[index]!.id,
+          result.isError ? "unreachable" : result.data?.status,
+        ]),
+      ),
+  })
+}
+
+export function useConnectionStatus(id: string) {
+  const query = useQuery(connectionStatusQuery(id))
+  const status: ConnectionStatus | undefined = query.isError ? "unreachable" : query.data?.status
+  return { status, isFetching: query.isFetching, refetch: query.refetch }
 }
 
 // host and token, plus any extra fields the provider's connect method declares.

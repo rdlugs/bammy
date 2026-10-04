@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app.ts";
 import { env } from "../src/config/env.ts";
-import { decrypt } from "../src/lib/crypto.ts";
+import { decrypt, encrypt } from "../src/lib/crypto.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { fetchStub } from "./helpers/fetchStub.ts";
 import { createUser } from "./helpers/users.ts";
@@ -165,6 +165,132 @@ describe("GET /api/connections", () => {
     expect(res.body.connections).toHaveLength(1);
     expect(res.body.connections[0]).toMatchObject({ accountLogin: "me" });
     expect(res.body.connections[0].encryptedToken).toBeUndefined();
+  });
+});
+
+describe("GET /api/connections/:id/status", () => {
+  const gitlabConnection = (owner = userId) =>
+    prisma.forgeConnection.create({
+      data: {
+        userId: owner,
+        provider: "gitlab",
+        host: "gitlab.com",
+        kind: "token",
+        accountLogin: "me",
+        encryptedToken: encrypt("glpat-x"),
+      },
+    });
+
+  const statusFor = async (id: string) =>
+    (await request(app).get(`/api/connections/${id}/status`).set("Cookie", cookie)).body.status;
+
+  it("reports a token the forge accepts as active", async () => {
+    const connection = await gitlabConnection();
+    vi.stubGlobal("fetch", fetchStub([{ url: /gitlab\.com\/api\/v4\/user$/, body: { username: "me" } }]).fetch);
+
+    expect(await statusFor(connection.id)).toBe("active");
+  });
+
+  it("reports a refused token as revoked", async () => {
+    const connection = await gitlabConnection();
+    vi.stubGlobal("fetch", fetchStub([{ url: /gitlab\.com\/api\/v4\/user$/, status: 401 }]).fetch);
+
+    expect(await statusFor(connection.id)).toBe("revoked");
+  });
+
+  it("reports a failing forge as unreachable", async () => {
+    const connection = await gitlabConnection();
+    vi.stubGlobal("fetch", fetchStub([{ url: /gitlab\.com\/api\/v4\/user$/, status: 500 }]).fetch);
+
+    expect(await statusFor(connection.id)).toBe("unreachable");
+  });
+
+  it("reports an uninstalled GitHub App as revoked", async () => {
+    const connection = await prisma.forgeConnection.create({
+      data: { userId, provider: "github", host: "github.com", kind: "github_app", installationId: "55", accountLogin: "acme" },
+    });
+    vi.stubGlobal("fetch", fetchStub([{ url: /api\.github\.com\/app\/installations\/55$/, status: 404 }]).fetch);
+
+    expect(await statusFor(connection.id)).toBe("revoked");
+  });
+
+  it("404s on someone else's connection and requires authentication", async () => {
+    const other = await createUser("other@example.com");
+    const theirs = await gitlabConnection(other.user.id);
+
+    expect((await request(app).get(`/api/connections/${theirs.id}/status`).set("Cookie", cookie)).status).toBe(404);
+    expect((await request(app).get(`/api/connections/${theirs.id}/status`)).status).toBe(401);
+  });
+});
+
+describe("GET /api/connections/:id", () => {
+  it("returns the connection with its enabled repositories and recent reviews", async () => {
+    const connection = await prisma.forgeConnection.create({
+      data: {
+        userId,
+        provider: "gitlab",
+        host: "gitlab.com",
+        kind: "token",
+        accountLogin: "me",
+        encryptedToken: encrypt("glpat-x"),
+      },
+    });
+    const repo = (fullPath: string, extra = {}) =>
+      prisma.repository.create({
+        data: {
+          connectionId: connection.id,
+          provider: "gitlab",
+          host: "gitlab.com",
+          fullPath,
+          externalId: fullPath,
+          defaultBranch: "main",
+          ...extra,
+        },
+      });
+    const hooked = await repo("acme/api", { enabled: true, webhookId: "9" });
+    await repo("acme/web", { enabled: true });
+    await repo("acme/old");
+    for (let number = 1; number <= 6; number++) {
+      await prisma.reviewJob.create({
+        data: {
+          repositoryId: hooked.id,
+          number,
+          headSha: "h",
+          trigger: "manual",
+          createdAt: new Date(Date.UTC(2026, 0, number)),
+        },
+      });
+    }
+
+    const res = await request(app).get(`/api/connections/${connection.id}`).set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.connection).toMatchObject({ id: connection.id, accountLogin: "me", installationId: null });
+    expect(res.body.connection.encryptedToken).toBeUndefined();
+    expect(res.body.repositories).toEqual([
+      {
+        id: hooked.id,
+        fullPath: "acme/api",
+        defaultBranch: "main",
+        webUrl: "https://gitlab.com/acme/api",
+        webhook: { active: true },
+      },
+      expect.objectContaining({ fullPath: "acme/web", webhook: { active: false } }),
+    ]);
+    expect(res.body.repositories[0].webhookId).toBeUndefined();
+    expect(res.body.reviews.total).toBe(6);
+    expect(res.body.reviews.recent.map((review: { number: number }) => review.number)).toEqual([6, 5, 4, 3, 2]);
+    expect(res.body.reviews.recent[0].repository).toEqual({ fullPath: "acme/api", provider: "gitlab" });
+  });
+
+  it("404s on someone else's connection and requires authentication", async () => {
+    const other = await createUser("other@example.com");
+    const theirs = await prisma.forgeConnection.create({
+      data: { userId: other.user.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "them" },
+    });
+
+    expect((await request(app).get(`/api/connections/${theirs.id}`).set("Cookie", cookie)).status).toBe(404);
+    expect((await request(app).get(`/api/connections/${theirs.id}`)).status).toBe(401);
   });
 });
 

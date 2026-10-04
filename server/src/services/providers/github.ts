@@ -5,6 +5,7 @@ import { HttpError } from "../../lib/httpError.ts";
 import { parseJson, REVIEW_COMMAND, safeEqual } from "../../lib/webhook.ts";
 import type { ForgeConnection } from "../../generated/prisma/client.ts";
 import { GitHubAdapter } from "../../review/forge/github.ts";
+import { ForgeError } from "../../review/forge/http.ts";
 import { githubConnectSchema } from "../../schemas/connections.schema.ts";
 import { enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
 import { getGitHubApp, githubConfigured } from "../githubApp.ts";
@@ -102,6 +103,23 @@ export async function handleGithubEvent(
 
 export const githubProvider: ProviderDefinition = {
   adapterFor,
+
+  async checkCredentials(connection) {
+    if (connection.kind === "token") {
+      await adapterFor(connection).currentAccount();
+      return;
+    }
+    // Not installationToken(): it caches tokens for up to an hour, so it would
+    // miss an uninstall. The installation lookup 404s as soon as it is gone.
+    const app = getGitHubApp();
+    if (!app || !connection.installationId) {
+      throw new HttpError(503, "GitHub is not configured on this server");
+    }
+    const installation = await app.installation(connection.installationId);
+    if (installation.suspended_at) {
+      throw new ForgeError(403, "GitHub App installation is suspended");
+    }
+  },
 
   // GitHub.com connects through the app; a token is for Enterprise Server.
   tokenConnect: {

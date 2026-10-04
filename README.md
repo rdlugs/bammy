@@ -26,6 +26,11 @@ cp .env.example .env
 docker compose up --build
 ```
 
+The initial command builds the client and server dependency images. For subsequent
+starts, use `docker compose up`. Source changes are bind-mounted into the containers
+and picked up by the development watchers without rebuilding. Rebuild the images
+when either `package.json` or `package-lock.json` changes.
+
 - Web client: http://localhost:5173 (`CLIENT_HOST_PORT`)
 - API: http://localhost:4000/api (`API_HOST_PORT`); the client proxies `/api` to it
 - Postgres: localhost:5433 (`DB_HOST_PORT`)

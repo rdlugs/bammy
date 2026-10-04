@@ -22,6 +22,9 @@ export type HeaderReader = (name: string) => string | undefined;
 // review/forge/providers.ts for the checklist to add a forge.
 export interface ProviderDefinition {
   adapterFor(connection: ForgeConnection): Forge;
+  // Proves the stored credentials still work; throws ForgeError when the forge
+  // refuses them.
+  checkCredentials(connection: ForgeConnection): Promise<void>;
   // Connecting with a host and a token the user pastes in.
   tokenConnect?: {
     schema: z.ZodType<{ host: string; token: string }, unknown>;
