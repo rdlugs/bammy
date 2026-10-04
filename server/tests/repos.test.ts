@@ -77,7 +77,7 @@ describe("GET /api/repos", () => {
     const res = await request(app).get(`/api/repos?connectionId=${connectionId}`).set("Cookie", cookie);
 
     expect(res.status).toBe(502);
-    expect(res.body.message).toMatch(/reconnect/);
+    expect(res.body.message).toBe("GitLab rejected the stored credentials; reconnect the account");
   });
 
   it("404s for another user's connection", async () => {

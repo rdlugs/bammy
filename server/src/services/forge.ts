@@ -7,7 +7,9 @@ import { GitHubAdapter } from "../review/forge/github.ts";
 import { GitHubApp, githubApiBase } from "../review/forge/githubApp.ts";
 import { GitLabAdapter } from "../review/forge/gitlab.ts";
 import { ForgeError } from "../review/forge/http.ts";
-import { hostOrigin, type ForgeAdapter } from "../review/forge/types.ts";
+import { hostOrigin, type ForgeAdapter, type ForgePublisher } from "../review/forge/types.ts";
+
+export type Forge = ForgeAdapter & ForgePublisher;
 
 let githubApp: GitHubApp | null | undefined;
 
@@ -46,7 +48,7 @@ export function githubInstallUrl(state: string): string | null {
   return `${hostOrigin(env.GITHUB_HOST)}/${appsPath}/${slug}/installations/new?state=${encodeURIComponent(state)}`;
 }
 
-export function adapterForConnection(connection: ForgeConnection): ForgeAdapter {
+export function adapterForConnection(connection: ForgeConnection): Forge {
   if (connection.provider === "github") {
     const app = getGitHubApp();
     const installationId = connection.installationId;
@@ -57,6 +59,8 @@ export function adapterForConnection(connection: ForgeConnection): ForgeAdapter 
       host: connection.host,
       token: () => app.installationToken(installationId),
       account: async () => ({ login: connection.accountLogin }),
+      // An app posts as "<slug>[bot]", not as the account it is installed on.
+      selfLogin: env.GITHUB_APP_SLUG ? `${env.GITHUB_APP_SLUG}[bot]` : undefined,
     });
   }
 
@@ -64,7 +68,11 @@ export function adapterForConnection(connection: ForgeConnection): ForgeAdapter 
   if (!encryptedToken) {
     throw new HttpError(500, "GitLab connection has no token");
   }
-  return new GitLabAdapter({ host: connection.host, token: async () => decrypt(encryptedToken) });
+  return new GitLabAdapter({
+    host: connection.host,
+    token: async () => decrypt(encryptedToken),
+    selfLogin: connection.accountLogin,
+  });
 }
 
 export async function loadOwnedConnection(userId: string, id: string): Promise<ForgeConnection> {
@@ -77,10 +85,13 @@ export async function loadOwnedConnection(userId: string, id: string): Promise<F
 
 // Translates a forge failure into something the user can act on. A forge
 // refusing our credentials is a broken connection, not a 401 from Bammy.
-export function toHttpError(err: unknown, provider: string): unknown {
+const PROVIDER_NAME: Record<string, string> = { github: "GitHub", gitlab: "GitLab" };
+
+export function toHttpError(err: unknown, providerId: string): unknown {
   if (!(err instanceof ForgeError)) {
     return err;
   }
+  const provider = PROVIDER_NAME[providerId] ?? providerId;
   if (err.status === 401 || err.status === 403) {
     return new HttpError(502, `${provider} rejected the stored credentials; reconnect the account`);
   }

@@ -38,7 +38,8 @@ export function ReviewsTable({ reviews }: { reviews: ReviewListItem[] }) {
           <TableRow key={review.id}>
             <TableCell className="max-w-md">
               <Link to={`/reviews/${review.id}`} className="font-medium hover:underline">
-                {review.summary?.title ?? `${review.repository.fullPath} ${changeLabel(review.repository.provider, review.number)}`}
+                {review.summary?.title ??
+                  `${review.repository.provider === "gitlab" ? "Merge" : "Pull"} request ${changeLabel(review.repository.provider, review.number)}`}
               </Link>
               <div className="truncate text-xs text-muted-foreground">
                 {review.repository.fullPath} {changeLabel(review.repository.provider, review.number)} ·{" "}
