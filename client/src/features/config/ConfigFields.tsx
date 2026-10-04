@@ -17,6 +17,7 @@ import {
   FieldLegend,
   FieldSeparator,
   FieldSet,
+  FieldTitle,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -316,18 +317,21 @@ function CategoriesField(props: {
       <div className="grid grid-cols-2 gap-2 @md/field-group:grid-cols-3">
         {props.options.map((category) => {
           const id = `category-${category}`
+          // A label wrapping a field renders as a selectable card (see FieldLabel).
           return (
-            <Field key={category} orientation="horizontal" data-disabled={disabled}>
-              <Checkbox
-                id={id}
-                checked={checked?.includes(category) ?? false}
-                onCheckedChange={(on) => toggle(category, on === true)}
-                disabled={disabled}
-              />
-              <FieldLabel htmlFor={id} className="font-normal">
-                {category}
-              </FieldLabel>
-            </Field>
+            <FieldLabel key={category} htmlFor={id}>
+              <Field orientation="horizontal" data-disabled={disabled}>
+                <Checkbox
+                  id={id}
+                  checked={checked?.includes(category) ?? false}
+                  onCheckedChange={(on) => toggle(category, on === true)}
+                  disabled={disabled}
+                />
+                <FieldContent>
+                  <FieldTitle className="capitalize">{category}</FieldTitle>
+                </FieldContent>
+              </Field>
+            </FieldLabel>
           )
         })}
       </div>
@@ -780,132 +784,151 @@ export function ConfigFields(props: {
   const panels: Record<ConfigTab, ReactNode> = {
     llm: (
       <>
-        <div className="grid gap-4 @md/field-group:grid-cols-2">
-          <ChoiceField
-            id="profile"
-            label="Profile"
-            value={form.profile}
-            onChange={setField("profile")}
-            options={profiles}
-            {...choice("profile", inherited?.profile)}
-            description="A preset that fills in values on every tab; anything set here wins over it."
-            effective={config && effective("profile", config.profile)}
-            disabled={disabled}
-          />
-          <div className="flex flex-col gap-2">
+        <Section title="Connection" description="Which preset applies and which saved connection runs the review.">
+          <div className="grid gap-4 @md/field-group:grid-cols-2">
             <ChoiceField
-              id="llm-connection"
-              label="LLM connection"
-              value={form.connection}
-              onChange={(connection) => props.onChange({ ...form, connection })}
-              options={connectionOptions}
-              inherit={
-                isRepo
-                  ? { description: inherited && inheritedHint("llm.connection", configuredConnectionLabel(inherited.llm)) }
-                  : undefined
-              }
-              description={
-                <>
-                  Uses the latest key and API host configured in{" "}
-                  <Link className="underline underline-offset-4" to="/settings?tab=api-keys">Settings &gt; API keys</Link>.
-                </>
-              }
-              effective={config && effective("llm.connection", configuredConnectionLabel(config.llm))}
-              error={errors.connection}
-              disabled={disabled || apiKeys.isPending}
-            />
-            {apiKeys.isSuccess && storedConnections.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                No saved connections. Add one in{" "}
-                <Link className="underline underline-offset-4" to="/settings?tab=api-keys">
-                  Settings &gt; API keys
-                </Link>
-                .
-              </p>
-            )}
-            {apiKeys.isError && <p className="text-sm text-destructive">Could not load LLM connections.</p>}
-          </div>
-        </div>
-        <div className="grid gap-4 @md/field-group:grid-cols-2">
-          <Field data-disabled={disabled}>
-            <FieldLabel htmlFor="model">Model</FieldLabel>
-            <ModelCombobox
-              id="model"
-              value={form.model}
-              onChange={setField("model")}
-              placeholder={inherited?.llm.model ?? config?.llm.model ?? "anthropic/claude-sonnet-5-5"}
+              id="profile"
+              label="Profile"
+              value={form.profile}
+              onChange={setField("profile")}
+              options={profiles}
+              {...choice("profile", inherited?.profile)}
+              description="A preset that fills in values on every tab; anything set here wins over it."
+              effective={config && effective("profile", config.profile)}
               disabled={disabled}
-              aria-invalid={errors.model ? true : undefined}
-              suggestions={modelSuggestions}
             />
-            <FieldDescription>
-              provider/model;{" "}
-              {isRepo
-                ? `leave empty to inherit${inherited ? ` ${inheritedHint("llm.model", inherited.llm.model)}` : ""}.`
-                : `leave empty to use the default${inherited ? ` (${inherited.llm.model})` : ""}.`}
-            </FieldDescription>
-            {config && <FieldDescription className="text-xs">{effective("llm.model", config.llm.model)}</FieldDescription>}
-            {!disabled && !runsOn(form.model) && mismatchHint}
-            {errors.model && <FieldError>{errors.model}</FieldError>}
-          </Field>
-          <FallbackModelsField
-            rows={form.fallbackModels}
-            onChange={(fallbackModels) => props.onChange({ ...form, fallbackModels })}
-            emptyHint={emptyHint("llm.fallbackModels", inherited?.llm.fallbackModels)}
-            effective={config && effective("llm.fallbackModels", config.llm.fallbackModels)}
-            error={errors.fallbackModels}
-            disabled={disabled}
-            suggestions={modelSuggestions}
-            warning={!disabled && !form.fallbackModels.every(runsOn) ? mismatchHint : undefined}
-          />
-        </div>
-        <div className="grid gap-4 @md/field-group:grid-cols-3">
-          {numberField("temperature")}
-          {numberField("maxTokens")}
-          {numberField("contextBudget")}
-        </div>
+            <div className="flex flex-col gap-2">
+              <ChoiceField
+                id="llm-connection"
+                label="LLM connection"
+                value={form.connection}
+                onChange={(connection) => props.onChange({ ...form, connection })}
+                options={connectionOptions}
+                inherit={
+                  isRepo
+                    ? { description: inherited && inheritedHint("llm.connection", configuredConnectionLabel(inherited.llm)) }
+                    : undefined
+                }
+                description={
+                  <>
+                    Uses the latest key and API host configured in{" "}
+                    <Link className="underline underline-offset-4" to="/settings?tab=api-keys">Settings &gt; API keys</Link>.
+                  </>
+                }
+                effective={config && effective("llm.connection", configuredConnectionLabel(config.llm))}
+                error={errors.connection}
+                disabled={disabled || apiKeys.isPending}
+              />
+              {apiKeys.isSuccess && storedConnections.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No saved connections. Add one in{" "}
+                  <Link className="underline underline-offset-4" to="/settings?tab=api-keys">
+                    Settings &gt; API keys
+                  </Link>
+                  .
+                </p>
+              )}
+              {apiKeys.isError && <p className="text-sm text-destructive">Could not load LLM connections.</p>}
+            </div>
+          </div>
+        </Section>
+        <FieldSeparator />
+        <Section title="Models" description="The model that reviews the change, and the ones tried when it fails.">
+          <div className="grid gap-4 @md/field-group:grid-cols-2">
+            <Field data-disabled={disabled}>
+              <FieldLabel htmlFor="model">Model</FieldLabel>
+              <ModelCombobox
+                id="model"
+                value={form.model}
+                onChange={setField("model")}
+                placeholder={inherited?.llm.model ?? config?.llm.model ?? "anthropic/claude-sonnet-5-5"}
+                disabled={disabled}
+                aria-invalid={errors.model ? true : undefined}
+                suggestions={modelSuggestions}
+              />
+              <FieldDescription>
+                provider/model;{" "}
+                {isRepo
+                  ? `leave empty to inherit${inherited ? ` ${inheritedHint("llm.model", inherited.llm.model)}` : ""}.`
+                  : `leave empty to use the default${inherited ? ` (${inherited.llm.model})` : ""}.`}
+              </FieldDescription>
+              {config && <FieldDescription className="text-xs">{effective("llm.model", config.llm.model)}</FieldDescription>}
+              {!disabled && !runsOn(form.model) && mismatchHint}
+              {errors.model && <FieldError>{errors.model}</FieldError>}
+            </Field>
+            <FallbackModelsField
+              rows={form.fallbackModels}
+              onChange={(fallbackModels) => props.onChange({ ...form, fallbackModels })}
+              emptyHint={emptyHint("llm.fallbackModels", inherited?.llm.fallbackModels)}
+              effective={config && effective("llm.fallbackModels", config.llm.fallbackModels)}
+              error={errors.fallbackModels}
+              disabled={disabled}
+              suggestions={modelSuggestions}
+              warning={!disabled && !form.fallbackModels.every(runsOn) ? mismatchHint : undefined}
+            />
+          </div>
+        </Section>
+        <FieldSeparator />
+        <Section title="Model calls" description="How each request to the model is made.">
+          <div className="grid gap-4 @md/field-group:grid-cols-3">
+            {numberField("temperature")}
+            {numberField("maxTokens")}
+            {numberField("contextBudget")}
+          </div>
+        </Section>
       </>
     ),
     findings: (
       <>
-        <div className="grid gap-4 @md/field-group:grid-cols-2">
-          <ChoiceField
-            id="severity-floor"
-            label="Report findings at or above"
-            value={form.severityFloor}
-            onChange={setField("severityFloor")}
-            options={severities}
-            {...choice("review.severityFloor", inherited?.review.severityFloor)}
-            effective={config && effective("review.severityFloor", config.review.severityFloor)}
+        <Section title="Severity" description="What is reported, and what fails the review and its commit status.">
+          <div className="grid gap-4 @md/field-group:grid-cols-2">
+            <ChoiceField
+              id="severity-floor"
+              label="Report findings at or above"
+              value={form.severityFloor}
+              onChange={setField("severityFloor")}
+              options={severities}
+              {...choice("review.severityFloor", inherited?.review.severityFloor)}
+              effective={config && effective("review.severityFloor", config.review.severityFloor)}
+              disabled={disabled}
+            />
+            <ChoiceField
+              id="block-on"
+              label="Block at or above"
+              value={form.blockOn}
+              onChange={setField("blockOn")}
+              options={severities}
+              {...choice("review.blockOn", inherited?.review.blockOn)}
+              effective={config && effective("review.blockOn", config.review.blockOn)}
+              disabled={disabled}
+            />
+          </div>
+        </Section>
+        <FieldSeparator />
+        <Section
+          title="What gets reported"
+          description="The kinds of issues the reviewer looks for, and how many it reports."
+        >
+          <CategoriesField
+            options={schema.data?.categories ?? []}
+            value={form.categories}
+            inherited={inherited?.review.categories}
+            onChange={(categories) => props.onChange({ ...form, categories })}
+            resettable={isRepo}
+            inheritedHint={inheritedHint("review.categories", inherited?.review.categories)}
+            effective={config && effective("review.categories", config.review.categories)}
+            error={errors.categories}
             disabled={disabled}
           />
-          <ChoiceField
-            id="block-on"
-            label="Block at or above"
-            value={form.blockOn}
-            onChange={setField("blockOn")}
-            options={severities}
-            {...choice("review.blockOn", inherited?.review.blockOn)}
-            effective={config && effective("review.blockOn", config.review.blockOn)}
-            disabled={disabled}
-          />
-        </div>
-        <CategoriesField
-          options={schema.data?.categories ?? []}
-          value={form.categories}
-          inherited={inherited?.review.categories}
-          onChange={(categories) => props.onChange({ ...form, categories })}
-          resettable={isRepo}
-          inheritedHint={inheritedHint("review.categories", inherited?.review.categories)}
-          effective={config && effective("review.categories", config.review.categories)}
-          error={errors.categories}
-          disabled={disabled}
-        />
-        <div className="grid gap-4 @md/field-group:grid-cols-2">
-          {numberField("maxFindings")}
-          {numberField("minConfidence")}
-        </div>
-        {toggles(["requireEvidence", "fullFile", "committableSuggestions"])}
+          <div className="grid gap-4 @md/field-group:grid-cols-2">
+            {numberField("maxFindings")}
+            {numberField("minConfidence")}
+          </div>
+        </Section>
+        <FieldSeparator />
+        <Section title="Review rules" description="How findings are checked and how fixes are offered.">
+          <ToggleList>{toggles(["requireEvidence", "fullFile", "committableSuggestions"])}</ToggleList>
+        </Section>
       </>
     ),
     files: (
