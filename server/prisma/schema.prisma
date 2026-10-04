@@ -10,12 +10,15 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  name         String
-  email        String   @unique @db.Citext
-  passwordHash String   @map("password_hash")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  email          String   @unique @db.Citext
+  passwordHash   String   @map("password_hash")
+  // Global review config: a ConfigOverride applied to every repository that
+  // follows it (and beneath the overrides of those that do not).
+  reviewSettings Json     @default("{}") @map("review_settings")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   connections    ForgeConnection[]
   llmCredentials LlmCredential[]
@@ -95,6 +98,8 @@ model Repository {
   defaultBranch          String        @map("default_branch")
   enabled                Boolean       @default(false)
   settings               Json          @default("{}")
+  // When set, `settings` is ignored and only the owner's global config applies.
+  followGlobal           Boolean       @default(true) @map("follow_global")
   // GitLab project hook Bammy registered, and the secret GitLab sends with it.
   webhookId              String?       @map("webhook_id")
   encryptedWebhookSecret String?       @map("encrypted_webhook_secret")

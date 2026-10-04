@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadReviewConfig } from "../src/review/config/load.ts";
 import { parseRepoFile } from "../src/review/config/repoFile.ts";
 import { resolveConfig } from "../src/review/config/resolve.ts";
-import { DEFAULT_CONFIG, configSchema } from "../src/review/config/schema.ts";
+import { DEFAULT_CONFIG, configSchema, dashboardOverrideSchema } from "../src/review/config/schema.ts";
 import type { ForgeAdapter } from "../src/review/forge/types.ts";
 
 describe("DEFAULT_CONFIG", () => {
@@ -35,6 +35,24 @@ describe("resolveConfig", () => {
       "review.minConfidence": "repoSettings",
       "output.walkthrough": "repoSettings",
       "review.blockOn": "default",
+    });
+  });
+
+  it("puts the global config above the profile and below repository settings", () => {
+    const { config, sources } = resolveConfig({
+      global: { profile: "strict", review: { maxFindings: 10, minConfidence: 0.8 } },
+      repoSettings: { review: { maxFindings: 15 } },
+    });
+
+    expect(config.profile).toBe("strict");
+    expect(config.review.blockOn).toBe("major");
+    expect(config.review.minConfidence).toBe(0.8);
+    expect(config.review.maxFindings).toBe(15);
+    expect(sources).toMatchObject({
+      profile: "global",
+      "review.blockOn": "profile",
+      "review.minConfidence": "global",
+      "review.maxFindings": "repoSettings",
     });
   });
 
@@ -84,6 +102,37 @@ describe("resolveConfig", () => {
     expect(config.languageInstructions).toEqual({ php: "Laravel", go: "Use errgroup" });
     expect(sources.languageInstructions).toBe("repoFile");
     expect(sources["languageInstructions.php"]).toBeUndefined();
+  });
+
+  it("takes the endpoint and its key from the dashboard layers", () => {
+    const { config, sources } = resolveConfig({
+      global: { llm: { baseUrl: "https://proxy.example/v1", endpointKey: "openai" } },
+      repoSettings: { llm: { baseUrl: "http://host.docker.internal:20128/v1" } },
+    });
+
+    expect(config.llm).toMatchObject({ baseUrl: "http://host.docker.internal:20128/v1", endpointKey: "openai" });
+    expect(sources).toMatchObject({ "llm.baseUrl": "repoSettings", "llm.endpointKey": "global" });
+  });
+
+  it("refuses an endpoint or key choice from the repository file and triggers", () => {
+    for (const llm of [{ baseUrl: "https://evil.example" }, { endpointKey: "openai" }]) {
+      expect(() => resolveConfig({ repoFile: { llm } as never })).toThrow();
+      expect(() => resolveConfig({ trigger: { llm } as never })).toThrow();
+    }
+  });
+
+  it("only accepts an http(s) base URL and a known key slot", () => {
+    expect(dashboardOverrideSchema.safeParse({ llm: { baseUrl: "ftp://proxy.example" } }).success).toBe(false);
+    expect(dashboardOverrideSchema.safeParse({ llm: { endpointKey: "mistral" } }).success).toBe(false);
+    expect(dashboardOverrideSchema.safeParse({ llm: { baseUrl: null, endpointKey: null } }).success).toBe(true);
+  });
+
+  it("accepts router model ids with slashes and parentheses", () => {
+    const { config } = resolveConfig({
+      global: { llm: { model: "openai/cx/gpt-5.6-sol(medium)", fallbackModels: ["openai/cx/gpt-5.6-sol(low)"] } },
+    });
+    expect(config.llm.model).toBe("openai/cx/gpt-5.6-sol(medium)");
+    expect(() => resolveConfig({ global: { llm: { model: "openai/gpt 5" } } })).toThrow();
   });
 
   it("rejects an invalid layer", () => {
@@ -144,6 +193,15 @@ describe("parseRepoFile", () => {
     );
     expect(override).toBeUndefined();
     expect(warnings[0]).toMatch(/unknown setting api_base, api_keys/);
+  });
+
+  it("refuses the endpoint and key choice, which only the dashboard may set", () => {
+    const { override, warnings } = parseRepoFile(
+      ".bammy.yaml",
+      "llm:\n  base_url: https://evil.example\n  endpoint_key: openai\n",
+    );
+    expect(override).toBeUndefined();
+    expect(warnings[0]).toMatch(/unknown setting base_url, endpoint_key/);
   });
 
   it("reports an invalid value with its path", () => {

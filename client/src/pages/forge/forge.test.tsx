@@ -13,6 +13,7 @@ const gitlabConnection = {
   kind: "token",
   accountLogin: "dev",
   createdAt: "2026-03-14T12:00:00.000Z",
+  user: { name: "Dev", email: "dev@example.com" },
 }
 
 async function openAddConnection() {
@@ -100,7 +101,7 @@ describe("Connections page", () => {
       "POST /api/connections/github": (init?: RequestInit) => {
         body = JSON.parse(String(init?.body))
         return jsonResponse(201, {
-          connection: { id: "c2", provider: "github", host: "ghe.acme.com", kind: "token", accountLogin: "dev", createdAt: "" },
+          connection: { id: "c2", provider: "github", host: "ghe.acme.com", kind: "token", accountLogin: "dev", createdAt: "", user: { name: "Dev", email: "dev@example.com" } },
         })
       },
     })
@@ -115,7 +116,7 @@ describe("Connections page", () => {
     await waitFor(() => expect(body).toEqual({ host: "ghe.acme.com", token: "ghp_x" }))
   })
 
-  it("shows whether each connection is active and when it was created", async () => {
+  it("shows whether each connection is active, who added it and when", async () => {
     mockApi({
       "GET /api/connections": {
         connections: [gitlabConnection, { ...gitlabConnection, id: "c2", accountLogin: "old" }],
@@ -135,6 +136,7 @@ describe("Connections page", () => {
     expect(inactive).toHaveClass("text-destructive")
     const created = new Date(gitlabConnection.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })
     expect(screen.getAllByText(created)).toHaveLength(2)
+    expect(screen.getAllByText("Dev")[0]).toHaveAttribute("title", "dev@example.com")
   })
 
   it("sorts the table by the clicked column", async () => {
@@ -260,6 +262,19 @@ describe("Connections page", () => {
   })
 })
 
+const addedRepo = (id: string, fullPath: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  connectionId: "c1",
+  account: { login: "dev", provider: "gitlab", host: "gitlab.com" },
+  externalId: id,
+  fullPath,
+  defaultBranch: "main",
+  webUrl: `https://gitlab.com/${fullPath}`,
+  enabled: true,
+  settings: {},
+  ...extra,
+})
+
 describe("Repositories page", () => {
   it("points to Connections when nothing is connected", async () => {
     mockApi({ "GET /api/connections": { connections: [], availableApps: ["github"] } })
@@ -268,11 +283,46 @@ describe("Repositories page", () => {
     expect(await screen.findByText("No forge connected")).toBeInTheDocument()
   })
 
-  it("enables a repository that has never been saved", async () => {
-    const posted: unknown[] = []
+  it("shows an empty state without asking the forge for every repository", async () => {
+    const available = vi.fn(() => jsonResponse(200, { repos: [] }))
     mockApi({
       "GET /api/connections": { connections: [gitlabConnection], availableApps: ["github"] },
-      "GET /api/repos?connectionId=c1": {
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": { repos: [] },
+      "GET /api/repos/available?connectionId=c1": available,
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    expect(await screen.findByText("No repositories added")).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Add repository" })).toHaveLength(1)
+    expect(available).not.toHaveBeenCalled()
+  })
+
+  it("adds the repositories picked from the forge", async () => {
+    const posted: unknown[] = []
+    let added = false
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: ["github"] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": () =>
+        jsonResponse(200, {
+          repos: added
+            ? [
+                {
+                  id: "r1",
+                  connectionId: "c1",
+                  account: { login: "dev", provider: "gitlab", host: "gitlab.com" },
+                  externalId: "9",
+                  fullPath: "team/web",
+                  defaultBranch: "main",
+                  webUrl: "https://gitlab.com/team/web",
+                  enabled: true,
+                  settings: {},
+                },
+              ]
+            : [],
+        }),
+      "GET /api/repos/available?connectionId=c1": {
         repos: [
           {
             id: null,
@@ -284,10 +334,21 @@ describe("Repositories page", () => {
             enabled: false,
             settings: {},
           },
+          {
+            id: "r2",
+            externalId: "10",
+            fullPath: "team/api",
+            defaultBranch: "main",
+            private: false,
+            webUrl: "https://gitlab.com/team/api",
+            enabled: false,
+            settings: {},
+          },
         ],
       },
       "POST /api/repos": (init?: RequestInit) => {
         posted.push(JSON.parse(String(init?.body)))
+        added = true
         return jsonResponse(201, {
           repo: { id: "r1" },
           webhook: { active: false, error: "Automatic reviews are off: GitLab refused the webhook (403 Forbidden)" },
@@ -296,10 +357,202 @@ describe("Repositories page", () => {
     })
     renderWithProviders(<App />, { route: "/repositories" })
 
-    await userEvent.click(await screen.findByRole("switch", { name: "Reviews for team/web" }))
+    await userEvent.click(await screen.findByRole("button", { name: "Add repository" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(await within(dialog).findByRole("checkbox", { name: /team\/api/ })).toBeDisabled()
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: /team\/web/ }))
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add 1 repository" }))
 
     await waitFor(() => expect(posted).toEqual([{ connectionId: "c1", externalId: "9" }]))
     expect(await screen.findByText(/GitLab refused the webhook/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled()
+    expect(await screen.findByRole("switch", { name: "Reviews for team/web" })).toBeChecked()
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  it("toggles an added repository", async () => {
+    const patched: unknown[] = []
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: ["github"] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": {
+        repos: [
+          {
+            id: "r1",
+            connectionId: "c1",
+            account: { login: "dev", provider: "gitlab", host: "gitlab.com" },
+            externalId: "9",
+            fullPath: "team/web",
+            defaultBranch: "main",
+            webUrl: "https://gitlab.com/team/web",
+            enabled: true,
+            settings: {},
+          },
+        ],
+      },
+      "PATCH /api/repos/r1": (init?: RequestInit) => {
+        patched.push(JSON.parse(String(init?.body)))
+        return jsonResponse(200, { repo: { id: "r1" } })
+      },
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    const row = (await screen.findByRole("switch", { name: "Reviews for team/web" })).closest("tr")!
+    expect(within(row).getByText("dev (gitlab.com)")).toBeInTheDocument()
+    // Review config is edited on the Configuration page, not here.
+    expect(within(row).queryByRole("button", { name: "Settings" })).not.toBeInTheDocument()
+    await userEvent.click(within(row).getByRole("switch"))
+
+    await waitFor(() => expect(patched).toEqual([{ enabled: false }]))
+  })
+
+  it("shows a loading skeleton while the account's repositories load", async () => {
+    let respond!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => (respond = resolve))
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: [] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": { repos: [] },
+      // Typed as a Response, but the fetch mock awaits whatever the handler returns.
+      "GET /api/repos/available?connectionId=c1": () => pending as unknown as Response,
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add repository" }))
+    const sheet = await screen.findByRole("dialog")
+    expect(within(sheet).getByRole("status", { name: "Loading repositories" })).toBeInTheDocument()
+
+    respond(
+      jsonResponse(200, {
+        repos: [
+          {
+            id: null,
+            externalId: "9",
+            fullPath: "team/web",
+            defaultBranch: "main",
+            private: false,
+            webUrl: "https://gitlab.com/team/web",
+            enabled: false,
+            settings: {},
+          },
+        ],
+      }),
+    )
+    expect(await within(sheet).findByRole("checkbox", { name: /team\/web/ })).toBeInTheDocument()
+    expect(within(sheet).queryByRole("status", { name: "Loading repositories" })).not.toBeInTheDocument()
+  })
+
+  it("adds repositories from the account chosen in the sheet", async () => {
+    const posted: unknown[] = []
+    const workRepo = {
+      id: null,
+      externalId: "20",
+      fullPath: "acme/api",
+      defaultBranch: "main",
+      private: false,
+      webUrl: "https://gitlab.acme.com/acme/api",
+      enabled: false,
+      settings: {},
+    }
+    mockApi({
+      "GET /api/connections": {
+        connections: [gitlabConnection, { ...gitlabConnection, id: "c2", host: "gitlab.acme.com", accountLogin: "work" }],
+        availableApps: [],
+      },
+      "GET /api/repos": { repos: [] },
+      "GET /api/repos/available?connectionId=c1": { repos: [] },
+      "GET /api/repos/available?connectionId=c2": { repos: [workRepo] },
+      "POST /api/repos": (init?: RequestInit) => {
+        posted.push(JSON.parse(String(init?.body)))
+        return jsonResponse(201, { repo: { id: "r9" } })
+      },
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add repository" }))
+    const sheet = await screen.findByRole("dialog")
+    expect(await within(sheet).findByText("This account can see no repositories.")).toBeInTheDocument()
+    await userEvent.click(within(sheet).getByRole("combobox", { name: "Account" }))
+    await userEvent.click(screen.getByRole("option", { name: "work (gitlab.acme.com)" }))
+    await userEvent.click(await within(sheet).findByRole("checkbox", { name: /acme\/api/ }))
+    await userEvent.click(within(sheet).getByRole("button", { name: "Add 1 repository" }))
+
+    await waitFor(() => expect(posted).toEqual([{ connectionId: "c2", externalId: "20" }]))
+  })
+
+  it("shows each repository's connection status", async () => {
+    mockApi({
+      "GET /api/connections": {
+        connections: [gitlabConnection, { ...gitlabConnection, id: "c2", accountLogin: "old" }],
+        availableApps: [],
+      },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/connections/c2/status": { status: "revoked" },
+      "GET /api/repos": {
+        repos: [
+          addedRepo("r1", "team/web"),
+          addedRepo("r2", "old/api", { connectionId: "c2", account: { login: "old", provider: "gitlab", host: "gitlab.com" } }),
+        ],
+      },
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    const row = (name: string) => screen.getByRole("link", { name }).closest("tr")!
+    await waitFor(() => expect(within(row("team/web")).getByText("Active")).toBeInTheDocument())
+    expect(within(row("old/api")).getByText("Inactive")).toBeInTheDocument()
+  })
+
+  it("sorts the table by the clicked column", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: [] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": {
+        repos: [addedRepo("r1", "team/api", { enabled: false }), addedRepo("r2", "team/web")],
+      },
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    const paths = () => screen.getAllByRole("link", { name: /^team\// }).map((link) => link.textContent)
+    await screen.findByRole("link", { name: "team/web" })
+    expect(paths()).toEqual(["team/api", "team/web"])
+
+    await userEvent.click(screen.getByRole("button", { name: "Reviews" }))
+    expect(paths()).toEqual(["team/web", "team/api"])
+    expect(screen.getByRole("columnheader", { name: "Reviews" })).toHaveAttribute("aria-sort", "ascending")
+
+    await userEvent.click(screen.getByRole("button", { name: "Repository" }))
+    await userEvent.click(screen.getByRole("button", { name: "Repository" }))
+    expect(paths()).toEqual(["team/web", "team/api"])
+    expect(screen.getByRole("columnheader", { name: "Repository" })).toHaveAttribute("aria-sort", "descending")
+  })
+
+  it("asks for confirmation before removing a repository", async () => {
+    let removed = false
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: [] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": () =>
+        jsonResponse(200, { repos: removed ? [addedRepo("r2", "team/api")] : [addedRepo("r2", "team/api"), addedRepo("r1", "team/web")] }),
+      "DELETE /api/repos/r1": () => {
+        removed = true
+        return new Response(null, { status: 204 })
+      },
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    const row = (await screen.findByRole("link", { name: "team/web" })).closest("tr")!
+    await userEvent.click(within(row).getByRole("button", { name: "Remove" }))
+    let dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByRole("heading", { name: "Remove team/web?" })).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(removed).toBe(false)
+
+    await userEvent.click(within(row).getByRole("button", { name: "Remove" }))
+    dialog = await screen.findByRole("dialog")
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove repository" }))
+
+    await waitFor(() => expect(screen.queryByRole("link", { name: "team/web" })).not.toBeInTheDocument())
+    expect(removed).toBe(true)
+    expect(screen.getByRole("link", { name: "team/api" })).toBeInTheDocument()
   })
 })

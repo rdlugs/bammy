@@ -3,7 +3,7 @@ import type { ForgeConnection, ReviewJob } from "../generated/prisma/client.ts";
 import { prisma } from "../lib/prisma.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
 import type { Config } from "../review/config/schema.ts";
-import { createGenerate, missingKeys, type ApiKeys, type Generate } from "../review/llm/providers.ts";
+import { createGenerate, missingKeys, type ApiKeys, type Endpoint, type Generate } from "../review/llm/providers.ts";
 import { runReview } from "../review/pipeline.ts";
 import { publishes, publishReview } from "../review/publish/publisher.ts";
 import { pendingStatus } from "../review/publish/status.ts";
@@ -15,7 +15,7 @@ import { complete } from "./queue.ts";
 
 export interface RunJobDeps {
   adapterFor: (connection: ForgeConnection) => Forge;
-  generateFor: (keys: ApiKeys) => Generate;
+  generateFor: (keys: ApiKeys, endpoint?: Endpoint) => Generate;
   apiKeysFor: (userId: string) => Promise<ApiKeys>;
 }
 
@@ -51,7 +51,7 @@ function message(err: unknown): string {
 export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Promise<void> {
   const repo = await prisma.repository.findUnique({
     where: { id: job.repositoryId },
-    include: { connection: true },
+    include: { connection: { include: { user: { select: { reviewSettings: true } } } } },
   });
   if (!repo) {
     throw new Error("The repository is no longer connected");
@@ -65,7 +65,9 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     adapter: forge,
     project: repo.fullPath,
     ref: changeSet.forgeRef.baseSha,
+    globalSettings: repo.connection.user.reviewSettings,
     repoSettings: repo.settings,
+    followGlobal: repo.followGlobal,
   });
 
   const { config } = loaded;
@@ -83,13 +85,18 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   }
 
   const keys = await deps.apiKeysFor(repo.connection.userId);
-  if (missingKeys([config.llm.model], keys).length > 0) {
+  const { baseUrl, endpointKey } = config.llm;
+  if (endpointKey && !keys[endpointKey]) {
+    throw new Error(`No API key for ${endpointKey}: store one in settings or configure it on the server`);
+  }
+  const endpoint = baseUrl ? { baseUrl, apiKey: endpointKey ? keys[endpointKey] : undefined } : undefined;
+  if (missingKeys([config.llm.model], keys, endpoint).length > 0) {
     const provider = config.llm.model.split("/")[0];
     throw new Error(`No API key for ${provider}: store one in settings or configure it on the server`);
   }
   const warnings = [...loaded.warnings];
   const fallbackModels = config.llm.fallbackModels.filter((model) => {
-    const usable = missingKeys([model], keys).length === 0;
+    const usable = missingKeys([model], keys, endpoint).length === 0;
     if (!usable) warnings.push(`Fallback model ${model} skipped: no API key for its provider`);
     return usable;
   });
@@ -112,7 +119,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
 
   const result = await runReview(
     { changeSet, config: { ...config, llm: { ...config.llm, fallbackModels } }, warnings },
-    { generate: deps.generateFor(keys) },
+    { generate: deps.generateFor(keys, endpoint) },
   );
 
   let publication = null;

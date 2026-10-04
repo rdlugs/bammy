@@ -26,6 +26,7 @@ beforeEach(async () => {
       defaultBranch: "main",
       enabled: true,
       settings: { review: { blockOn: "major" } },
+      followGlobal: false,
     },
   });
   repositoryId = repo.id;
@@ -139,6 +140,40 @@ describe("runJob", () => {
     ]);
   });
 
+  it("sends every model call to the endpoint with the chosen key", async () => {
+    const job = await claimedJob();
+    const baseUrl = "http://host.docker.internal:20128/v1";
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { llm: { model: "openai/cx/gpt-5.6-sol(medium)", baseUrl, endpointKey: "openai" } } },
+    });
+    const keys = { anthropic: "k", openai: "router-key" };
+    const { runDeps, model } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, keys);
+    const generateFor: unknown[][] = [];
+    runDeps.generateFor = (...args) => {
+      generateFor.push(args);
+      return model.generate;
+    };
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored.status).toBe("completed");
+    expect(generateFor).toEqual([[keys, { baseUrl, apiKey: "router-key" }]]);
+  });
+
+  it("refuses to run when the chosen endpoint key is not stored", async () => {
+    const job = await claimedJob();
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { llm: { baseUrl: "http://router.test/v1", endpointKey: "google" } } },
+    });
+    const { runDeps, model } = deps({}, {});
+
+    await expect(runJob(job, runDeps)).rejects.toThrow(/No API key for google/);
+    expect(model.requests).toHaveLength(0);
+  });
+
   it("posts progress first, then inline comments, the summary and the status", async () => {
     const job = await claimedJob();
     const { runDeps, published } = deps({}, { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH });
@@ -212,6 +247,41 @@ describe("runJob", () => {
     expect(published).toEqual({ inline: [], summaries: [], statuses: [] });
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored.publication).toBeNull();
+  });
+});
+
+describe("runJob with the global config", () => {
+  it("applies the owner's global config beneath the repository settings", async () => {
+    const repo = await prisma.repository.findUniqueOrThrow({ where: { id: repositoryId }, include: { connection: true } });
+    await prisma.user.update({
+      where: { id: repo.connection.userId },
+      data: { reviewSettings: { review: { blockOn: "minor", maxFindings: 5 } } },
+    });
+    const job = await claimedJob();
+    const { runDeps } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored.resolvedConfig).toMatchObject({
+      config: { review: { blockOn: "major", maxFindings: 5 } },
+      sources: { "review.blockOn": "repoSettings", "review.maxFindings": "global" },
+    });
+  });
+
+  it("ignores the repository settings while the repository follows the global config", async () => {
+    const repo = await prisma.repository.update({ where: { id: repositoryId }, data: { followGlobal: true }, include: { connection: true } });
+    await prisma.user.update({ where: { id: repo.connection.userId }, data: { reviewSettings: { review: { blockOn: "minor" } } } });
+    const job = await claimedJob();
+    const { runDeps } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored.resolvedConfig).toMatchObject({
+      config: { review: { blockOn: "minor" } },
+      sources: { "review.blockOn": "global" },
+    });
   });
 });
 

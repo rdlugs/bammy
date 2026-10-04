@@ -7,6 +7,16 @@ import type { z } from "zod";
 export const PROVIDERS = ["anthropic", "openai", "google"] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
 export type ApiKeys = Partial<Record<ProviderName, string>>;
+// A proxy every model call goes to instead of the providers' official APIs,
+// with the key to send it when the config picked one.
+export interface Endpoint {
+  baseUrl: string;
+  apiKey?: string;
+}
+
+// A proxy such as 9router may need no key, but the SDKs refuse to build a
+// client without one.
+const NO_KEY = "unused";
 
 export function providerOf(model: string): ProviderName {
   const provider = model.split("/")[0];
@@ -16,22 +26,30 @@ export function providerOf(model: string): ProviderName {
   return provider as ProviderName;
 }
 
-export function missingKeys(models: string[], keys: ApiKeys): ProviderName[] {
+// Behind an endpoint no provider is missing a key: the endpoint decides
+// whether it needs one.
+export function missingKeys(models: string[], keys: ApiKeys, endpoint?: Endpoint): ProviderName[] {
+  if (endpoint) return [];
   return [...new Set(models.map(providerOf))].filter((provider) => !keys[provider]);
 }
 
-function languageModel(model: string, keys: ApiKeys): LanguageModel {
+function languageModel(model: string, keys: ApiKeys, endpoint?: Endpoint): LanguageModel {
   const provider = providerOf(model);
   const modelId = model.slice(provider.length + 1);
-  const apiKey = keys[provider];
+  const baseURL = endpoint?.baseUrl;
+  const apiKey = endpoint ? (endpoint.apiKey ?? keys[provider] ?? NO_KEY) : keys[provider];
   if (!apiKey) throw new Error(`No API key for ${provider}`);
   switch (provider) {
     case "anthropic":
-      return createAnthropic({ apiKey })(modelId);
-    case "openai":
-      return createOpenAI({ apiKey })(modelId);
+      return createAnthropic({ apiKey, baseURL })(modelId);
+    case "openai": {
+      const openai = createOpenAI({ apiKey, baseURL });
+      // OpenAI-compatible proxies speak chat completions, not the Responses API
+      // the SDK defaults to.
+      return baseURL ? openai.chat(modelId) : openai(modelId);
+    }
     case "google":
-      return createGoogleGenerativeAI({ apiKey })(modelId);
+      return createGoogleGenerativeAI({ apiKey, baseURL })(modelId);
   }
 }
 
@@ -56,11 +74,11 @@ export interface GenerateResponse<T> {
 // The one seam between the engine and a model provider. Tests pass their own.
 export type Generate = <T>(request: GenerateRequest<T>) => Promise<GenerateResponse<T>>;
 
-export function createGenerate(keys: ApiKeys): Generate {
+export function createGenerate(keys: ApiKeys, endpoint?: Endpoint): Generate {
   return async <T>(request: GenerateRequest<T>): Promise<GenerateResponse<T>> => {
     const started = Date.now();
     const result = await generateText({
-      model: languageModel(request.model, keys),
+      model: languageModel(request.model, keys, endpoint),
       system: request.system,
       prompt: request.prompt,
       temperature: request.temperature,

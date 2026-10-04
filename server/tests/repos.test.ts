@@ -43,6 +43,77 @@ afterAll(async () => {
 });
 
 describe("GET /api/repos", () => {
+  it("lists only the added repositories, without asking the forge", async () => {
+    await prisma.repository.create({
+      data: {
+        connectionId,
+        provider: "gitlab",
+        host: "gitlab.com",
+        fullPath: "team/api",
+        externalId: "2",
+        defaultBranch: "main",
+        enabled: true,
+      },
+    });
+    // No routes: any forge request would throw.
+    vi.stubGlobal("fetch", fetchStub([]).fetch);
+
+    const res = await request(app).get(`/api/repos?connectionId=${connectionId}`).set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.repos).toEqual([
+      expect.objectContaining({
+        externalId: "2",
+        fullPath: "team/api",
+        enabled: true,
+        settings: {},
+        webUrl: "https://gitlab.com/team/api",
+      }),
+    ]);
+  });
+
+  it("404s for another user's connection", async () => {
+    const other = await createUser("other@example.com");
+    const res = await request(app).get(`/api/repos?connectionId=${connectionId}`).set("Cookie", other.cookie);
+    expect(res.status).toBe(404);
+  });
+  it("lists every connection's repositories when no connectionId is given", async () => {
+    const userId = (await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } })).userId;
+    const second = await prisma.forgeConnection.create({
+      data: { userId, provider: "gitlab", host: "gitlab.acme.com", kind: "token", accountLogin: "work", encryptedToken: encrypt("glpat") },
+    });
+    const other = await createUser("other@example.com");
+    const foreign = await prisma.forgeConnection.create({
+      data: { userId: other.user.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "x", encryptedToken: encrypt("glpat") },
+    });
+    const repo = (connection: string, fullPath: string, externalId: string) => ({
+      connectionId: connection,
+      provider: "gitlab" as const,
+      host: "gitlab.com",
+      fullPath,
+      externalId,
+      defaultBranch: "main",
+    });
+    await prisma.repository.createMany({
+      data: [repo(connectionId, "team/web", "1"), repo(second.id, "acme/api", "2"), repo(foreign.id, "other/secret", "3")],
+    });
+
+    const res = await request(app).get("/api/repos").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.repos).toEqual([
+      expect.objectContaining({
+        fullPath: "acme/api",
+        connectionId: second.id,
+        account: { login: "work", provider: "gitlab", host: "gitlab.acme.com" },
+        webUrl: "https://gitlab.acme.com/acme/api",
+      }),
+      expect.objectContaining({ fullPath: "team/web", connectionId, account: { login: "dev", provider: "gitlab", host: "gitlab.com" } }),
+    ]);
+  });
+});
+
+describe("GET /api/repos/available", () => {
   it("merges the forge's list with what is enabled", async () => {
     await prisma.repository.create({
       data: {
@@ -61,7 +132,7 @@ describe("GET /api/repos", () => {
         .fetch,
     );
 
-    const res = await request(app).get(`/api/repos?connectionId=${connectionId}`).set("Cookie", cookie);
+    const res = await request(app).get(`/api/repos/available?connectionId=${connectionId}`).set("Cookie", cookie);
 
     expect(res.status).toBe(200);
     expect(res.body.repos.map((r: { fullPath: string; enabled: boolean }) => [r.fullPath, r.enabled])).toEqual([
@@ -74,7 +145,7 @@ describe("GET /api/repos", () => {
   it("reports revoked credentials as a broken connection", async () => {
     vi.stubGlobal("fetch", fetchStub([{ url: /\/projects\?/, status: 401, body: { message: "401" } }]).fetch);
 
-    const res = await request(app).get(`/api/repos?connectionId=${connectionId}`).set("Cookie", cookie);
+    const res = await request(app).get(`/api/repos/available?connectionId=${connectionId}`).set("Cookie", cookie);
 
     expect(res.status).toBe(502);
     expect(res.body.message).toBe("GitLab rejected the stored credentials; reconnect the account");
@@ -82,7 +153,7 @@ describe("GET /api/repos", () => {
 
   it("404s for another user's connection", async () => {
     const other = await createUser("other@example.com");
-    const res = await request(app).get(`/api/repos?connectionId=${connectionId}`).set("Cookie", other.cookie);
+    const res = await request(app).get(`/api/repos/available?connectionId=${connectionId}`).set("Cookie", other.cookie);
     expect(res.status).toBe(404);
   });
 });
@@ -135,6 +206,26 @@ describe("POST /api/repos and PATCH /api/repos/:id", () => {
     expect(reset.body.repo.settings).toEqual({});
   });
 
+  it("toggles following the global config, keeping the saved settings", async () => {
+    const repo = await prisma.repository.create({
+      data: {
+        connectionId,
+        provider: "gitlab",
+        host: "gitlab.com",
+        fullPath: "team/web",
+        externalId: "1",
+        defaultBranch: "main",
+        settings: { profile: "strict" },
+      },
+    });
+    expect(repo.followGlobal).toBe(true);
+
+    const res = await request(app).patch(`/api/repos/${repo.id}`).set("Cookie", cookie).send({ followGlobal: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body.repo).toMatchObject({ followGlobal: false, settings: { profile: "strict" } });
+  });
+
   it("rejects invalid settings and an empty body", async () => {
     const repo = await prisma.repository.create({
       data: { connectionId, provider: "gitlab", host: "gitlab.com", fullPath: "team/web", externalId: "1", defaultBranch: "main" },
@@ -170,6 +261,44 @@ describe("POST /api/repos and PATCH /api/repos/:id", () => {
   });
 });
 
+describe("DELETE /api/repos/:id", () => {
+  it("removes the repository and its GitLab hook", async () => {
+    const repo = await prisma.repository.create({
+      data: {
+        connectionId,
+        provider: "gitlab",
+        host: "gitlab.com",
+        fullPath: "team/api",
+        externalId: "1",
+        defaultBranch: "main",
+        enabled: true,
+        webhookId: "314",
+        encryptedWebhookSecret: encrypt("secret"),
+      },
+    });
+    const stub = fetchStub([{ method: "DELETE", url: /\/api\/v4\/projects\/1\/hooks\/314$/, status: 204, body: "" }]);
+    vi.stubGlobal("fetch", stub.fetch);
+
+    const res = await request(app).delete(`/api/repos/${repo.id}`).set("Cookie", cookie);
+
+    expect(res.status).toBe(204);
+    expect(stub.calls.map((call) => call.method)).toEqual(["DELETE"]);
+    expect(await prisma.repository.findUnique({ where: { id: repo.id } })).toBeNull();
+  });
+
+  it("404s for another user's repository", async () => {
+    const repo = await prisma.repository.create({
+      data: { connectionId, provider: "gitlab", host: "gitlab.com", fullPath: "team/api", externalId: "1", defaultBranch: "main" },
+    });
+    const other = await createUser("other@example.com");
+
+    const res = await request(app).delete(`/api/repos/${repo.id}`).set("Cookie", other.cookie);
+
+    expect(res.status).toBe(404);
+    expect(await prisma.repository.findUnique({ where: { id: repo.id } })).not.toBeNull();
+  });
+});
+
 describe("GET /api/repos/:id/config", () => {
   it("resolves saved settings with the repository file from the default branch", async () => {
     const repo = await prisma.repository.create({
@@ -181,6 +310,7 @@ describe("GET /api/repos/:id/config", () => {
         externalId: "1",
         defaultBranch: "trunk",
         settings: { review: { maxFindings: 10 } },
+        followGlobal: false,
       },
     });
     const { fetch, calls } = fetchStub([
@@ -212,6 +342,90 @@ describe("GET /api/repos/:id/config", () => {
     const res = await request(app).get(`/api/repos/${repo.id}/config`).set("Cookie", other.cookie);
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/repos/:id/config with the global config", () => {
+  async function repoWithGlobal(followGlobal: boolean) {
+    const user = await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } });
+    await prisma.user.update({
+      where: { id: user.userId },
+      data: { reviewSettings: { profile: "security", review: { maxFindings: 5, minConfidence: 0.9 } } },
+    });
+    const repo = await prisma.repository.create({
+      data: {
+        connectionId,
+        provider: "gitlab",
+        host: "gitlab.com",
+        fullPath: "team/web",
+        externalId: "1",
+        defaultBranch: "main",
+        settings: { review: { maxFindings: 10 } },
+        followGlobal,
+      },
+    });
+    vi.stubGlobal("fetch", fetchStub([{ url: /\/repository\/files\/.+\/raw/, status: 404, body: "" }]).fetch);
+    return repo;
+  }
+
+  it("uses only the global config while the repository follows it", async () => {
+    const repo = await repoWithGlobal(true);
+
+    const res = await request(app).get(`/api/repos/${repo.id}/config`).set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.config.profile).toBe("security");
+    expect(res.body.config.review.maxFindings).toBe(5);
+    expect(res.body.sources).toMatchObject({ profile: "global", "review.maxFindings": "global" });
+  });
+
+  it("layers the repository settings over the global config when it does not", async () => {
+    const repo = await repoWithGlobal(false);
+
+    const res = await request(app).get(`/api/repos/${repo.id}/config`).set("Cookie", cookie);
+
+    expect(res.body.config.review.maxFindings).toBe(10);
+    expect(res.body.config.review.minConfidence).toBe(0.9);
+    expect(res.body.sources).toMatchObject({ "review.maxFindings": "repoSettings", "review.minConfidence": "global" });
+  });
+});
+
+describe("GET and PUT /api/config/global", () => {
+  it("starts empty, saves validated settings and resets with an empty object", async () => {
+    const initial = await request(app).get("/api/config/global").set("Cookie", cookie);
+    expect(initial.status).toBe(200);
+    expect(initial.body).toMatchObject({ settings: {}, warnings: [], sources: { profile: "default" } });
+
+    const saved = await request(app)
+      .put("/api/config/global")
+      .set("Cookie", cookie)
+      .send({ settings: { profile: "strict", llm: { model: "openai/gpt-5" } } });
+    expect(saved.status).toBe(200);
+    expect(saved.body.settings).toEqual({ profile: "strict", llm: { model: "openai/gpt-5" } });
+    expect(saved.body.config.review.blockOn).toBe("major");
+    expect(saved.body.sources).toMatchObject({ profile: "global", "llm.model": "global", "review.blockOn": "profile" });
+
+    const reset = await request(app).put("/api/config/global").set("Cookie", cookie).send({ settings: {} });
+    expect(reset.body.settings).toEqual({});
+  });
+
+  it("rejects invalid settings", async () => {
+    const res = await request(app)
+      .put("/api/config/global")
+      .set("Cookie", cookie)
+      .send({ settings: { llm: { apiBase: "https://evil" } } });
+
+    expect(res.status).toBe(400);
+    expect(res.body.errors.settings).toBeDefined();
+  });
+
+  it("keeps each user's global config separate", async () => {
+    await request(app).put("/api/config/global").set("Cookie", cookie).send({ settings: { profile: "fast" } });
+    const other = await createUser("other@example.com");
+
+    const res = await request(app).get("/api/config/global").set("Cookie", other.cookie);
+
+    expect(res.body.settings).toEqual({});
   });
 });
 

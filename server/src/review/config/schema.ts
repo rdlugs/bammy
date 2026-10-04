@@ -8,11 +8,15 @@ export type ProfileName = z.infer<typeof profileNameSchema>;
 // Field shapes are declared once, without defaults: the full schema validates a
 // merged config, and the override schema validates one layer of it. Defaults
 // live in DEFAULT_CONFIG so a layer never fills in fields it did not set.
-// There is deliberately no API key, endpoint or token here; a repository file
-// must never be able to point Bammy's credentials somewhere else.
+// There is deliberately no API key or token here. Endpoints exist only in the
+// dashboard layers (see dashboardOverrideSchema): a repository file must never
+// be able to point Bammy's credentials somewhere else.
+// The model id may itself contain slashes and parentheses, as router ids such
+// as "openai/cx/gpt-5.6-sol(medium)" do; the provider is what precedes the first slash.
 const modelString = z
   .string()
-  .regex(/^(anthropic|openai|google)\/[\w.:-]+$/, 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5');
+  .regex(/^(anthropic|openai|google)\/[\w.:()/-]+$/, 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5');
+
 
 const llmShape = {
   model: modelString,
@@ -21,6 +25,18 @@ const llmShape = {
   maxTokens: z.number().int().min(1000).max(64000),
   // Prompt token ceiling; null derives it from the model's context window.
   contextBudget: z.number().int().min(4000).nullable(),
+};
+
+// Settable only from the dashboard, never from a repository file or a trigger.
+const dashboardLlmShape = {
+  ...llmShape,
+  // One endpoint, such as a 9router proxy, for every model call; null means
+  // each provider's official API. The model's provider prefix still picks the
+  // wire format.
+  baseUrl: z.url({ protocol: /^https?$/, error: "Enter an http or https URL" }).max(500).nullable(),
+  // Which stored provider key is sent to baseUrl; null sends each model's own
+  // provider key. Names a key slot, never holds the key.
+  endpointKey: z.enum(["anthropic", "openai", "google"]).nullable(),
 };
 
 const reviewShape = {
@@ -65,7 +81,7 @@ const topLevelShape = {
 
 export const configSchema = z.strictObject({
   ...topLevelShape,
-  llm: z.strictObject(llmShape),
+  llm: z.strictObject(dashboardLlmShape),
   review: z.strictObject(reviewShape),
   output: z.strictObject(outputShape),
   triggers: z.strictObject(triggersShape),
@@ -83,6 +99,14 @@ export const configOverrideSchema = z
   .partial();
 export type ConfigOverride = z.infer<typeof configOverrideSchema>;
 
+// The global config and repository settings, saved by the repository owner in
+// the dashboard. Only these layers may set endpoints; the repository file and
+// triggers use configOverrideSchema, which rejects them as unknown settings.
+export const dashboardOverrideSchema = configOverrideSchema.extend({
+  llm: z.strictObject(dashboardLlmShape).partial().optional(),
+});
+export type DashboardOverride = z.infer<typeof dashboardOverrideSchema>;
+
 export const DEFAULT_CONFIG: Config = {
   version: 1,
   profile: "balanced",
@@ -92,6 +116,8 @@ export const DEFAULT_CONFIG: Config = {
     temperature: 0.2,
     maxTokens: 8000,
     contextBudget: null,
+    baseUrl: null,
+    endpointKey: null,
   },
   review: {
     categories: ["security", "bug", "performance", "logic", "reliability"],

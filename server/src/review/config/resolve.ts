@@ -3,16 +3,20 @@ import {
   DEFAULT_CONFIG,
   configOverrideSchema,
   configSchema,
+  dashboardOverrideSchema,
   type Config,
   type ConfigOverride,
+  type DashboardOverride,
   type ProfileName,
 } from "./schema.ts";
 
-export type LayerName = "default" | "profile" | "repoSettings" | "repoFile" | "trigger";
+export type LayerName = "default" | "profile" | "global" | "repoSettings" | "repoFile" | "trigger";
 
 export interface ConfigLayers {
+  // The owner's global config from the dashboard, validated on write.
+  global?: DashboardOverride;
   // Saved in the dashboard, validated on write.
-  repoSettings?: ConfigOverride;
+  repoSettings?: DashboardOverride;
   // `.bammy.yaml` from the base revision, already parsed.
   repoFile?: ConfigOverride;
   // A one-off override from whatever started the review.
@@ -57,17 +61,21 @@ function recordLeaves(value: unknown, layer: LayerName, sources: Record<string, 
   }
 }
 
-// Precedence, lowest first: defaults, profile preset, repository settings,
-// repository file, trigger. The profile itself is chosen by the highest layer
+// Precedence, lowest first: defaults, profile preset, global config,
+// repository settings, repository file, trigger. The profile itself is chosen by the highest layer
 // that names one.
 export function resolveConfig(layers: ConfigLayers): ResolvedConfig {
-  const ordered: [LayerName, ConfigOverride | undefined][] = [
+  const ordered: [LayerName, DashboardOverride | undefined][] = [
+    ["global", layers.global],
     ["repoSettings", layers.repoSettings],
     ["repoFile", layers.repoFile],
     ["trigger", layers.trigger],
   ];
-  for (const [, layer] of ordered) {
-    if (layer) configOverrideSchema.parse(layer);
+  // Only the dashboard layers may set endpoints.
+  for (const [name, layer] of ordered) {
+    if (!layer) continue;
+    if (name === "global" || name === "repoSettings") dashboardOverrideSchema.parse(layer);
+    else configOverrideSchema.parse(layer);
   }
 
   const naming = [...ordered].reverse().find(([, layer]) => layer?.profile);
@@ -77,7 +85,7 @@ export function resolveConfig(layers: ConfigLayers): ResolvedConfig {
   recordLeaves(DEFAULT_CONFIG, "default", sources);
   let merged = merge({}, DEFAULT_CONFIG);
 
-  const stack: [LayerName, ConfigOverride][] = [["profile", { ...PROFILES[profile], profile }]];
+  const stack: [LayerName, DashboardOverride][] = [["profile", { ...PROFILES[profile], profile }]];
   for (const [name, layer] of ordered) {
     if (layer) stack.push([name, layer]);
   }

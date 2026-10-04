@@ -56,7 +56,7 @@ The `worker` container runs review jobs: it fetches the PR/MR, resolves the revi
 | DELETE | `/api/connections/:id` | Removes a connection and its repositories |
 | GET    | `/api/repos?connectionId=` | Repositories the connection can see, with their enabled flag |
 | POST   | `/api/repos`         | `{ connectionId, externalId }`, enables a repository for review |
-| PATCH  | `/api/repos/:id`     | `{ enabled?, settings? }`; `settings` replaces the saved review overrides |
+| PATCH  | `/api/repos/:id`     | `{ enabled?, settings?, followGlobal? }`; `settings` replaces the saved review overrides, `followGlobal` makes the repository ignore them and use only the global config |
 | GET    | `/api/repos/:id/config` | The effective review config for the default branch, where each value came from, and any repository-file warnings |
 | POST   | `/api/reviews`       | `{ url }` of a pull or merge request on an enabled repository; queues a review of its current head |
 | GET    | `/api/reviews?repoId=&status=&cursor=&limit=` | The caller's reviews, newest first, with a summary but not the full result |
@@ -66,6 +66,8 @@ The `worker` container runs review jobs: it fetches the PR/MR, resolves the revi
 | POST   | `/api/webhooks/github` | GitHub App webhook (signed with `GITHUB_WEBHOOK_SECRET`) |
 | POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Bammy registers per repository (token checked per repository) |
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
+| GET    | `/api/config/global` | The caller's global review config, and what it resolves to with each value's source |
+| PUT    | `/api/config/global` | `{ settings }`, replaces the global review config; `{}` resets it |
 
 Register and login are rate limited (20 requests per 15 minutes per IP).
 
@@ -107,11 +109,23 @@ Settings resolve in this order, highest first:
 
 1. Overrides from whatever triggered the review
 2. `.bammy.yaml` (or `.bammy.yml`; the first found wins, they are not merged) in the repository, read from the PR's **base** revision so a change cannot loosen its own review
-3. Repository settings saved in the dashboard
-4. The selected profile: `balanced` (default), `fast`, `strict`, `security`
-5. Built-in defaults
+3. Repository settings saved in the dashboard (ignored while the repository follows the global config, which is the default for new repositories)
+4. The global config saved on the Configuration page, shared by all of a user's repositories
+5. The selected profile: `balanced` (default), `fast`, `strict`, `security`
+6. Built-in defaults
 
 A field set explicitly in any layer beats the profile. An invalid repository file is ignored as a whole and reported as a warning; the review still runs. The file cannot hold API keys, tokens or endpoints.
+
+### Custom endpoint (e.g. 9router)
+
+The LLM tab of the global config and of a repository's settings (never `.bammy.yaml` or a trigger) can send every model call to one compatible proxy instead of the providers' official APIs. A repository inherits the base URL and key choice unless it sets its own. The model's provider prefix still picks the request format (`openai/` uses chat completions), and the rest of the id is passed through as is, slashes and parentheses included.
+
+**API key** picks which key from Settings > API keys is sent to the endpoint; "Each model's provider key" sends the matching provider's key, or none. For 9router:
+
+1. Save the 9router key in Settings > API keys under OpenAI.
+2. In Configuration > LLM, set Model `openai/cx/gpt-5.6-sol(medium)`, Base URL `http://host.docker.internal:20128/v1`, and API key "OpenAI key".
+
+The worker runs in a container, where `localhost` is the container itself; `host.docker.internal` reaches a proxy running on the host.
 
 ```yaml
 # .bammy.yaml - every key is optional
