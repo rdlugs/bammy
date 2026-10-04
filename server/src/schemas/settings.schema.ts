@@ -25,7 +25,8 @@ export const changePasswordSchema = z
 export const apiKeyParamsSchema = z.object({ provider: z.enum(PROVIDERS) });
 
 export const saveApiKeySchema = z.object({
-  apiKey: z.string().trim().min(8, "That does not look like an API key").max(500),
+  apiKey: z.string().trim().max(500).optional(),
+  baseUrl: z.url({ protocol: /^https?$/, error: "Enter an http or https URL" }).max(500).optional(),
 });
 
 export const deleteAccountSchema = z.object({

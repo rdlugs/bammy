@@ -12,7 +12,14 @@ let repositoryId: string;
 
 beforeEach(async () => {
   await prisma.user.deleteMany();
-  const user = await prisma.user.create({ data: { name: "W", email: "w@example.com", passwordHash: "x" } });
+  const user = await prisma.user.create({
+    data: {
+      name: "W",
+      email: "w@example.com",
+      passwordHash: "x",
+      reviewSettings: { llm: { connection: "anthropic" } },
+    },
+  });
   const connection = await prisma.forgeConnection.create({
     data: { userId: user.id, provider: "github", host: "github.com", kind: "github_app", installationId: "1", accountLogin: "acme" },
   });
@@ -71,10 +78,13 @@ function deps(
     },
   } as unknown as Forge;
   const model = fakeModel(answers);
+  const connections = Object.fromEntries(
+    Object.entries(keys).map(([provider, apiKey]) => [provider, { apiKey }]),
+  );
   const runDeps: RunJobDeps = {
     adapterFor: () => forge,
     generateFor: () => model.generate,
-    apiKeysFor: async () => keys,
+    credentialsFor: async () => ({ keys, baseUrls: {}, connections }),
   };
   return { runDeps, reads, model, published };
 }
@@ -120,11 +130,11 @@ describe("runJob", () => {
     const job = await claimedJob();
     const { runDeps, model } = deps({}, {}, {} as never);
 
-    await expect(runJob(job, runDeps)).rejects.toThrow(/No API key for anthropic/);
+    await expect(runJob(job, runDeps)).rejects.toThrow(/selected anthropic LLM connection no longer exists/);
     expect(model.requests).toHaveLength(0);
   });
 
-  it("skips fallback models with no key, with a warning", async () => {
+  it("rejects a fallback that cannot use the selected official connection", async () => {
     const job = await claimedJob();
     await prisma.repository.update({
       where: { id: repositoryId },
@@ -132,12 +142,7 @@ describe("runJob", () => {
     });
     const { runDeps } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
 
-    await runJob(job, runDeps);
-
-    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
-    expect((stored.result as { warnings: string[] }).warnings).toEqual([
-      "Fallback model openai/gpt-5 skipped: no API key for its provider",
-    ]);
+    await expect(runJob(job, runDeps)).rejects.toThrow(/anthropic LLM connection.*cannot run model openai\/gpt-5/);
   });
 
   it("sends every model call to the endpoint with the chosen key", async () => {
@@ -145,7 +150,7 @@ describe("runJob", () => {
     const baseUrl = "http://host.docker.internal:20128/v1";
     await prisma.repository.update({
       where: { id: repositoryId },
-      data: { settings: { llm: { model: "openai/cx/gpt-5.6-sol(medium)", baseUrl, endpointKey: "openai" } } },
+      data: { settings: { llm: { model: "openai/cx/gpt-5.6-sol(medium)", connection: "openai" } } },
     });
     const keys = { anthropic: "k", openai: "router-key" };
     const { runDeps, model } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, keys);
@@ -154,23 +159,28 @@ describe("runJob", () => {
       generateFor.push(args);
       return model.generate;
     };
+    runDeps.credentialsFor = async () => ({
+      keys,
+      baseUrls: { openai: baseUrl },
+      connections: { anthropic: { apiKey: "k" }, openai: { apiKey: "router-key", baseUrl } },
+    });
 
     await runJob(job, runDeps);
 
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored.status).toBe("completed");
-    expect(generateFor).toEqual([[keys, { baseUrl, apiKey: "router-key" }]]);
+    expect(generateFor).toEqual([[keys, { baseUrl, apiKey: "router-key" }, { openai: baseUrl }]]);
   });
 
-  it("refuses to run when the chosen endpoint key is not stored", async () => {
+  it("refuses to run when the selected connection is not stored", async () => {
     const job = await claimedJob();
     await prisma.repository.update({
       where: { id: repositoryId },
-      data: { settings: { llm: { baseUrl: "http://router.test/v1", endpointKey: "google" } } },
+      data: { settings: { llm: { connection: "google" } } },
     });
     const { runDeps, model } = deps({}, {});
 
-    await expect(runJob(job, runDeps)).rejects.toThrow(/No API key for google/);
+    await expect(runJob(job, runDeps)).rejects.toThrow(/selected google LLM connection no longer exists/);
     expect(model.requests).toHaveLength(0);
   });
 
@@ -255,7 +265,7 @@ describe("runJob with the global config", () => {
     const repo = await prisma.repository.findUniqueOrThrow({ where: { id: repositoryId }, include: { connection: true } });
     await prisma.user.update({
       where: { id: repo.connection.userId },
-      data: { reviewSettings: { review: { blockOn: "minor", maxFindings: 5 } } },
+      data: { reviewSettings: { llm: { connection: "anthropic" }, review: { blockOn: "minor", maxFindings: 5 } } },
     });
     const job = await claimedJob();
     const { runDeps } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
@@ -271,7 +281,10 @@ describe("runJob with the global config", () => {
 
   it("ignores the repository settings while the repository follows the global config", async () => {
     const repo = await prisma.repository.update({ where: { id: repositoryId }, data: { followGlobal: true }, include: { connection: true } });
-    await prisma.user.update({ where: { id: repo.connection.userId }, data: { reviewSettings: { review: { blockOn: "minor" } } } });
+    await prisma.user.update({
+      where: { id: repo.connection.userId },
+      data: { reviewSettings: { llm: { connection: "anthropic" }, review: { blockOn: "minor" } } },
+    });
     const job = await claimedJob();
     const { runDeps } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
 

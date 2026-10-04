@@ -32,6 +32,9 @@ beforeEach(async () => {
     },
   });
   connectionId = connection.id;
+  await prisma.llmCredential.create({
+    data: { userId: created.user.id, provider: "openai", encryptedKey: encrypt("sk-openai-test") },
+  });
 });
 
 afterEach(() => {
@@ -391,7 +394,7 @@ describe("GET /api/repos/:id/config with the global config", () => {
 });
 
 describe("GET and PUT /api/config/global", () => {
-  it("starts empty, saves validated settings and resets with an empty object", async () => {
+  it("starts empty, saves validated settings and resets while keeping the connection", async () => {
     const initial = await request(app).get("/api/config/global").set("Cookie", cookie);
     expect(initial.status).toBe(200);
     expect(initial.body).toMatchObject({ settings: {}, warnings: [], sources: { profile: "default" } });
@@ -399,14 +402,20 @@ describe("GET and PUT /api/config/global", () => {
     const saved = await request(app)
       .put("/api/config/global")
       .set("Cookie", cookie)
-      .send({ settings: { profile: "strict", llm: { model: "openai/gpt-5" } } });
+      .send({ settings: { profile: "strict", llm: { model: "openai/gpt-5", connection: "openai" } } });
     expect(saved.status).toBe(200);
-    expect(saved.body.settings).toEqual({ profile: "strict", llm: { model: "openai/gpt-5" } });
+    expect(saved.body.settings).toEqual({
+      profile: "strict",
+      llm: { model: "openai/gpt-5", connection: "openai" },
+    });
     expect(saved.body.config.review.blockOn).toBe("major");
     expect(saved.body.sources).toMatchObject({ profile: "global", "llm.model": "global", "review.blockOn": "profile" });
 
-    const reset = await request(app).put("/api/config/global").set("Cookie", cookie).send({ settings: {} });
-    expect(reset.body.settings).toEqual({});
+    const reset = await request(app)
+      .put("/api/config/global")
+      .set("Cookie", cookie)
+      .send({ settings: { llm: { connection: "openai" } } });
+    expect(reset.body.settings).toEqual({ llm: { connection: "openai" } });
   });
 
   it("rejects invalid settings", async () => {
@@ -419,8 +428,29 @@ describe("GET and PUT /api/config/global", () => {
     expect(res.body.errors.settings).toBeDefined();
   });
 
+  it("requires a saved connection for global configuration", async () => {
+    const missing = await request(app)
+      .put("/api/config/global")
+      .set("Cookie", cookie)
+      .send({ settings: { profile: "fast" } });
+    expect(missing.status).toBe(400);
+    expect(missing.body.errors.connection).toEqual(["Select an LLM connection"]);
+
+    const unsaved = await request(app)
+      .put("/api/config/global")
+      .set("Cookie", cookie)
+      .send({ settings: { llm: { connection: "anthropic" } } });
+    expect(unsaved.status).toBe(400);
+    expect(unsaved.body.errors.connection).toEqual([
+      "Select a connection configured in Settings > API keys",
+    ]);
+  });
+
   it("keeps each user's global config separate", async () => {
-    await request(app).put("/api/config/global").set("Cookie", cookie).send({ settings: { profile: "fast" } });
+    await request(app)
+      .put("/api/config/global")
+      .set("Cookie", cookie)
+      .send({ settings: { profile: "fast", llm: { connection: "openai" } } });
     const other = await createUser("other@example.com");
 
     const res = await request(app).get("/api/config/global").set("Cookie", other.cookie);

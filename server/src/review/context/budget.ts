@@ -10,6 +10,7 @@ const CONTEXT_WINDOW: Record<string, number> = {
   anthropic: 200_000,
   openai: 200_000,
   google: 1_000_000,
+  ollama: 128_000,
 };
 
 // Very long prompts review worse than several focused ones, so a pass never

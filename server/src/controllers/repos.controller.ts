@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
 import { hostOrigin } from "../review/forge/types.ts";
 import { adapterForConnection, loadOwnedConnection, toHttpError } from "../services/forge.ts";
+import { requireStoredLlmConnection } from "../services/llm.ts";
 import { ensureWebhook, removeWebhook } from "../services/webhooks.ts";
 import {
   availableReposQuerySchema,
@@ -121,6 +122,13 @@ export async function updateRepo(req: Request, res: Response) {
   const { id } = repoIdParamSchema.parse(req.params);
   const { enabled, settings, followGlobal } = updateRepoSchema.parse(req.body);
   const existing = await loadOwnedRepo(req.userId!, id);
+
+  if (settings?.llm && "connection" in settings.llm) {
+    if (!settings.llm.connection) {
+      throw new HttpError(400, "Validation failed", { connection: ["Select an LLM connection"] });
+    }
+    await requireStoredLlmConnection(req.userId!, settings.llm.connection);
+  }
 
   const updated = await prisma.repository.update({ where: { id }, data: { enabled, settings, followGlobal } });
   let webhook;

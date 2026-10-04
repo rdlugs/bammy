@@ -5,6 +5,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import type { ForgeRepo } from "@/features/forge/api"
+import { useApiKeys } from "@/features/settings/api"
 import { useGlobalConfig, useRepoConfig, useSaveRepoSettings, useSetFollowGlobal } from "./api"
 import { ConfigFields } from "./ConfigFields"
 import type { ConfigTab } from "./tabs"
@@ -43,9 +44,14 @@ export function RepoConfigForm(props: { repo: ForgeRepo; tab: ConfigTab; onTabCh
   // the global config leaves unset; the Effective line after saving is exact.
   const global = useGlobalConfig()
   const save = useSaveRepoSettings()
+  const apiKeys = useApiKeys()
   const [form, setForm] = useState<FormState>(() => toForm(repo.settings))
   const dirty = isDirty(repo.settings, form)
-  const errors = validateForm(form)
+  const errors = validateForm(
+    form,
+    false,
+    apiKeys.data?.keys.filter((key) => key.stored).map((key) => key.provider),
+  )
   const valid = Object.keys(errors).length === 0
 
   async function onSave() {

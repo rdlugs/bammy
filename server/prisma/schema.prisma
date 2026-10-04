@@ -161,7 +161,8 @@ model LlmCredential {
   id           String   @id @default(uuid()) @db.Uuid
   userId       String   @map("user_id") @db.Uuid
   provider     String
-  encryptedKey String   @map("encrypted_key")
+  encryptedKey String?  @map("encrypted_key")
+  baseUrl      String?  @map("base_url")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 

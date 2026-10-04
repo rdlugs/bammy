@@ -1,8 +1,6 @@
 import type { ConfigOverride, ConfigSchema, EffectiveConfig } from "./api"
 
 export const INHERIT = "__inherit"
-// The endpoint key choice saved as null: send each model's own provider key.
-export const PROVIDER_KEYS = "__provider_keys"
 
 // Every boolean the form edits, keyed by where it lives in a config.
 export const FLAGS = [
@@ -50,7 +48,7 @@ export const AUTO = "auto"
 
 // Router ids such as "openai/cx/gpt-5.6-sol(medium)" keep slashes and
 // parentheses in the model part.
-export const MODEL_PATTERN = /^(anthropic|openai|google)\/[\w.:()/-]+$/
+export const MODEL_PATTERN = /^(anthropic|openai|google|ollama)\/[\w.:()/-]+$/
 export const MAX_FALLBACK_MODELS = 3
 const MAX_IGNORE_PATHS = 200
 const MAX_INSTRUCTIONS = 4000
@@ -66,10 +64,8 @@ export interface FormState {
   model: string
   // One model per row, in order; blank rows are not saved and no rows inherits.
   fallbackModels: string[]
-  // "" inherits (each provider's official API at the bottom).
-  baseUrl: string
-  // INHERIT, PROVIDER_KEYS or a provider whose stored key goes to baseUrl.
-  endpointKey: string
+  // INHERIT in a repository, otherwise a saved provider connection.
+  connection: string
   severityFloor: string
   blockOn: string
   // undefined inherits.
@@ -85,7 +81,7 @@ export interface FormState {
   flags: Record<FlagName, boolean | undefined>
 }
 
-export type FormErrors = Partial<Record<NumberName | "model" | "fallbackModels" | "baseUrl" | "categories" | "ignorePaths" | "instructions" | "languageInstructions", string>>
+export type FormErrors = Partial<Record<NumberName | "model" | "fallbackModels" | "connection" | "categories" | "ignorePaths" | "instructions" | "languageInstructions", string>>
 
 type Section = Record<string, unknown>
 
@@ -104,15 +100,6 @@ function parseNumber(spec: NumberSpec, text: string): number | null | undefined 
   if (!trimmed) return undefined
   if (spec.nullable && trimmed.toLowerCase() === AUTO) return null
   return Number(trimmed)
-}
-
-// Mirrors the server: http or https only.
-function isHttpUrl(text: string) {
-  try {
-    return ["http:", "https:"].includes(new URL(text).protocol)
-  } catch {
-    return false
-  }
 }
 
 function languageMap(rows: LanguageRow[]): Record<string, string> {
@@ -140,9 +127,9 @@ export function toForm(settings: ConfigOverride): FormState {
     profile: settings.profile ?? INHERIT,
     model: settings.llm?.model ?? "",
     fallbackModels: [...(settings.llm?.fallbackModels ?? [])],
-    baseUrl: settings.llm?.baseUrl ?? "",
-    endpointKey:
-      settings.llm?.endpointKey === undefined ? INHERIT : (settings.llm.endpointKey ?? PROVIDER_KEYS),
+    // endpointKey is the provider reference used by the legacy two-field UI.
+    // Reading it here converts that configuration on the next save.
+    connection: settings.llm?.connection ?? settings.llm?.endpointKey ?? INHERIT,
     severityFloor: settings.review?.severityFloor ?? INHERIT,
     blockOn: settings.review?.blockOn ?? INHERIT,
     categories: settings.review?.categories,
@@ -176,13 +163,14 @@ export function toSettings(base: ConfigOverride, form: FormState): ConfigOverrid
   setOrDelete(next, "languageInstructions", Object.keys(languages).length ? languages : undefined)
 
   const fallbackModels = modelList(form.fallbackModels)
-  const endpointKey = pick(form.endpointKey)
   const fields: Record<string, [string, unknown][]> = {
     llm: [
       ["model", form.model.trim() || undefined],
       ["fallbackModels", fallbackModels.length ? fallbackModels : undefined],
-      ["baseUrl", form.baseUrl.trim() || undefined],
-      ["endpointKey", endpointKey === PROVIDER_KEYS ? null : endpointKey],
+      ["connection", pick(form.connection)],
+      // New dashboard writes replace the old copied endpoint values.
+      ["baseUrl", undefined],
+      ["endpointKey", undefined],
     ],
     review: [
       ["severityFloor", pick(form.severityFloor)],
@@ -204,7 +192,7 @@ export function toSettings(base: ConfigOverride, form: FormState): ConfigOverrid
 }
 
 // Mirrors the server's bounds; a save is held back while anything is listed.
-export function validateForm(form: FormState): FormErrors {
+export function validateForm(form: FormState, connectionRequired = false, savedConnections?: string[]): FormErrors {
   const errors: FormErrors = {}
   for (const spec of NUMBERS) {
     const value = parseNumber(spec, form.numbers[spec.name])
@@ -227,7 +215,14 @@ export function validateForm(form: FormState): FormErrors {
   if (fallbackModels.length > MAX_FALLBACK_MODELS) errors.fallbackModels = `At most ${MAX_FALLBACK_MODELS} fallback models`
   else if (fallbackModels.some((model) => !MODEL_PATTERN.test(model))) errors.fallbackModels = modelHint
 
-  if (form.baseUrl.trim() && !isHttpUrl(form.baseUrl.trim())) errors.baseUrl = "Enter an http or https URL"
+  if (connectionRequired && form.connection === INHERIT) errors.connection = "Select an LLM connection"
+  else if (
+    form.connection !== INHERIT &&
+    savedConnections &&
+    !savedConnections.includes(form.connection)
+  ) {
+    errors.connection = "Select a connection configured in Settings > API keys"
+  }
 
   if (form.categories?.length === 0) errors.categories = "Choose at least one category"
   if (pathList(form.ignorePaths).length > MAX_IGNORE_PATHS) errors.ignorePaths = `At most ${MAX_IGNORE_PATHS} paths`

@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { useApiKeys } from "@/features/settings/api"
 import { useConfigSchema, useSaveGlobalConfig, type ConfigOverride, type GlobalConfig } from "./api"
 import { ConfigFields } from "./ConfigFields"
 import type { ConfigTab } from "./tabs"
@@ -26,13 +27,23 @@ export function GlobalConfigForm(props: {
   const { global } = props
   const save = useSaveGlobalConfig()
   const schema = useConfigSchema()
+  const apiKeys = useApiKeys()
   const [form, setForm] = useState<FormState>(() => toForm(global.settings))
   // Fields left unset show what the selected profile and the defaults give.
   const inherited = schema.data && baseConfig(schema.data, form.profile === INHERIT ? undefined : form.profile)
   const finish = (settings: ConfigOverride) => (schema.data ? withoutDefaults(settings, schema.data) : settings)
   const dirty = isDirty(global.settings, form, finish)
-  const errors = validateForm(form)
+  const errors = validateForm(
+    form,
+    true,
+    apiKeys.data?.keys.filter((key) => key.stored).map((key) => key.provider),
+  )
   const valid = Object.keys(errors).length === 0
+  const resetSettings: ConfigOverride =
+    form.connection === INHERIT
+      ? {}
+      : { llm: { connection: form.connection as "anthropic" | "openai" | "google" | "ollama" } }
+  const canReset = JSON.stringify(global.settings) !== JSON.stringify(resetSettings)
 
   async function submit(settings: GlobalConfig["settings"], message: string) {
     try {
@@ -77,8 +88,8 @@ export function GlobalConfigForm(props: {
           </Button>
           <Button
             variant="outline"
-            onClick={() => submit({}, "Global config reset")}
-            disabled={save.isPending || Object.keys(global.settings).length === 0}
+            onClick={() => submit(resetSettings, "Global config reset")}
+            disabled={save.isPending || form.connection === INHERIT || !canReset}
           >
             Reset to defaults
           </Button>

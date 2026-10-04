@@ -33,7 +33,11 @@ describe("createGenerate with an endpoint", () => {
     ]);
     vi.stubGlobal("fetch", fetch);
 
-    const generate = createGenerate({ openai: "sk-real" }, { baseUrl: "http://router.test/v1", apiKey: "router-key" });
+    const generate = createGenerate(
+      { openai: "sk-real" },
+      { baseUrl: "http://router.test/v1", apiKey: "router-key" },
+      { openai: "http://credential-host.test/v1" },
+    );
     const response = await generate(request("openai/cx/gpt-5.6-sol(medium)"));
 
     expect(response.object).toEqual({ ok: true });
@@ -51,6 +55,20 @@ describe("createGenerate with an endpoint", () => {
 
     expect(calls[0]!.url).toBe("http://router.test/v1/messages");
   });
+
+  it("uses an Ollama credential host through chat completions without a key", async () => {
+    const { fetch, calls } = fetchStub([
+      { method: "POST", url: /^http:\/\/ollama\.test\/v1\/chat\/completions$/, body: chatCompletion('{"ok":true}') },
+    ]);
+    vi.stubGlobal("fetch", fetch);
+
+    const generate = createGenerate({}, undefined, { ollama: "http://ollama.test/v1" });
+    const response = await generate(request("ollama/qwen3"));
+
+    expect(response.object).toEqual({ ok: true });
+    expect(calls[0]!.headers.authorization).toBe("Bearer unused");
+    expect(JSON.parse(calls[0]!.body!).model).toBe("qwen3");
+  });
 });
 
 describe("missingKeys", () => {
@@ -58,5 +76,6 @@ describe("missingKeys", () => {
     const models = ["openai/gpt-5", "anthropic/claude-sonnet-5-5"];
     expect(missingKeys(models, {}, { baseUrl: "http://router.test/v1" })).toEqual([]);
     expect(missingKeys(models, { openai: "k" })).toEqual(["anthropic"]);
+    expect(missingKeys(["ollama/qwen3"], {}, undefined, { ollama: "http://ollama.test/v1" })).toEqual([]);
   });
 });
