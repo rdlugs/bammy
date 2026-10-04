@@ -2,9 +2,13 @@ import { Navigate, Route, Routes } from "react-router"
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute"
 import { PublicOnlyRoute } from "@/features/auth/PublicOnlyRoute"
 import { DashboardLayout } from "@/layouts/DashboardLayout"
+import { ConnectionsPage } from "@/pages/ConnectionsPage"
 import { DashboardPage } from "@/pages/DashboardPage"
 import { LoginPage } from "@/pages/LoginPage"
 import { RegisterPage } from "@/pages/RegisterPage"
+import { RepositoriesPage } from "@/pages/RepositoriesPage"
+import { ReviewDetailPage } from "@/pages/ReviewDetailPage"
+import { ReviewsPage } from "@/pages/ReviewsPage"
 
 export function App() {
   return (
@@ -16,6 +20,10 @@ export function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<DashboardLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/reviews" element={<ReviewsPage />} />
+          <Route path="/reviews/:id" element={<ReviewDetailPage />} />
+          <Route path="/repositories" element={<RepositoriesPage />} />
+          <Route path="/connections" element={<ConnectionsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

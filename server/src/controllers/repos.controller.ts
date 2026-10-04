@@ -40,7 +40,7 @@ export async function listRepos(req: Request, res: Response) {
   res.json({
     repos: forgeRepos.map((repo) => {
       const saved = byExternalId.get(repo.externalId);
-      return { ...repo, id: saved?.id ?? null, enabled: saved?.enabled ?? false };
+      return { ...repo, id: saved?.id ?? null, enabled: saved?.enabled ?? false, settings: saved?.settings ?? {} };
     }),
   });
 }
