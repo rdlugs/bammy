@@ -91,6 +91,7 @@ function walkthroughSection(result: ReviewResult): string[] {
   const meta = [
     walkthrough.labels.length ? `Labels: ${walkthrough.labels.map((l) => `\`${inline(l)}\``).join(", ")}` : "",
     `Review effort: ${walkthrough.estimatedEffort}/5`,
+    walkthrough.blastRadius ? `Blast radius: ${walkthrough.blastRadius}` : "",
   ].filter(Boolean);
   lines.push("", meta.join(" · "));
   if (walkthrough.fileSummaries.length) {
@@ -168,7 +169,9 @@ function footer(result: ReviewResult): string {
 // The one markdown document for a review. The forge summary comment and the
 // dashboard's "copy markdown" are this function's output, byte for byte; it
 // depends only on the result, so re-rendering a stored review reproduces it.
-export function toMarkdown(result: ReviewResult): string {
+// The forge's summary comment leaves the walkthrough out (`walkthrough:
+// false`) when it is published on its own; see walkthroughMarkdown.
+export function toMarkdown(result: ReviewResult, options: { walkthrough?: boolean } = {}): string {
   const lines = [
     "## Bammy review",
     "",
@@ -176,8 +179,16 @@ export function toMarkdown(result: ReviewResult): string {
     "",
     countsLine(result),
   ];
-  const walkthrough = walkthroughSection(result);
+  const walkthrough = options.walkthrough === false ? [] : walkthroughSection(result);
   if (walkthrough.length) lines.push("", ...walkthrough);
   lines.push(...bucketSections(result), ...coverageSection(result), "", footer(result), "", SUMMARY_MARKER);
   return `${lines.join("\n")}\n`;
+}
+
+// The walkthrough on its own, for the PR/MR description or a comment of its
+// own. Empty when the review has none.
+export function walkthroughMarkdown(result: ReviewResult): string {
+  const section = walkthroughSection(result);
+  if (!section.length) return "";
+  return `${["## Bammy summary", ...section.slice(1)].join("\n")}\n`;
 }

@@ -3,7 +3,7 @@ import { prisma } from "../src/lib/prisma.ts";
 import type { InlineComment } from "../src/review/forge/types.ts";
 import type { Forge } from "../src/services/forge.ts";
 import { claimNext, enqueue } from "../src/worker/queue.ts";
-import { runJob, skipReason, type RunJobDeps } from "../src/worker/runJob.ts";
+import { runJob, skipReason, walkthroughEnabled, type RunJobDeps } from "../src/worker/runJob.ts";
 import { DEFAULT_CONFIG } from "../src/review/config/schema.ts";
 import { makeChangeSet } from "./helpers/changeSet.ts";
 import { WALKTHROUGH, fakeModel, modelFinding } from "./helpers/model.ts";
@@ -47,6 +47,8 @@ interface Published {
   inline: { fingerprint: string; startLine: number }[];
   summaries: string[];
   statuses: string[];
+  descriptions: string[];
+  labels: string[][];
 }
 
 function deps(
@@ -56,7 +58,7 @@ function deps(
   options: { failSummary?: boolean; onForge?: string[] } = {},
 ) {
   const reads: string[] = [];
-  const published: Published = { inline: [], summaries: [], statuses: [] };
+  const published: Published = { inline: [], summaries: [], statuses: [], descriptions: [], labels: [] };
   const forge = {
     getChange: async () => ({ ...makeChangeSet(), forgeRef: { ...makeChangeSet().forgeRef, headSha: "newhead" } }),
     getFileAtRef: async (_p: string, path: string, ref: string) => {
@@ -72,6 +74,16 @@ function deps(
       if (options.failSummary && !body.includes("Reviewing")) throw new Error("403 Forbidden");
       published.summaries.push(body);
       return "note-1";
+    },
+    upsertComment: async (_ref: unknown, _marker: string, body: string) => {
+      published.summaries.push(body);
+      return "note-2";
+    },
+    updateDescription: async (_ref: unknown, transform: (description: string) => string) => {
+      published.descriptions.push(transform(""));
+    },
+    setLabels: async (_ref: unknown, add: string[]) => {
+      published.labels.push(add);
     },
     setCommitStatus: async (_ref: unknown, status: { state: string }) => {
       published.statuses.push(status.state);
@@ -195,6 +207,10 @@ describe("runJob", () => {
     expect(published.summaries[1]).toContain("## Bammy review");
     expect(published.statuses).toEqual(["pending", "failure"]);
     expect(published.inline).toHaveLength(1);
+    // The description was empty, so the walkthrough went there.
+    expect(published.descriptions).toHaveLength(1);
+    expect(published.descriptions[0]).toContain("## Bammy summary");
+    expect(published.summaries[1]).not.toContain("### Walkthrough");
 
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored.publication).toMatchObject({ summaryCommentId: "note-1", statusState: "failure", errors: [] });
@@ -244,17 +260,32 @@ describe("runJob", () => {
     expect(published.statuses).toEqual(["pending", "success"]);
   });
 
+  it("adds the estimate labels when they are turned on", async () => {
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { output: { blastRadiusLabel: true, effortLabel: true } } },
+    });
+    const job = await claimedJob();
+    const { runDeps, published } = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    expect(published.labels).toEqual([["Small blast radius", "1-5 Minutes"]]);
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored.publication).toMatchObject({ labels: ["Small blast radius", "1-5 Minutes"], walkthroughLocation: "description" });
+  });
+
   it("publishes nothing when every output is turned off", async () => {
     await prisma.repository.update({
       where: { id: repositoryId },
-      data: { settings: { output: { postInline: false, postSummary: false, postCheck: false } } },
+      data: { settings: { output: { postInline: false, postSummary: false, postCheck: false, walkthrough: false } } },
     });
     const job = await claimedJob();
     const { runDeps, published } = deps({}, { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH });
 
     await runJob(job, runDeps);
 
-    expect(published).toEqual({ inline: [], summaries: [], statuses: [] });
+    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [] });
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored.publication).toBeNull();
   });
@@ -300,17 +331,52 @@ describe("runJob with the global config", () => {
 
 describe("skipReason", () => {
   const triggers = (t: Partial<typeof DEFAULT_CONFIG.triggers>) => ({ ...DEFAULT_CONFIG, triggers: { ...DEFAULT_CONFIG.triggers, ...t } });
+  const change = (c: Partial<ReturnType<typeof makeChangeSet>> = {}) => ({ ...makeChangeSet(), ...c });
+  const opened = { trigger: "webhook" as const, event: "open", actor: null };
+  const pushed = { trigger: "webhook" as const, event: "push", actor: null };
 
-  it("skips automatic reviews of drafts and of repositories that turned them off", () => {
-    expect(skipReason("webhook", DEFAULT_CONFIG, true)).toMatch(/Draft/);
-    expect(skipReason("webhook", triggers({ drafts: true }), true)).toBeNull();
-    expect(skipReason("webhook", triggers({ onPush: false }), false)).toMatch(/turned off/);
+  it("follows the code review trigger for automatic reviews", () => {
+    expect(skipReason(opened, DEFAULT_CONFIG, change({ isDraft: true }))).toMatch(/Draft/);
+    expect(skipReason(opened, DEFAULT_CONFIG, change())).toBeNull();
+    expect(skipReason(opened, triggers({ review: "all" }), change({ isDraft: true }))).toBeNull();
+    expect(skipReason(opened, triggers({ review: "manual" }), change())).toMatch(/turned off/);
+    expect(skipReason(pushed, triggers({ review: "manual" }), change())).toMatch(/turned off/);
+  });
+
+  it("reviews new commits only while review on push is on", () => {
+    expect(skipReason(pushed, DEFAULT_CONFIG, change())).toBeNull();
+    expect(skipReason(pushed, triggers({ reviewOnPush: false }), change())).toMatch(/New commits/);
+    expect(skipReason(opened, triggers({ reviewOnPush: false }), change())).toBeNull();
+  });
+
+  it("applies the skip lists to automatic reviews only", () => {
+    const skipAll = triggers({ ignoreTitles: ["wip"], skipAuthors: ["dependabot"] });
+    expect(skipReason(opened, skipAll, change({ title: "WIP: add b" }))).toMatch(/title contains "wip"/);
+    expect(skipReason(opened, skipAll, change({ author: "Dependabot" }))).toMatch(/Dependabot/);
+    expect(skipReason({ ...pushed, actor: "dependabot" }, skipAll, change({ author: "alice" }))).toMatch(/dependabot/);
+    expect(skipReason({ trigger: "manual" }, skipAll, change({ title: "WIP" }))).toBeNull();
+    expect(skipReason({ trigger: "comment" }, skipAll, change({ title: "WIP" }))).toBeNull();
   });
 
   it("honours the command switch and never skips a manual review", () => {
-    expect(skipReason("comment", triggers({ command: false }), false)).toMatch(/commands/);
-    expect(skipReason("comment", DEFAULT_CONFIG, true)).toBeNull();
-    expect(skipReason("manual", triggers({ onPush: false, command: false }), true)).toBeNull();
+    expect(skipReason({ trigger: "comment" }, triggers({ command: false }), change())).toMatch(/commands/);
+    expect(skipReason({ trigger: "comment" }, DEFAULT_CONFIG, change({ isDraft: true }))).toBeNull();
+    expect(skipReason({ trigger: "manual" }, triggers({ review: "manual", command: false }), change({ isDraft: true }))).toBeNull();
+  });
+});
+
+describe("walkthroughEnabled", () => {
+  const withTriggers = (summary: "manual" | "published") => ({
+    ...DEFAULT_CONFIG,
+    triggers: { ...DEFAULT_CONFIG.triggers, summary },
+  });
+
+  it("limits automatic summaries to published changes, or none when manual", () => {
+    expect(walkthroughEnabled("webhook", withTriggers("published"), false)).toBe(true);
+    expect(walkthroughEnabled("webhook", withTriggers("published"), true)).toBe(false);
+    expect(walkthroughEnabled("webhook", withTriggers("manual"), false)).toBe(false);
+    expect(walkthroughEnabled("manual", withTriggers("manual"), true)).toBe(true);
+    expect(walkthroughEnabled("comment", { ...DEFAULT_CONFIG, output: { ...DEFAULT_CONFIG.output, walkthrough: false } }, false)).toBe(false);
   });
 });
 
@@ -326,6 +392,6 @@ describe("runJob with automatic triggers", () => {
     expect(stored).toMatchObject({ status: "skipped", verdict: null, result: null });
     expect(stored.error).toMatch(/turned off/);
     expect(model.requests).toHaveLength(0);
-    expect(published).toEqual({ inline: [], summaries: [], statuses: [] });
+    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [] });
   });
 });

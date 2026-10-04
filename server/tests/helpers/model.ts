@@ -42,4 +42,5 @@ export const WALKTHROUGH = {
   fileSummaries: [{ path: "src/app.ts", summary: "Two new constants." }],
   labels: ["feature"],
   estimatedEffort: 1,
+  blastRadius: "small",
 };

@@ -121,6 +121,11 @@ model ReviewJob {
   headSha        String         @map("head_sha")
   baseSha        String?        @map("base_sha")
   trigger        ReviewTrigger
+  // For webhook jobs, whether the change was opened ("open") or received new
+  // commits ("push"); trigger settings treat the two differently.
+  event          String?
+  // Forge login of whoever opened, pushed or commented, for the author skip list.
+  actor          String?
   status         ReviewStatus   @default(queued)
   verdict        ReviewVerdict?
   resolvedConfig Json?          @map("resolved_config")

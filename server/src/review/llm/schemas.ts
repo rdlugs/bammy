@@ -38,5 +38,8 @@ export const walkthroughOutputSchema = z.object({
   fileSummaries: z.array(z.object({ path: z.string(), summary: z.string() })),
   labels: z.array(z.string()).describe("Up to five short labels, e.g. bugfix, refactor, feature"),
   estimatedEffort: z.number().describe("Review effort from 1 (trivial) to 5 (very involved)"),
+  blastRadius: z
+    .enum(["small", "medium", "large"])
+    .describe("How much of the system the change could break: small (local), medium (one feature or module), large (shared code, data, config or many callers)"),
 });
 export type WalkthroughOutput = z.infer<typeof walkthroughOutputSchema>;

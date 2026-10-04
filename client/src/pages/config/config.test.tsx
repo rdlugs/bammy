@@ -28,8 +28,28 @@ const effective = {
     fullFile: false,
     committableSuggestions: true,
   },
-  output: { walkthrough: true, postInline: true, postSummary: true, postCheck: true },
-  triggers: { onPush: true, drafts: false, command: true },
+  output: {
+    walkthrough: true,
+    postInline: true,
+    postSummary: true,
+    postCheck: true,
+    summaryLocation: "dynamic",
+    blastRadiusLabel: false,
+    effortLabel: false,
+  },
+  triggers: {
+    review: "published",
+    reviewOnPush: true,
+    summary: "published",
+    command: true,
+    ignoreTitles: [],
+    skipAuthors: [],
+    skipLabels: [],
+    skipSourceBranches: [],
+    skipTargetBranches: [],
+    onPush: true,
+    drafts: false,
+  },
   ignorePaths: ["**/*.lock"],
   instructions: "",
   languageInstructions: {},
@@ -70,6 +90,11 @@ async function chooseScope(name: string | RegExp) {
 
 async function openTab(name: string) {
   await userEvent.click(await screen.findByRole("tab", { name: new RegExp(`^${name}`) }))
+}
+
+async function selectConnectionOnLlmTab() {
+  await openTab("LLM Config")
+  await selectOpenAiConnection()
 }
 
 async function selectOpenAiConnection() {
@@ -244,6 +269,75 @@ describe("Configuration page", () => {
           review: { categories: ["security", "style"], maxFindings: 10 },
           ignorePaths: ["gen/**", "docs/**"],
           languageInstructions: { Go: "Wrap errors" },
+        },
+      }),
+    )
+  })
+
+  it("edits the trigger settings in the global config", async () => {
+    let body: unknown
+    mockApi(
+      globalRoutes({
+        "PUT /api/config/global": (init?: RequestInit) => {
+          body = JSON.parse(String(init?.body))
+          return jsonResponse(200, globalConfig((body as { settings: Record<string, unknown> }).settings))
+        },
+      }),
+    )
+    renderWithProviders(<App />, { route: "/configuration?tab=triggers" })
+
+    // The global config shows real values: the defaults until something is picked.
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Code review trigger" })).toHaveTextContent("Published PRs"),
+    )
+    expect(screen.getByRole("combobox", { name: "Comment location" })).toHaveTextContent("Dynamic location")
+    for (const name of ["Code reviews", "PR summary", "Skip rules"]) {
+      expect(screen.getByRole("group", { name })).toBeInTheDocument()
+    }
+    for (const name of [
+      "Review automatically on push",
+      "Publish blast radius label",
+      "Publish review time estimate label",
+      "Allow review command",
+    ]) {
+      expect(screen.getByRole("switch", { name })).toBeInTheDocument()
+    }
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Code review trigger" }))
+    await userEvent.click(screen.getByRole("option", { name: "Draft and published PRs" }))
+    await userEvent.click(screen.getByRole("combobox", { name: "PR summary trigger" }))
+    await userEvent.click(screen.getByRole("option", { name: "Manual only" }))
+    await userEvent.click(screen.getByRole("combobox", { name: "Comment location" }))
+    await userEvent.click(screen.getByRole("option", { name: "Standalone comment" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Review automatically on push" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Publish blast radius label" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Publish review time estimate label" }))
+    await userEvent.type(screen.getByLabelText("Ignore by title"), "WIP{enter}Draft,")
+    // "[[" types a literal bracket.
+    await userEvent.type(screen.getByLabelText("Skip by author"), "dependabot[[bot]{enter}")
+    await userEvent.type(screen.getByLabelText("Skip by label"), "no-review{enter}")
+    await userEvent.type(screen.getByLabelText("Skip by source branch"), "release/{enter}")
+    // Left in the box: it is added when the box loses focus.
+    await userEvent.type(screen.getByLabelText("Skip by target branch"), "legacy")
+    expect(screen.getByRole("button", { name: "Remove Draft" })).toBeInTheDocument()
+    await selectConnectionOnLlmTab()
+    await userEvent.click(screen.getByRole("button", { name: "Save global config" }))
+
+    await waitFor(() =>
+      expect(body).toEqual({
+        settings: {
+          llm: { connection: "openai" },
+          output: { summaryLocation: "comment", blastRadiusLabel: true, effortLabel: true },
+          triggers: {
+            review: "all",
+            reviewOnPush: false,
+            summary: "manual",
+            ignoreTitles: ["WIP", "Draft"],
+            skipAuthors: ["dependabot[bot]"],
+            skipLabels: ["no-review"],
+            skipSourceBranches: ["release/"],
+            skipTargetBranches: ["legacy"],
+          },
         },
       }),
     )

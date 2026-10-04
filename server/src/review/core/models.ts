@@ -63,6 +63,9 @@ export const changeSetSchema = z.object({
   baseRef: z.string().optional(),
   headRef: z.string().optional(),
   isDraft: z.boolean(),
+  // Login of whoever opened the change, and its labels, for the skip lists.
+  author: z.string().optional(),
+  labels: z.array(z.string()).optional(),
   files: z.array(changedFileSchema),
 });
 export type ChangeSet = z.infer<typeof changeSetSchema>;
@@ -147,6 +150,8 @@ export const walkthroughSchema = z.object({
   fileSummaries: z.array(z.object({ path: z.string(), summary: z.string() })),
   labels: z.array(z.string()),
   estimatedEffort: z.number().int().min(1).max(5),
+  // Optional: results stored before it existed have none.
+  blastRadius: z.enum(["small", "medium", "large"]).optional(),
 });
 export type Walkthrough = z.infer<typeof walkthroughSchema>;
 

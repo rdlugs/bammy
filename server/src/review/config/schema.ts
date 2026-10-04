@@ -60,20 +60,46 @@ const reviewShape = {
   committableSuggestions: z.boolean(),
 };
 
+export const SUMMARY_LOCATIONS = ["dynamic", "description", "comment"] as const;
+export const REVIEW_TRIGGERS = ["manual", "published", "all"] as const;
+export const SUMMARY_TRIGGERS = ["manual", "published"] as const;
+
 const outputShape = {
   walkthrough: z.boolean(),
   postInline: z.boolean(),
   postSummary: z.boolean(),
   postCheck: z.boolean(),
+  // Where the walkthrough goes: the PR/MR description, a comment of its own,
+  // or the description only when the author left it empty.
+  summaryLocation: z.enum(SUMMARY_LOCATIONS),
+  // Native labels from the walkthrough's estimates, e.g. "Large blast radius".
+  blastRadiusLabel: z.boolean(),
+  effortLabel: z.boolean(),
 };
 
+// Phrases, logins, labels and branch names; matching rules are in filters.ts.
+const skipList = z.array(z.string().trim().min(1).max(200)).max(50);
+
 const triggersShape = {
-  // Review automatically when a PR/MR is opened or receives new commits.
+  // Which changes are reviewed automatically when opened or marked ready:
+  // none, published only, or drafts too.
+  review: z.enum(REVIEW_TRIGGERS),
+  // Review again when an open PR/MR receives new commits.
+  reviewOnPush: z.boolean(),
+  // Legacy, from before `review` existed: onPush turned all automatic reviews
+  // on or off and drafts included drafts. Still accepted so older files and
+  // saved settings keep validating; resolve.ts maps them onto `review`.
   onPush: z.boolean(),
-  // Include draft PRs/MRs in automatic reviews.
   drafts: z.boolean(),
+  // Whether automatic reviews include the walkthrough. A requested review always may.
+  summary: z.enum(SUMMARY_TRIGGERS),
   // Allow "/bammy review" in a comment to request a review.
   command: z.boolean(),
+  ignoreTitles: skipList,
+  skipAuthors: skipList,
+  skipLabels: skipList,
+  skipSourceBranches: skipList,
+  skipTargetBranches: skipList,
 };
 
 const topLevelShape = {
@@ -141,11 +167,22 @@ export const DEFAULT_CONFIG: Config = {
     postInline: true,
     postSummary: true,
     postCheck: true,
+    summaryLocation: "dynamic",
+    blastRadiusLabel: false,
+    effortLabel: false,
   },
   triggers: {
+    review: "published",
+    reviewOnPush: true,
     onPush: true,
     drafts: false,
+    summary: "published",
     command: true,
+    ignoreTitles: [],
+    skipAuthors: [],
+    skipLabels: [],
+    skipSourceBranches: [],
+    skipTargetBranches: [],
   },
   ignorePaths: [
     "**/*.lock",

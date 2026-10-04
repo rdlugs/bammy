@@ -26,8 +26,28 @@ const schema: ConfigSchema = {
       fullFile: false,
       committableSuggestions: true,
     },
-    output: { walkthrough: true, postInline: true, postSummary: true, postCheck: true },
-    triggers: { onPush: true, drafts: false, command: true },
+    output: {
+      walkthrough: true,
+      postInline: true,
+      postSummary: true,
+      postCheck: true,
+      summaryLocation: "dynamic",
+      blastRadiusLabel: false,
+      effortLabel: false,
+    },
+    triggers: {
+      review: "published",
+      reviewOnPush: true,
+      summary: "published",
+      command: true,
+      ignoreTitles: [],
+      skipAuthors: [],
+      skipLabels: [],
+      skipSourceBranches: [],
+      skipTargetBranches: [],
+      onPush: true,
+      drafts: false,
+    },
     ignorePaths: ["**/*.lock"],
     instructions: "",
     languageInstructions: {},
@@ -44,10 +64,39 @@ describe("toSettings", () => {
       llm: { model: "openai/gpt-5" },
       review: { blockOn: "major", fullFile: true },
       output: { walkthrough: false, postCheck: true },
-      triggers: { drafts: true, command: false },
+      triggers: { review: "all" as const, reviewOnPush: false, command: false, skipLabels: ["no-review"] },
       instructions: "Keep it lean",
     }
     expect(toSettings(saved, toForm(saved))).toEqual(saved)
+  })
+
+  it("saves the trigger choices and skip lists", () => {
+    const form = toForm({})
+    expect(form.choices).toEqual({ review: INHERIT, summary: INHERIT, summaryLocation: INHERIT })
+    const next = {
+      ...form,
+      choices: { review: "manual", summary: "manual", summaryLocation: "comment" },
+      lists: { ...form.lists, ignoreTitles: [" WIP", "Do not review ", " "], skipAuthors: ["dependabot[bot]"] },
+    }
+    expect(toSettings({}, next)).toEqual({
+      output: { summaryLocation: "comment" },
+      triggers: {
+        review: "manual",
+        summary: "manual",
+        ignoreTitles: ["WIP", "Do not review"],
+        skipAuthors: ["dependabot[bot]"],
+      },
+    })
+    expect(toForm(toSettings({}, next)).lists.ignoreTitles).toEqual(["WIP", "Do not review"])
+  })
+
+  it("reads the legacy trigger keys into the code review trigger and drops them on save", () => {
+    expect(toForm({ triggers: { onPush: false } }).choices.review).toBe("manual")
+    expect(toForm({ triggers: { drafts: true } }).choices.review).toBe("all")
+    expect(toForm({ triggers: { onPush: false, review: "published" } }).choices.review).toBe("published")
+    const legacy = { triggers: { onPush: false, drafts: true, command: false } }
+    expect(toSettings(legacy, toForm(legacy))).toEqual({ triggers: { review: "manual", command: false } })
+    expect(isDirty(legacy, toForm(legacy))).toBe(false)
   })
 
   it("round-trips every other field, including an explicit auto context budget", () => {
@@ -117,7 +166,10 @@ describe("isDirty", () => {
 
   it("is dirty once a value changes or a flag goes back to inheriting", () => {
     const form = toForm(saved)
-    expect(isDirty(saved, { ...form, flags: { ...form.flags, drafts: true } })).toBe(true)
+    expect(isDirty(saved, { ...form, flags: { ...form.flags, reviewOnPush: false } })).toBe(true)
+    expect(isDirty(saved, { ...form, choices: { ...form.choices, review: "all" } })).toBe(true)
+    expect(isDirty(saved, { ...form, lists: { ...form.lists, skipLabels: [" "] } })).toBe(false)
+    expect(isDirty(saved, { ...form, lists: { ...form.lists, skipLabels: ["no-review"] } })).toBe(true)
     expect(isDirty(saved, { ...form, flags: { ...form.flags, walkthrough: undefined } })).toBe(true)
   })
 })
@@ -160,7 +212,7 @@ describe("withoutDefaults", () => {
   })
 
   it("drops the default profile and sections left empty", () => {
-    expect(withoutDefaults({ profile: "balanced", triggers: { drafts: false } }, schema)).toEqual({})
+    expect(withoutDefaults({ profile: "balanced", triggers: { review: "published", skipLabels: [] } }, schema)).toEqual({})
   })
 
   it("lets isDirty ignore picking a value the defaults already give", () => {
@@ -189,6 +241,11 @@ describe("validateForm", () => {
         { language: "Go", text: "a" },
         { language: "go", text: "b" },
       ],
+      lists: {
+        ...form.lists,
+        skipAuthors: Array.from({ length: 51 }, (_, i) => `bot${i}`),
+        skipLabels: ["x".repeat(201)],
+      },
     })
 
     expect(errors).toEqual({
@@ -199,6 +256,8 @@ describe("validateForm", () => {
       maxTokens: "Enter a whole number",
       contextBudget: 'Enter a whole number or "auto"',
       languageInstructions: "Each language can only be listed once",
+      skipAuthors: "At most 50 entries",
+      skipLabels: "At most 200 characters per entry",
     })
   })
 

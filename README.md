@@ -91,16 +91,22 @@ In production, self-hosted forge hosts must use https and resolve to public addr
 When a review starts, Bammy posts a "reviewing" summary comment and sets a pending `bammy/review` commit status. When it finishes it publishes, each step independently:
 
 - **Inline comments** for actionable findings only (GitHub: one review posted as `COMMENT`, never approve or request changes; GitLab: one discussion per finding). Suggestions use each forge's suggestion syntax. Each comment carries a hidden fingerprint, so a later run never posts the same finding twice, even if Bammy's own records are lost.
-- **The summary comment**, edited in place: exactly the markdown served by `GET /api/reviews/:id/markdown`.
+- **The summary comment**, edited in place: the markdown served by `GET /api/reviews/:id/markdown`, minus the walkthrough, which is published on its own.
+- **The PR summary** (the walkthrough), placed by `output.summary_location`: `description` keeps a marked block at the end of the PR/MR description (the author's text is left alone and a later run replaces only that block), `comment` posts and then edits a comment of its own, and `dynamic` (the default) uses the description only when the author left it empty.
+- **Labels**, when `output.blast_radius_label` or `output.effort_label` is on: the walkthrough's estimates as native labels such as `Large blast radius` or `10-20 Minutes`. A later run swaps a changed estimate's label. GitHub and GitLab only; on GitHub both labels and description edits use the Pull requests (write) permission.
 - **The commit status**: `success` (pass), `failure` (blocked) or `error` (incomplete; GitLab shows it as `failed`), linking to the review in the dashboard. Branch protection can require it.
 
-Turn each one off with `output.post_inline`, `output.post_summary` and `output.post_check`. If publishing fails, the review is kept and the job is marked partial with the reason.
+Turn the first three off with `output.post_inline`, `output.post_summary` and `output.post_check`, and the PR summary with `output.walkthrough`. If publishing fails, the review is kept and the job is marked partial with the reason.
 
 ## Automatic reviews
 
 - A PR/MR is reviewed when it opens, reopens, leaves draft or receives new commits. A commit that was already queued or reviewed is never reviewed again, so redelivered webhooks are harmless, and a newer push supersedes a review still waiting in the queue.
 - Comment `/bammy review` on a PR/MR to ask for a review of its current head. Only people who can push (GitHub owners, members and collaborators; GitLab Developer or above) can.
-- Drafts are skipped unless `triggers.drafts` is on; `triggers.on_push` and `triggers.command` turn the two triggers off. These are checked by the worker with the full configuration, so a skipped review shows in the dashboard with the reason.
+- `triggers.review` picks what is reviewed automatically when it opens, reopens or leaves draft: `manual` (nothing), `published` (the default, drafts skipped) or `all`. `triggers.review_on_push` decides whether new commits are reviewed again, and `triggers.command` turns `/bammy review` off.
+- `triggers.summary` limits the walkthrough in automatic reviews: `published` (the default) or `manual`, which leaves it to requested reviews.
+- Automatic reviews are skipped when the title contains a phrase in `triggers.ignore_titles` (ignoring case), the author or whoever pushed is in `triggers.skip_authors`, the change carries a label in `triggers.skip_labels` (exact and case-sensitive), or the source or target branch name contains an entry of `triggers.skip_source_branches` / `triggers.skip_target_branches`. A manual review or `/bammy review` is never skipped by these lists.
+- All of this is checked by the worker with the full configuration, so a skipped review shows in the dashboard with the reason.
+- Older settings keep their meaning: `triggers.on_push: false` reads as `review: manual` and `triggers.drafts: true` as `review: all`, unless the same layer sets `review`.
 - Each user has at most `WORKER_USER_CONCURRENCY` reviews running at once, and a repository holds at most 10 queued.
 
 ## Review configuration
@@ -153,10 +159,19 @@ output:
   post_inline: true
   post_summary: true
   post_check: true
+  summary_location: dynamic # dynamic | description | comment
+  blast_radius_label: false # e.g. "Large blast radius"
+  effort_label: false       # e.g. "10-20 Minutes"
 triggers:
-  on_push: true             # review automatically when a PR/MR opens or gets new commits
-  drafts: false             # include drafts in automatic reviews
+  review: published         # manual | published | all (drafts too)
+  review_on_push: true      # review new commits pushed to an open PR/MR
+  summary: published        # manual | published: walkthrough in automatic reviews
   command: true             # allow "/bammy review" in a comment
+  ignore_titles: ["WIP"]    # title contains, ignoring case
+  skip_authors: ["dependabot[bot]"]
+  skip_labels: ["no-review"]          # exact, case-sensitive
+  skip_source_branches: ["release/"]  # branch name contains
+  skip_target_branches: []
 ignore_paths: ["**/*.lock", "**/dist/**"]   # replaces the default list
 instructions: "Controllers stay thin; business logic lives in services."
 language_instructions:

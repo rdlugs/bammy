@@ -10,7 +10,7 @@
 
 Adds b and c.
 
-Labels: `feature` · Review effort: 1/5
+Labels: `feature` · Review effort: 1/5 · Blast radius: small
 
 <details>
 <summary>Changes (1 file)</summary>

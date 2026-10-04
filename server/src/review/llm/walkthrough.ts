@@ -50,6 +50,7 @@ export async function generateWalkthrough(
       fileSummaries: output.fileSummaries.filter((entry) => known.has(entry.path)),
       labels: output.labels.map((label) => label.trim()).filter(Boolean).slice(0, 5),
       estimatedEffort: Math.min(5, Math.max(1, Math.round(output.estimatedEffort))),
+      blastRadius: output.blastRadius,
     },
     usage: {
       purpose: "walkthrough",

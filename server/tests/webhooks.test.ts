@@ -95,6 +95,7 @@ const prEvent = (action: string, sha = "sha1") => ({
   installation: { id: 55 },
   repository: { id: 900 },
   pull_request: { number: 42, head: { sha } },
+  sender: { login: "alice" },
 });
 
 beforeEach(async () => {
@@ -146,6 +147,28 @@ describe("POST /api/webhooks/github", () => {
 
     expect((await sendGithub("pull_request", prEvent("synchronize"))).body.outcome).toBe("duplicate");
     expect((await sendGithub("pull_request", prEvent("synchronize", "sha2"))).body.outcome).toBe("queued");
+  });
+
+  it("records whether the change opened or received commits, and who did it", async () => {
+    await githubRepo();
+    await sendGithub("pull_request", prEvent("opened"));
+    await sendGithub("pull_request", prEvent("synchronize", "sha2"));
+
+    const jobs = await prisma.reviewJob.findMany({ orderBy: { createdAt: "asc" }, select: { event: true, actor: true } });
+    expect(jobs).toEqual([
+      { event: "open", actor: "alice" },
+      { event: "push", actor: "alice" },
+    ]);
+  });
+
+  it("reviews a draft's head again once it is marked ready for review", async () => {
+    const repo = await githubRepo();
+    await prisma.reviewJob.create({
+      data: { repositoryId: repo.id, number: 42, headSha: "sha1", trigger: "webhook", status: "skipped" },
+    });
+
+    const res = await sendGithub("pull_request", prEvent("ready_for_review"));
+    expect(res.body.outcome).toBe("queued");
   });
 
   it("ignores repositories that are not enabled and events it does not handle", async () => {
@@ -293,6 +316,30 @@ describe("POST /api/webhooks/gitlab/:repoId", () => {
         .outcome,
     ).toBe("queued");
     expect(await prisma.reviewJob.count({ where: { status: { not: "superseded" } } })).toBe(1);
+  });
+
+  it("records the event and actor, and treats leaving draft as opening", async () => {
+    const repo = await gitlabRepo();
+    const user = { id: 5, username: "bob" };
+
+    await sendGitlab(repo.id, "Merge Request Hook", { ...mrEvent("open"), user });
+    await sendGitlab(repo.id, "Merge Request Hook", {
+      ...mrEvent("update", { oldrev: "x", last_commit: { id: "next" } }),
+      user,
+    });
+    const ready = await sendGitlab(repo.id, "Merge Request Hook", {
+      ...mrEvent("update", { last_commit: { id: "ready" } }),
+      user,
+      changes: { draft: { previous: true, current: false } },
+    });
+    expect(ready.body.outcome).toBe("queued");
+
+    const jobs = await prisma.reviewJob.findMany({ orderBy: { createdAt: "asc" }, select: { event: true, actor: true } });
+    expect(jobs).toEqual([
+      { event: "open", actor: "bob" },
+      { event: "push", actor: "bob" },
+      { event: "open", actor: "bob" },
+    ]);
   });
 
   const noteEvent = { object_kind: "note", user: { id: 5 }, object_attributes: { noteable_type: "MergeRequest", note: "/bammy review" }, merge_request: { iid: 7, last_commit: { id: "glsha" } } };

@@ -11,13 +11,30 @@ export const FLAGS = [
   { name: "postInline", section: "output" },
   { name: "postSummary", section: "output" },
   { name: "postCheck", section: "output" },
-  { name: "onPush", section: "triggers" },
-  { name: "drafts", section: "triggers" },
+  { name: "blastRadiusLabel", section: "output" },
+  { name: "effortLabel", section: "output" },
+  { name: "reviewOnPush", section: "triggers" },
   { name: "command", section: "triggers" },
 ] as const
 
 export type FlagName = (typeof FLAGS)[number]["name"]
 export type FlagSection = (typeof FLAGS)[number]["section"]
+
+// Every select the form edits besides the profile, connection and severities.
+export const CHOICES = [
+  { name: "review", section: "triggers" },
+  { name: "summary", section: "triggers" },
+  { name: "summaryLocation", section: "output" },
+] as const
+
+export type ChoiceName = (typeof CHOICES)[number]["name"]
+
+// The skip lists, edited as tags.
+export const LISTS = ["ignoreTitles", "skipAuthors", "skipLabels", "skipSourceBranches", "skipTargetBranches"] as const
+export type ListName = (typeof LISTS)[number]
+// Mirror server/src/review/config/schema.ts.
+const MAX_LIST_ENTRIES = 50
+const MAX_LIST_ENTRY = 200
 
 export type NumberName = "temperature" | "maxTokens" | "contextBudget" | "maxFindings" | "maxChunks" | "minConfidence"
 
@@ -79,9 +96,26 @@ export interface FormState {
   languageInstructions: LanguageRow[]
   // undefined inherits the value from the layers below.
   flags: Record<FlagName, boolean | undefined>
+  // INHERIT inherits.
+  choices: Record<ChoiceName, string>
+  // Empty inherits.
+  lists: Record<ListName, string[]>
 }
 
-export type FormErrors = Partial<Record<NumberName | "model" | "fallbackModels" | "connection" | "categories" | "ignorePaths" | "instructions" | "languageInstructions", string>>
+export type FormErrors = Partial<
+  Record<
+    | NumberName
+    | ListName
+    | "model"
+    | "fallbackModels"
+    | "connection"
+    | "categories"
+    | "ignorePaths"
+    | "instructions"
+    | "languageInstructions",
+    string
+  >
+>
 
 type Section = Record<string, unknown>
 
@@ -94,6 +128,16 @@ function lines(text: string, separators: RegExp) {
 
 const modelList = (rows: string[]) => rows.map((model) => model.trim()).filter(Boolean)
 const pathList = (text: string) => lines(text, /\n/)
+const tagList = (tags: string[]) => tags.map((tag) => tag.trim()).filter(Boolean)
+
+// Settings saved before `triggers.review` existed say the same thing through
+// the legacy keys; server/src/review/config/resolve.ts maps them the same way.
+function legacyReview(triggers: ConfigOverride["triggers"]): string | undefined {
+  if (triggers?.review) return triggers.review
+  if (triggers?.onPush === false) return "manual"
+  if (triggers?.drafts === true) return "all"
+  return undefined
+}
 
 function parseNumber(spec: NumberSpec, text: string): number | null | undefined {
   const trimmed = text.trim()
@@ -123,6 +167,13 @@ export function toForm(settings: ConfigOverride): FormState {
     const value = (settings[section] as Section | undefined)?.[name]
     numbers[name] = value === null ? AUTO : typeof value === "number" ? String(value) : ""
   }
+  const choices = {} as FormState["choices"]
+  for (const { name, section } of CHOICES) {
+    const value = name === "review" ? legacyReview(settings.triggers) : (settings[section] as Section | undefined)?.[name]
+    choices[name] = typeof value === "string" ? value : INHERIT
+  }
+  const lists = {} as FormState["lists"]
+  for (const name of LISTS) lists[name] = [...(settings.triggers?.[name] ?? [])]
   return {
     profile: settings.profile ?? INHERIT,
     model: settings.llm?.model ?? "",
@@ -134,6 +185,8 @@ export function toForm(settings: ConfigOverride): FormState {
     blockOn: settings.review?.blockOn ?? INHERIT,
     categories: settings.review?.categories,
     numbers,
+    choices,
+    lists,
     ignorePaths: (settings.ignorePaths ?? []).join("\n"),
     instructions: settings.instructions ?? "",
     languageInstructions: Object.entries(settings.languageInstructions ?? {}).map(([language, text]) => ({
@@ -178,9 +231,18 @@ export function toSettings(base: ConfigOverride, form: FormState): ConfigOverrid
       ["categories", form.categories],
     ],
     output: [],
-    triggers: [],
+    triggers: [
+      // Replaced by `review`, which the form reads them into.
+      ["onPush", undefined],
+      ["drafts", undefined],
+    ],
   }
   for (const { name, section } of FLAGS) fields[section].push([name, form.flags[name]])
+  for (const { name, section } of CHOICES) fields[section].push([name, pick(form.choices[name])])
+  for (const name of LISTS) {
+    const entries = tagList(form.lists[name])
+    fields.triggers.push([name, entries.length ? entries : undefined])
+  }
   for (const spec of NUMBERS) fields[spec.section].push([spec.name, parseNumber(spec, form.numbers[spec.name])])
 
   for (const [name, entries] of Object.entries(fields)) {
@@ -222,6 +284,12 @@ export function validateForm(form: FormState, connectionRequired = false, savedC
     !savedConnections.includes(form.connection)
   ) {
     errors.connection = "Select a connection configured in Settings > API keys"
+  }
+
+  for (const name of LISTS) {
+    const entries = tagList(form.lists[name])
+    if (entries.length > MAX_LIST_ENTRIES) errors[name] = `At most ${MAX_LIST_ENTRIES} entries`
+    else if (entries.some((entry) => entry.length > MAX_LIST_ENTRY)) errors[name] = `At most ${MAX_LIST_ENTRY} characters per entry`
   }
 
   if (form.categories?.length === 0) errors.categories = "Choose at least one category"

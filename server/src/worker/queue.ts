@@ -6,6 +6,8 @@ export interface EnqueueInput {
   number: number;
   headSha: string;
   trigger: ReviewTrigger;
+  event?: "open" | "push";
+  actor?: string;
 }
 
 // A newer push makes any still-queued review of the same PR pointless, so it is
@@ -55,7 +57,9 @@ export async function enqueueFromWebhook(input: EnqueueInput): Promise<WebhookEn
       repositoryId: input.repositoryId,
       number: input.number,
       headSha: input.headSha,
-      status: { not: "superseded" },
+      // A skipped job does not count: a draft marked ready for review keeps its
+      // head, and must still be reviewed.
+      status: { notIn: ["superseded", "skipped"] },
     },
     select: { id: true },
   });

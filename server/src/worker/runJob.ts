@@ -1,6 +1,7 @@
 import { env } from "../config/env.ts";
 import type { ForgeConnection, ReviewJob } from "../generated/prisma/client.ts";
 import { prisma } from "../lib/prisma.ts";
+import { skipFilterReason } from "../review/config/filters.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
 import type { Config } from "../review/config/schema.ts";
 import {
@@ -36,16 +37,31 @@ const defaultDeps: RunJobDeps = {
 
 // Decided here rather than in the webhook handler, because only now is the
 // full configuration known, including the repository file. A manual review is
-// never skipped; someone asked for it.
-export function skipReason(trigger: ReviewJob["trigger"], config: Config, isDraft: boolean): string | null {
-  if (trigger === "webhook") {
-    if (!config.triggers.onPush) return "Automatic reviews are turned off for this repository";
-    if (isDraft && !config.triggers.drafts) return "Draft changes are not reviewed automatically";
+// never skipped; someone asked for it, and so did a permitted review command.
+export function skipReason(
+  job: { trigger: ReviewJob["trigger"]; event?: string | null; actor?: string | null },
+  config: Config,
+  change: Parameters<typeof skipFilterReason>[1] & { isDraft: boolean },
+): string | null {
+  const { triggers } = config;
+  if (job.trigger === "webhook") {
+    if (triggers.review === "manual") return "Automatic reviews are turned off for this repository";
+    if (change.isDraft && triggers.review !== "all") return "Draft changes are not reviewed automatically";
+    if (job.event === "push" && !triggers.reviewOnPush) return "New commits are not reviewed automatically";
+    return skipFilterReason(triggers, change, job.actor);
   }
-  if (trigger === "comment" && !config.triggers.command) {
+  if (job.trigger === "comment" && !triggers.command) {
     return "Review commands are turned off for this repository";
   }
   return null;
+}
+
+// Automatic reviews include the walkthrough only when the summary trigger
+// allows it; a requested review follows the walkthrough setting alone.
+export function walkthroughEnabled(trigger: ReviewJob["trigger"], config: Config, isDraft: boolean): boolean {
+  if (!config.output.walkthrough) return false;
+  if (trigger !== "webhook") return true;
+  return config.triggers.summary === "published" && !isDraft;
 }
 
 function message(err: unknown): string {
@@ -80,7 +96,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   });
 
   const { config } = loaded;
-  const skip = skipReason(job.trigger, config, changeSet.isDraft);
+  const skip = skipReason(job, config, changeSet);
   if (skip) {
     await complete(job.id, {
       status: "skipped",
@@ -149,8 +165,17 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     }
   }
 
+  const walkthrough = walkthroughEnabled(job.trigger, config, changeSet.isDraft);
   const result = await runReview(
-    { changeSet, config: { ...config, llm: { ...config.llm, fallbackModels } }, warnings },
+    {
+      changeSet,
+      config: {
+        ...config,
+        llm: { ...config.llm, fallbackModels },
+        output: { ...config.output, walkthrough },
+      },
+      warnings,
+    },
     { generate: deps.generateFor(keys, endpoint, baseUrls) },
   );
 
