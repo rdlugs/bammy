@@ -9,6 +9,8 @@ export interface FormState {
   blockOn: string
   walkthrough: string
   postInline: string
+  onPush: string
+  drafts: string
   instructions: string
 }
 
@@ -21,6 +23,8 @@ export function toForm(settings: ConfigOverride): FormState {
     blockOn: settings.review?.blockOn ?? INHERIT,
     walkthrough: flag(settings.output?.walkthrough),
     postInline: flag(settings.output?.postInline),
+    onPush: flag(settings.triggers?.onPush),
+    drafts: flag(settings.triggers?.drafts),
     instructions: settings.instructions ?? "",
   }
 }
@@ -45,6 +49,7 @@ export function toSettings(base: ConfigOverride, form: FormState): ConfigOverrid
     ["llm", [["model", form.model.trim() || undefined]]],
     ["review", [["severityFloor", pick(form.severityFloor)], ["blockOn", pick(form.blockOn)]]],
     ["output", [["walkthrough", flag(form.walkthrough)], ["postInline", flag(form.postInline)]]],
+    ["triggers", [["onPush", flag(form.onPush)], ["drafts", flag(form.drafts)]]],
   ]
   for (const [name, fields] of sections) {
     const section: Section = { ...((next[name] as Section | undefined) ?? {}) }

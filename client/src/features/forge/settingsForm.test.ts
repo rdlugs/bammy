@@ -8,6 +8,7 @@ describe("toSettings", () => {
       llm: { model: "openai/gpt-5" },
       review: { blockOn: "major" },
       output: { walkthrough: false },
+      triggers: { drafts: true },
       instructions: "Keep it lean",
     }
     expect(toSettings(saved, toForm(saved))).toEqual(saved)

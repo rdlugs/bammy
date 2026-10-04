@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "../src/lib/prisma.ts";
-import { claimNext, complete, enqueue, fail, recoverStale } from "../src/worker/queue.ts";
+import { claimNext, complete, enqueue, enqueueFromWebhook, fail, recoverStale } from "../src/worker/queue.ts";
 
 let repositoryId: string;
 
@@ -153,5 +153,44 @@ describe("recoverStale", () => {
     await claimNext();
 
     expect(await recoverStale(15 * 60 * 1000, 3)).toBe(0);
+  });
+});
+
+describe("per-user concurrency", () => {
+  it("skips a user at their running limit and serves the next user", async () => {
+    const other = await prisma.user.create({ data: { name: "O", email: "o@example.com", passwordHash: "x" } });
+    const conn = await prisma.forgeConnection.create({
+      data: { userId: other.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "o" },
+    });
+    const otherRepo = await prisma.repository.create({
+      data: { connectionId: conn.id, provider: "gitlab", host: "gitlab.com", fullPath: "o/r", externalId: "2", defaultBranch: "main" },
+    });
+    await job("a", 1);
+    await job("b", 2);
+    const theirs = await enqueue({ repositoryId: otherRepo.id, number: 1, headSha: "c", trigger: "manual" });
+
+    expect((await claimNext(1))?.number).toBe(1);
+    // The first user is at their limit of one, so their second job waits.
+    expect((await claimNext(1))?.id).toBe(theirs.id);
+    expect(await claimNext(1)).toBeNull();
+  });
+});
+
+describe("enqueueFromWebhook", () => {
+  it("refuses a head it has seen in any state but superseded", async () => {
+    const done = await job("aaa");
+    await prisma.reviewJob.update({ where: { id: done.id }, data: { status: "failed" } });
+    expect(await enqueueFromWebhook({ repositoryId, number: 7, headSha: "aaa", trigger: "webhook" })).toEqual({
+      queued: false,
+      reason: "duplicate",
+    });
+  });
+
+  it("stops queueing once a repository's queue is full", async () => {
+    for (let n = 1; n <= 10; n++) await job(`s${n}`, n);
+    expect(await enqueueFromWebhook({ repositoryId, number: 99, headSha: "z", trigger: "webhook" })).toEqual({
+      queued: false,
+      reason: "queue_full",
+    });
   });
 });

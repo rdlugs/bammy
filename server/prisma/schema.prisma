@@ -52,6 +52,8 @@ enum ReviewStatus {
   partial
   failed
   superseded
+  // The trigger did not call for a review (auto-review off, a draft).
+  skipped
 
   @@map("review_status")
 }
@@ -84,17 +86,20 @@ model ForgeConnection {
 }
 
 model Repository {
-  id            String        @id @default(uuid()) @db.Uuid
-  connectionId  String        @map("connection_id") @db.Uuid
-  provider      ForgeProvider
-  host          String
-  fullPath      String        @map("full_path")
-  externalId    String        @map("external_id")
-  defaultBranch String        @map("default_branch")
-  enabled       Boolean       @default(false)
-  settings      Json          @default("{}")
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  id                     String        @id @default(uuid()) @db.Uuid
+  connectionId           String        @map("connection_id") @db.Uuid
+  provider               ForgeProvider
+  host                   String
+  fullPath               String        @map("full_path")
+  externalId             String        @map("external_id")
+  defaultBranch          String        @map("default_branch")
+  enabled                Boolean       @default(false)
+  settings               Json          @default("{}")
+  // GitLab project hook Bammy registered, and the secret GitLab sends with it.
+  webhookId              String?       @map("webhook_id")
+  encryptedWebhookSecret String?       @map("encrypted_webhook_secret")
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
   connection     ForgeConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   reviewJobs     ReviewJob[]

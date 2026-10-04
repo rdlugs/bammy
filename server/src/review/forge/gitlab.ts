@@ -272,4 +272,41 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher {
       }),
     });
   }
+
+  // Project hooks need Maintainer access; callers treat a failure as "automatic
+  // reviews unavailable" rather than an error.
+  async createProjectHook(project: string, url: string, token: string): Promise<string> {
+    const hook = await this.http.json<{ id: number }>(`${this.project(project)}/hooks`, {
+      method: "POST",
+      body: JSON.stringify({
+        url,
+        token,
+        merge_requests_events: true,
+        note_events: true,
+        push_events: false,
+        enable_ssl_verification: true,
+      }),
+    });
+    return String(hook.id);
+  }
+
+  async deleteProjectHook(project: string, hookId: string): Promise<void> {
+    try {
+      await this.http.request(`${this.project(project)}/hooks/${encodeURIComponent(hookId)}`, { method: "DELETE" });
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
+
+  // Effective access level of a user on the project, inherited membership
+  // included; 0 when they are not a member.
+  async memberAccessLevel(project: string, userId: number): Promise<number> {
+    try {
+      const member = await this.http.json<{ access_level: number }>(`${this.project(project)}/members/all/${userId}`);
+      return member.access_level;
+    } catch (err) {
+      if (isNotFound(err)) return 0;
+      throw err;
+    }
+  }
 }

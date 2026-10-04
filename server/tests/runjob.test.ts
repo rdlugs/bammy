@@ -3,7 +3,8 @@ import { prisma } from "../src/lib/prisma.ts";
 import type { InlineComment } from "../src/review/forge/types.ts";
 import type { Forge } from "../src/services/forge.ts";
 import { claimNext, enqueue } from "../src/worker/queue.ts";
-import { runJob, type RunJobDeps } from "../src/worker/runJob.ts";
+import { runJob, skipReason, type RunJobDeps } from "../src/worker/runJob.ts";
+import { DEFAULT_CONFIG } from "../src/review/config/schema.ts";
 import { makeChangeSet } from "./helpers/changeSet.ts";
 import { WALKTHROUGH, fakeModel, modelFinding } from "./helpers/model.ts";
 
@@ -211,5 +212,37 @@ describe("runJob", () => {
     expect(published).toEqual({ inline: [], summaries: [], statuses: [] });
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored.publication).toBeNull();
+  });
+});
+
+describe("skipReason", () => {
+  const triggers = (t: Partial<typeof DEFAULT_CONFIG.triggers>) => ({ ...DEFAULT_CONFIG, triggers: { ...DEFAULT_CONFIG.triggers, ...t } });
+
+  it("skips automatic reviews of drafts and of repositories that turned them off", () => {
+    expect(skipReason("webhook", DEFAULT_CONFIG, true)).toMatch(/Draft/);
+    expect(skipReason("webhook", triggers({ drafts: true }), true)).toBeNull();
+    expect(skipReason("webhook", triggers({ onPush: false }), false)).toMatch(/turned off/);
+  });
+
+  it("honours the command switch and never skips a manual review", () => {
+    expect(skipReason("comment", triggers({ command: false }), false)).toMatch(/commands/);
+    expect(skipReason("comment", DEFAULT_CONFIG, true)).toBeNull();
+    expect(skipReason("manual", triggers({ onPush: false, command: false }), true)).toBeNull();
+  });
+});
+
+describe("runJob with automatic triggers", () => {
+  it("records a skipped webhook job without calling the model or the forge", async () => {
+    await enqueue({ repositoryId, number: 42, headSha: "oldhead", trigger: "webhook" });
+    const job = (await claimNext())!;
+    const { runDeps, model, published } = deps({ "base:.bammy.yaml": "triggers:\n  on_push: false\n" }, {});
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored).toMatchObject({ status: "skipped", verdict: null, result: null });
+    expect(stored.error).toMatch(/turned off/);
+    expect(model.requests).toHaveLength(0);
+    expect(published).toEqual({ inline: [], summaries: [], statuses: [] });
   });
 });

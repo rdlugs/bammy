@@ -3,7 +3,7 @@
 
 export type Severity = "critical" | "major" | "minor" | "info"
 export type Bucket = "actionable" | "outside_diff" | "nitpick" | "requirement_gap"
-export type JobStatus = "queued" | "running" | "completed" | "partial" | "failed" | "superseded"
+export type JobStatus = "queued" | "running" | "completed" | "partial" | "failed" | "superseded" | "skipped"
 export type Verdict = "pass" | "blocked" | "error"
 export type Provider = "github" | "gitlab"
 

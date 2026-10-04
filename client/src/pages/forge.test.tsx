@@ -92,7 +92,10 @@ describe("Repositories page", () => {
       },
       "POST /api/repos": (init?: RequestInit) => {
         posted.push(JSON.parse(String(init?.body)))
-        return jsonResponse(201, { repo: { id: "r1" } })
+        return jsonResponse(201, {
+          repo: { id: "r1" },
+          webhook: { active: false, error: "Automatic reviews are off: GitLab refused the webhook (403 Forbidden)" },
+        })
       },
     })
     renderWithProviders(<App />, { route: "/repositories" })
@@ -100,6 +103,7 @@ describe("Repositories page", () => {
     await userEvent.click(await screen.findByRole("switch", { name: "Reviews for team/web" }))
 
     await waitFor(() => expect(posted).toEqual([{ connectionId: "c1", externalId: "9" }]))
+    expect(await screen.findByText(/GitLab refused the webhook/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Settings" })).toBeDisabled()
   })
 })
