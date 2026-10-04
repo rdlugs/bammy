@@ -8,6 +8,13 @@ export interface ForgeRepo {
   webUrl: string;
 }
 
+export interface ChangeHead {
+  headSha: string;
+  title: string;
+  state: "open" | "closed" | "merged";
+  isDraft: boolean;
+}
+
 export interface ForgeAccount {
   login: string;
 }
@@ -21,6 +28,8 @@ export interface ForgeAdapter {
   listRepos(): Promise<ForgeRepo[]>;
   getRepo(externalId: string): Promise<ForgeRepo>;
   getChange(project: string, number: number): Promise<ChangeSet>;
+  // Just enough to queue a review, without fetching the diff.
+  getChangeHead(project: string, number: number): Promise<ChangeHead>;
   // Raw file content at a ref, or null when the file does not exist there.
   getFileAtRef(project: string, path: string, ref: string): Promise<string | null>;
 }

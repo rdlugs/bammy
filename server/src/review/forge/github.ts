@@ -2,7 +2,7 @@ import type { ChangeSet, ChangeType } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
 import { ForgeHttp, isNotFound, linkHeaderNext, type FetchLike } from "./http.ts";
 import { githubApiBase } from "./githubApp.ts";
-import type { ForgeAccount, ForgeAdapter, ForgeRepo } from "./types.ts";
+import type { ChangeHead, ForgeAccount, ForgeAdapter, ForgeRepo } from "./types.ts";
 
 export interface GitHubAdapterOptions {
   host: string;
@@ -21,6 +21,9 @@ interface GhRepo {
 }
 
 interface GhPull {
+  state: "open" | "closed";
+  merged?: boolean;
+  merged_at?: string | null;
   title: string;
   body: string | null;
   draft?: boolean;
@@ -143,6 +146,17 @@ export class GitHubAdapter implements ForgeAdapter {
           patch: file.patch ?? (file.changes === 0 ? "" : undefined),
         }),
       ),
+    };
+  }
+
+  async getChangeHead(project: string, number: number): Promise<ChangeHead> {
+    const pull = await this.http.json<GhPull>(`${repoApiPath(project)}/pulls/${number}`);
+    const merged = pull.merged ?? Boolean(pull.merged_at);
+    return {
+      headSha: pull.head.sha,
+      title: pull.title,
+      state: merged ? "merged" : pull.state,
+      isDraft: pull.draft ?? false,
     };
   }
 

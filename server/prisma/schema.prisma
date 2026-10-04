@@ -115,6 +115,8 @@ model ReviewJob {
   verdict        ReviewVerdict?
   resolvedConfig Json?          @map("resolved_config")
   result         Json?
+  // Small digest of the result (title, counts) so lists never load results.
+  summary        Json?
   error          String?
   attempts       Int            @default(0)
   lockedAt       DateTime?      @map("locked_at") @db.Timestamptz

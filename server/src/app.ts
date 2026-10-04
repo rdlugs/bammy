@@ -7,6 +7,7 @@ import { authRouter } from "./routes/auth.routes.ts";
 import { configRouter } from "./routes/config.routes.ts";
 import { connectionsRouter } from "./routes/connections.routes.ts";
 import { reposRouter } from "./routes/repos.routes.ts";
+import { reviewsRouter } from "./routes/reviews.routes.ts";
 import { errorHandler } from "./middleware/errorHandler.ts";
 
 export const app = express();
@@ -24,6 +25,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/connections", connectionsRouter);
 app.use("/api/repos", reposRouter);
 app.use("/api/config", configRouter);
+app.use("/api/reviews", reviewsRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Not found" });
