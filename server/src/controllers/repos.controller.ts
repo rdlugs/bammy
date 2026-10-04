@@ -3,6 +3,7 @@ import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
 import { adapterForConnection, loadOwnedConnection, toHttpError } from "../services/forge.ts";
+import { ensureWebhook, removeWebhook } from "../services/webhooks.ts";
 import {
   enableRepoSchema,
   listReposQuerySchema,
@@ -55,7 +56,7 @@ export async function enableRepo(req: Request, res: Response) {
       throw toHttpError(err, connection.provider);
     });
   const details = { fullPath: forgeRepo.fullPath, defaultBranch: forgeRepo.defaultBranch, enabled: true };
-  const repo = await prisma.repository.upsert({
+  const saved = await prisma.repository.upsert({
     where: { connectionId_externalId: { connectionId, externalId: forgeRepo.externalId } },
     update: details,
     create: {
@@ -65,9 +66,11 @@ export async function enableRepo(req: Request, res: Response) {
       provider: connection.provider,
       host: connection.host,
     },
-    select: publicRepo,
   });
-  res.status(201).json({ repo });
+  // Manual reviews work either way; the webhook only adds automatic ones.
+  const webhook = await ensureWebhook(saved, connection);
+  const repo = await prisma.repository.findUniqueOrThrow({ where: { id: saved.id }, select: publicRepo });
+  res.status(201).json({ repo, webhook });
 }
 
 async function loadOwnedRepo(userId: string, id: string) {
@@ -84,14 +87,14 @@ async function loadOwnedRepo(userId: string, id: string) {
 export async function updateRepo(req: Request, res: Response) {
   const { id } = repoIdParamSchema.parse(req.params);
   const { enabled, settings } = updateRepoSchema.parse(req.body);
-  await loadOwnedRepo(req.userId!, id);
+  const existing = await loadOwnedRepo(req.userId!, id);
 
-  const repo = await prisma.repository.update({
-    where: { id },
-    data: { enabled, settings },
-    select: publicRepo,
-  });
-  res.json({ repo });
+  const updated = await prisma.repository.update({ where: { id }, data: { enabled, settings } });
+  let webhook;
+  if (enabled === true) webhook = await ensureWebhook(updated, existing.connection);
+  if (enabled === false) await removeWebhook(updated, existing.connection);
+  const repo = await prisma.repository.findUniqueOrThrow({ where: { id }, select: publicRepo });
+  res.json({ repo, ...(webhook ? { webhook } : {}) });
 }
 
 // The configuration a review of the default branch would run with right now,

@@ -245,7 +245,13 @@ export function ReviewDetailPage() {
       ) : (
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>{review.status === "superseded" ? "Superseded by a newer push" : "The review did not run"}</AlertTitle>
+          <AlertTitle>
+            {review.status === "superseded"
+              ? "Superseded by a newer push"
+              : review.status === "skipped"
+                ? "Skipped"
+                : "The review did not run"}
+          </AlertTitle>
           {review.error && <AlertDescription>{review.error}</AlertDescription>}
         </Alert>
       )}

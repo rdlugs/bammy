@@ -36,6 +36,7 @@ export interface ConfigOverride {
   llm?: { model?: string }
   review?: { severityFloor?: string; blockOn?: string }
   output?: { walkthrough?: boolean; postInline?: boolean; postSummary?: boolean; postCheck?: boolean }
+  triggers?: { onPush?: boolean; drafts?: boolean; command?: boolean }
   instructions?: string
   [key: string]: unknown
 }
@@ -50,8 +51,14 @@ export interface ResolvedConfig {
     llm: { model: string }
     review: { severityFloor: string; blockOn: string }
     output: { walkthrough: boolean; postInline: boolean; postSummary: boolean; postCheck: boolean }
+    triggers: { onPush: boolean; drafts: boolean; command: boolean }
     instructions: string
   }
+}
+
+export interface WebhookState {
+  active: boolean
+  error?: string
 }
 
 export interface ConfigSchema {
@@ -96,8 +103,11 @@ export function useSetRepoEnabled(connectionId: string) {
   return useMutation({
     mutationFn: ({ repo, enabled }: { repo: ForgeRepo; enabled: boolean }) =>
       repo.id
-        ? api<{ repo: SavedRepo }>(`/repos/${repo.id}`, { method: "PATCH", body: JSON.stringify({ enabled }) })
-        : api<{ repo: SavedRepo }>("/repos", {
+        ? api<{ repo: SavedRepo; webhook?: WebhookState }>(`/repos/${repo.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ enabled }),
+          })
+        : api<{ repo: SavedRepo; webhook?: WebhookState }>("/repos", {
             method: "POST",
             body: JSON.stringify({ connectionId, externalId: repo.externalId }),
           }),

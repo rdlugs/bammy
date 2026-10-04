@@ -20,12 +20,18 @@ const envSchema = z.object({
     .transform((key) => key?.replace(/\\n/g, "\n")),
   GITHUB_APP_CLIENT_ID: z.string().optional(),
   GITHUB_APP_CLIENT_SECRET: z.string().optional(),
+  GITHUB_WEBHOOK_SECRET: z.string().optional(),
+  // Where forges can reach this API, for the webhook URL registered on GitLab.
+  API_PUBLIC_URL: z.string().url().default("http://localhost:4000"),
   // Server-wide model keys, used when the repository owner has not stored one.
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  // Running reviews one user may have at once, so one busy account cannot
+  // take every worker slot.
+  WORKER_USER_CONCURRENCY: z.coerce.number().int().positive().default(2),
   WORKER_LOCK_TIMEOUT_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
 });

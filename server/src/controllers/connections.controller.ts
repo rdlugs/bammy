@@ -8,6 +8,7 @@ import { prisma } from "../lib/prisma.ts";
 import { GitLabAdapter } from "../review/forge/gitlab.ts";
 import { ForgeError } from "../review/forge/http.ts";
 import { getGitHubApp, githubConfigured, githubInstallUrl } from "../services/forge.ts";
+import { removeWebhook } from "../services/webhooks.ts";
 import { githubCallbackSchema, gitlabConnectSchema } from "../schemas/connections.schema.ts";
 
 const publicConnection = {
@@ -128,11 +129,17 @@ export async function githubCallback(req: Request, res: Response) {
 }
 
 export async function deleteConnection(req: Request, res: Response) {
-  const { count } = await prisma.forgeConnection.deleteMany({
+  const connection = await prisma.forgeConnection.findFirst({
     where: { id: String(req.params.id), userId: req.userId },
+    include: { repositories: true },
   });
-  if (count === 0) {
+  if (!connection) {
     throw new HttpError(404, "Connection not found");
   }
+  // Take Bammy's hooks off the forge while the token still works.
+  for (const repo of connection.repositories) {
+    await removeWebhook(repo, connection).catch(() => undefined);
+  }
+  await prisma.forgeConnection.delete({ where: { id: connection.id } });
   res.status(204).end();
 }

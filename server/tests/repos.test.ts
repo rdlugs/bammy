@@ -225,3 +225,55 @@ describe("GET /api/config/schema", () => {
     expect(res.body.severities).toEqual(["critical", "major", "minor", "info"]);
   });
 });
+
+describe("GitLab webhooks follow the enabled switch", () => {
+  it("registers a hook with a stored secret when enabling, and removes it when disabling", async () => {
+    const { fetch, calls } = fetchStub([
+      { url: /\/api\/v4\/projects\/1$/, body: project(1, "team/web") },
+      { method: "POST", url: /\/api\/v4\/projects\/1\/hooks$/, body: { id: 314 } },
+      { method: "DELETE", url: /\/api\/v4\/projects\/1\/hooks\/314$/, status: 204, body: "" },
+    ]);
+    vi.stubGlobal("fetch", fetch);
+
+    const enabled = await request(app).post("/api/repos").set("Cookie", cookie).send({ connectionId, externalId: "1" });
+
+    expect(enabled.body.webhook).toEqual({ active: true });
+    const hookCall = calls.find((c) => c.method === "POST")!;
+    const hook = JSON.parse(hookCall.body!);
+    expect(hook).toMatchObject({
+      url: `https://bammy.example.com/api/webhooks/gitlab/${enabled.body.repo.id}`,
+      merge_requests_events: true,
+      note_events: true,
+      push_events: false,
+    });
+    const stored = await prisma.repository.findUniqueOrThrow({ where: { id: enabled.body.repo.id } });
+    expect(stored.webhookId).toBe("314");
+    expect(stored.encryptedWebhookSecret).not.toContain(hook.token);
+    expect(enabled.body.repo.encryptedWebhookSecret).toBeUndefined();
+
+    await request(app).patch(`/api/repos/${enabled.body.repo.id}`).set("Cookie", cookie).send({ enabled: false });
+
+    expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+    expect(await prisma.repository.findUniqueOrThrow({ where: { id: enabled.body.repo.id } })).toMatchObject({
+      webhookId: null,
+      encryptedWebhookSecret: null,
+    });
+  });
+
+  it("keeps the repository enabled and explains when GitLab refuses the hook", async () => {
+    vi.stubGlobal(
+      "fetch",
+      fetchStub([
+        { url: /\/api\/v4\/projects\/1$/, body: project(1, "team/web") },
+        { method: "POST", url: /\/hooks$/, status: 403, body: { message: "403 Forbidden" } },
+      ]).fetch,
+    );
+
+    const res = await request(app).post("/api/repos").set("Cookie", cookie).send({ connectionId, externalId: "1" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.repo.enabled).toBe(true);
+    expect(res.body.webhook.active).toBe(false);
+    expect(res.body.webhook.error).toMatch(/Automatic reviews are off/);
+  });
+});

@@ -6,7 +6,7 @@ export const createReviewSchema = z.object({
 
 export const listReviewsQuerySchema = z.object({
   repoId: z.uuid().optional(),
-  status: z.enum(["queued", "running", "completed", "partial", "failed", "superseded"]).optional(),
+  status: z.enum(["queued", "running", "completed", "partial", "failed", "superseded", "skipped"]).optional(),
   cursor: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });

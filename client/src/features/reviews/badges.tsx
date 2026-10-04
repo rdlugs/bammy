@@ -9,6 +9,7 @@ const STATUS_LABEL: Record<JobStatus, string> = {
   partial: "Partial",
   failed: "Failed",
   superseded: "Superseded",
+  skipped: "Skipped",
 }
 
 export function StatusBadge({ status }: { status: JobStatus }) {

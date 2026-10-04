@@ -58,6 +58,8 @@ The `worker` container runs review jobs: it fetches the PR/MR, resolves the revi
 | GET    | `/api/reviews/:id`   | One review with its full result |
 | GET    | `/api/reviews/:id/markdown` | The review as the markdown document that is posted to the forge |
 | POST   | `/api/reviews/:id/rerun` | Queues a fresh review of the PR's latest head |
+| POST   | `/api/webhooks/github` | GitHub App webhook (signed with `GITHUB_WEBHOOK_SECRET`) |
+| POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Bammy registers per repository (token checked per repository) |
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
 
 Register and login are rate limited (20 requests per 15 minutes per IP).
@@ -71,6 +73,9 @@ Register and login are rate limited (20 requests per 15 minutes per IP).
 - Setup URL: `http://localhost:5173/api/connections/github/callback`, with **Request user authorization (OAuth) during installation** checked. Bammy uses that OAuth code to confirm the installing user can actually access the installation.
 - Repository permissions: Pull requests (read and write), Contents (read), Commit statuses (read and write), Metadata (read).
 - Copy the App ID, slug, client ID, a client secret and a generated private key into the `GITHUB_APP_*` variables.
+- Webhook: URL `<API_PUBLIC_URL>/api/webhooks/github`, a secret in `GITHUB_WEBHOOK_SECRET`, and the events **Pull request**, **Issue comment** and **Installation**.
+
+GitLab automatic reviews need a project webhook, which Bammy registers when a repository is enabled at `API_PUBLIC_URL`. That takes **Maintainer** access; with only Developer access the repository is enabled for manual reviews and the dashboard says why automatic ones are off. GitLab must be able to reach `API_PUBLIC_URL`; for local development use a tunnel.
 
 In production, self-hosted forge hosts must use https and resolve to public addresses.
 
@@ -83,6 +88,13 @@ When a review starts, Bammy posts a "reviewing" summary comment and sets a pendi
 - **The commit status**: `success` (pass), `failure` (blocked) or `error` (incomplete; GitLab shows it as `failed`), linking to the review in the dashboard. Branch protection can require it.
 
 Turn each one off with `output.post_inline`, `output.post_summary` and `output.post_check`. If publishing fails, the review is kept and the job is marked partial with the reason.
+
+## Automatic reviews
+
+- A PR/MR is reviewed when it opens, reopens, leaves draft or receives new commits. A commit that was already queued or reviewed is never reviewed again, so redelivered webhooks are harmless, and a newer push supersedes a review still waiting in the queue.
+- Comment `/bammy review` on a PR/MR to ask for a review of its current head. Only people who can push (GitHub owners, members and collaborators; GitLab Developer or above) can.
+- Drafts are skipped unless `triggers.drafts` is on; `triggers.on_push` and `triggers.command` turn the two triggers off. These are checked by the worker with the full configuration, so a skipped review shows in the dashboard with the reason.
+- Each user has at most `WORKER_USER_CONCURRENCY` reviews running at once, and a repository holds at most 10 queued.
 
 ## Review configuration
 
@@ -119,6 +131,10 @@ output:
   post_inline: true
   post_summary: true
   post_check: true
+triggers:
+  on_push: true             # review automatically when a PR/MR opens or gets new commits
+  drafts: false             # include drafts in automatic reviews
+  command: true             # allow "/bammy review" in a comment
 ignore_paths: ["**/*.lock", "**/dist/**"]   # replaces the default list
 instructions: "Controllers stay thin; business logic lives in services."
 language_instructions:

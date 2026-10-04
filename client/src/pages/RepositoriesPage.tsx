@@ -21,7 +21,9 @@ function RepoTable({ connectionId }: { connectionId: string }) {
 
   async function toggle(repo: ForgeRepo, enabled: boolean) {
     try {
-      await setEnabled.mutateAsync({ repo, enabled })
+      const { webhook } = await setEnabled.mutateAsync({ repo, enabled })
+      // Manual reviews still work; say why automatic ones do not.
+      if (webhook && !webhook.active) toast.warning(webhook.error ?? "Automatic reviews are unavailable")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not update the repository")
     }

@@ -46,6 +46,15 @@ const outputShape = {
   postCheck: z.boolean(),
 };
 
+const triggersShape = {
+  // Review automatically when a PR/MR is opened or receives new commits.
+  onPush: z.boolean(),
+  // Include draft PRs/MRs in automatic reviews.
+  drafts: z.boolean(),
+  // Allow "/bammy review" in a comment to request a review.
+  command: z.boolean(),
+};
+
 const topLevelShape = {
   version: z.literal(1),
   profile: profileNameSchema,
@@ -59,6 +68,7 @@ export const configSchema = z.strictObject({
   llm: z.strictObject(llmShape),
   review: z.strictObject(reviewShape),
   output: z.strictObject(outputShape),
+  triggers: z.strictObject(triggersShape),
 });
 export type Config = z.infer<typeof configSchema>;
 
@@ -68,6 +78,7 @@ export const configOverrideSchema = z
     llm: z.strictObject(llmShape).partial(),
     review: z.strictObject(reviewShape).partial(),
     output: z.strictObject(outputShape).partial(),
+    triggers: z.strictObject(triggersShape).partial(),
   })
   .partial();
 export type ConfigOverride = z.infer<typeof configOverrideSchema>;
@@ -98,6 +109,11 @@ export const DEFAULT_CONFIG: Config = {
     postInline: true,
     postSummary: true,
     postCheck: true,
+  },
+  triggers: {
+    onPush: true,
+    drafts: false,
+    command: true,
   },
   ignorePaths: [
     "**/*.lock",

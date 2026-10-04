@@ -2,6 +2,7 @@ import { env } from "../config/env.ts";
 import type { ForgeConnection, ReviewJob } from "../generated/prisma/client.ts";
 import { prisma } from "../lib/prisma.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
+import type { Config } from "../review/config/schema.ts";
 import { createGenerate, missingKeys, type ApiKeys, type Generate } from "../review/llm/providers.ts";
 import { runReview } from "../review/pipeline.ts";
 import { publishes, publishReview } from "../review/publish/publisher.ts";
@@ -23,6 +24,20 @@ const defaultDeps: RunJobDeps = {
   generateFor: createGenerate,
   apiKeysFor,
 };
+
+// Decided here rather than in the webhook handler, because only now is the
+// full configuration known, including the repository file. A manual review is
+// never skipped; someone asked for it.
+export function skipReason(trigger: ReviewJob["trigger"], config: Config, isDraft: boolean): string | null {
+  if (trigger === "webhook") {
+    if (!config.triggers.onPush) return "Automatic reviews are turned off for this repository";
+    if (isDraft && !config.triggers.drafts) return "Draft changes are not reviewed automatically";
+  }
+  if (trigger === "comment" && !config.triggers.command) {
+    return "Review commands are turned off for this repository";
+  }
+  return null;
+}
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -53,8 +68,21 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     repoSettings: repo.settings,
   });
 
-  const keys = await deps.apiKeysFor(repo.connection.userId);
   const { config } = loaded;
+  const skip = skipReason(job.trigger, config, changeSet.isDraft);
+  if (skip) {
+    await complete(job.id, {
+      status: "skipped",
+      verdict: null,
+      resolvedConfig: { config, sources: loaded.sources, repoFile: loaded.repoFile },
+      error: skip,
+      headSha: changeSet.forgeRef.headSha,
+      baseSha: changeSet.forgeRef.baseSha,
+    });
+    return;
+  }
+
+  const keys = await deps.apiKeysFor(repo.connection.userId);
   if (missingKeys([config.llm.model], keys).length > 0) {
     const provider = config.llm.model.split("/")[0];
     throw new Error(`No API key for ${provider}: store one in settings or configure it on the server`);

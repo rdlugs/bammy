@@ -168,6 +168,22 @@ function SettingsForm({ repo, onClose }: { repo: ForgeRepo; onClose: () => void 
             options={ON_OFF}
             effective={config && effective("output.postInline", config.output.postInline)}
           />
+          <ChoiceField
+            id="on-push"
+            label="Review automatically on push"
+            value={form.onPush}
+            onChange={set("onPush")}
+            options={ON_OFF}
+            effective={config && effective("triggers.onPush", config.triggers.onPush)}
+          />
+          <ChoiceField
+            id="drafts"
+            label="Review drafts automatically"
+            value={form.drafts}
+            onChange={set("drafts")}
+            options={ON_OFF}
+            effective={config && effective("triggers.drafts", config.triggers.drafts)}
+          />
           <Field>
             <FieldLabel htmlFor="instructions">Repository guidance</FieldLabel>
             <Textarea

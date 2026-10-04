@@ -118,7 +118,13 @@ describe("parseRepoFile", () => {
     });
   });
 
-  it("treats an empty file as no overrides", () => {
+  it("reads the triggers section", () => {
+    const { override, warnings } = parseRepoFile(".bammy.yaml", "triggers:\n  on_push: false\n  drafts: true\n");
+    expect(warnings).toEqual([]);
+    expect(override).toEqual({ triggers: { onPush: false, drafts: true } });
+  });
+
+    it("treats an empty file as no overrides", () => {
     expect(parseRepoFile(".bammy.yaml", "# nothing yet\n")).toEqual({ override: {}, warnings: [] });
   });
 

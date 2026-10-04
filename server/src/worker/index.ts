@@ -29,7 +29,7 @@ async function tick(): Promise<void> {
     console.log(`[worker] recovered ${recovered} stale job(s)`);
   }
   while (!stopping && running.size < env.WORKER_CONCURRENCY) {
-    const job = await claimNext();
+    const job = await claimNext(env.WORKER_USER_CONCURRENCY);
     if (!job) {
       return;
     }
