@@ -8,6 +8,7 @@ import { configRouter } from "./routes/config.routes.ts";
 import { connectionsRouter } from "./routes/connections.routes.ts";
 import { reposRouter } from "./routes/repos.routes.ts";
 import { reviewsRouter } from "./routes/reviews.routes.ts";
+import { settingsRouter } from "./routes/settings.routes.ts";
 import { webhooksRouter } from "./routes/webhooks.routes.ts";
 import { errorHandler } from "./middleware/errorHandler.ts";
 
@@ -29,6 +30,7 @@ app.use("/api/connections", connectionsRouter);
 app.use("/api/repos", reposRouter);
 app.use("/api/config", configRouter);
 app.use("/api/reviews", reviewsRouter);
+app.use("/api/settings", settingsRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Not found" });

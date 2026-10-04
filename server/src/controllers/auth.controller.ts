@@ -5,7 +5,7 @@ import { AUTH_COOKIE, authCookieOptions, signToken } from "../lib/jwt.ts";
 import { HttpError } from "../lib/httpError.ts";
 import { loginSchema, registerSchema } from "../schemas/auth.schema.ts";
 
-const publicUser = { id: true, name: true, email: true, createdAt: true } as const;
+export const publicUser = { id: true, name: true, email: true, createdAt: true } as const;
 
 function setAuthCookie(res: Response, userId: string) {
   res.cookie(AUTH_COOKIE, signToken(userId), authCookieOptions);
@@ -40,9 +40,13 @@ export async function login(req: Request, res: Response) {
   res.json({ user: { id: user.id, name: user.name, email: user.email, createdAt: user.createdAt } });
 }
 
-export function logout(_req: Request, res: Response) {
+export function clearAuthCookie(res: Response) {
   const { maxAge: _maxAge, ...clearOptions } = authCookieOptions;
   res.clearCookie(AUTH_COOKIE, clearOptions);
+}
+
+export function logout(_req: Request, res: Response) {
+  clearAuthCookie(res);
   res.status(204).end();
 }
 
