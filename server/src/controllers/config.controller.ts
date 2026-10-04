@@ -1,10 +1,12 @@
 import type { Request, Response } from "express";
+import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
 import { CATEGORIES, SEVERITIES } from "../review/core/severity.ts";
 import { PROFILES } from "../review/config/profiles.ts";
 import { resolveConfig } from "../review/config/resolve.ts";
 import { DEFAULT_CONFIG, PROFILE_NAMES, dashboardOverrideSchema } from "../review/config/schema.ts";
 import { updateGlobalConfigSchema } from "../schemas/config.schema.ts";
+import { requireStoredLlmConnection } from "../services/llm.ts";
 
 // What the settings UI needs to render choices and show inherited values.
 export function getConfigSchema(_req: Request, res: Response) {
@@ -34,6 +36,10 @@ export async function getGlobalConfig(req: Request, res: Response) {
 
 export async function updateGlobalConfig(req: Request, res: Response) {
   const { settings } = updateGlobalConfigSchema.parse(req.body);
+  if (!settings.llm?.connection) {
+    throw new HttpError(400, "Validation failed", { connection: ["Select an LLM connection"] });
+  }
+  await requireStoredLlmConnection(req.userId!, settings.llm.connection);
   const user = await prisma.user.update({
     where: { id: req.userId! },
     data: { reviewSettings: settings },

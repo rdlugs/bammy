@@ -116,16 +116,19 @@ Settings resolve in this order, highest first:
 
 A field set explicitly in any layer beats the profile. An invalid repository file is ignored as a whole and reported as a warning; the review still runs. The file cannot hold API keys, tokens or endpoints.
 
-### Custom endpoint (e.g. 9router)
+### LLM connections and custom endpoints
 
-The LLM tab of the global config and of a repository's settings (never `.bammy.yaml` or a trigger) can send every model call to one compatible proxy instead of the providers' official APIs. A repository inherits the base URL and key choice unless it sets its own. The model's provider prefix still picks the request format (`openai/` uses chat completions), and the rest of the id is passed through as is, slashes and parentheses included.
+Add and verify provider credentials in Settings > API keys, then select one in Configuration > LLM. Global configuration requires a connection; a repository can inherit it or select another saved connection. The selection is a live reference, so replacing its key or changing its custom host in Settings updates every configuration that uses it.
 
-**API key** picks which key from Settings > API keys is sent to the endpoint; "Each model's provider key" sends the matching provider's key, or none. For 9router:
+A connection with a custom host sends every model call to that compatible proxy. The model's provider prefix still picks the request format (`openai/` uses chat completions), and the rest of the id is passed through as is, slashes and parentheses included. Without a custom host, every configured model must use the selected connection's provider.
 
-1. Save the 9router key in Settings > API keys under OpenAI.
-2. In Configuration > LLM, set Model `openai/cx/gpt-5.6-sol(medium)`, Base URL `http://host.docker.internal:20128/v1`, and API key "OpenAI key".
+For 9router, save its key and host under OpenAI in Settings > API keys, select the OpenAI connection in Configuration > LLM, and use a model such as `openai/cx/gpt-5.6-sol(medium)`.
 
 The worker runs in a container, where `localhost` is the container itself; `host.docker.internal` reaches a proxy running on the host.
+
+### Ollama
+
+Add Ollama under Settings > API keys and enter its OpenAI-compatible base URL. For Ollama running on the Docker host, use `http://host.docker.internal:11434/v1`. The API key is optional. Select the Ollama connection in Configuration > LLM and use the `ollama/<model>` form, for example `ollama/qwen3`.
 
 ```yaml
 # .bammy.yaml - every key is optional

@@ -114,8 +114,22 @@ describe("resolveConfig", () => {
     expect(sources).toMatchObject({ "llm.baseUrl": "repoSettings", "llm.endpointKey": "global" });
   });
 
+  it("layers a live dashboard connection reference", () => {
+    const { config, sources } = resolveConfig({
+      global: { llm: { connection: "openai" } },
+      repoSettings: { llm: { connection: "ollama" } },
+    });
+
+    expect(config.llm.connection).toBe("ollama");
+    expect(sources["llm.connection"]).toBe("repoSettings");
+  });
+
   it("refuses an endpoint or key choice from the repository file and triggers", () => {
-    for (const llm of [{ baseUrl: "https://evil.example" }, { endpointKey: "openai" }]) {
+    for (const llm of [
+      { baseUrl: "https://evil.example" },
+      { endpointKey: "openai" },
+      { connection: "openai" },
+    ]) {
       expect(() => resolveConfig({ repoFile: { llm } as never })).toThrow();
       expect(() => resolveConfig({ trigger: { llm } as never })).toThrow();
     }
@@ -133,6 +147,11 @@ describe("resolveConfig", () => {
     });
     expect(config.llm.model).toBe("openai/cx/gpt-5.6-sol(medium)");
     expect(() => resolveConfig({ global: { llm: { model: "openai/gpt 5" } } })).toThrow();
+  });
+
+  it("accepts Ollama model ids", () => {
+    const { config } = resolveConfig({ global: { llm: { model: "ollama/qwen3" } } });
+    expect(config.llm.model).toBe("ollama/qwen3");
   });
 
   it("rejects an invalid layer", () => {

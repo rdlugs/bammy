@@ -3,26 +3,35 @@ import type { ForgeConnection, ReviewJob } from "../generated/prisma/client.ts";
 import { prisma } from "../lib/prisma.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
 import type { Config } from "../review/config/schema.ts";
-import { createGenerate, missingKeys, type ApiKeys, type Endpoint, type Generate } from "../review/llm/providers.ts";
+import {
+  createGenerate,
+  missingKeys,
+  type ApiKeys,
+  type Endpoint,
+  type Generate,
+  type ProviderBaseUrls,
+} from "../review/llm/providers.ts";
 import { runReview } from "../review/pipeline.ts";
 import { publishes, publishReview } from "../review/publish/publisher.ts";
 import { pendingStatus } from "../review/publish/status.ts";
 import { summarize } from "../review/render/json.ts";
 import { progressMarkdown } from "../review/render/progress.ts";
 import { adapterForConnection, type Forge } from "../services/forge.ts";
-import { apiKeysFor } from "../services/llm.ts";
+import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts";
 import { complete } from "./queue.ts";
 
 export interface RunJobDeps {
   adapterFor: (connection: ForgeConnection) => Forge;
-  generateFor: (keys: ApiKeys, endpoint?: Endpoint) => Generate;
-  apiKeysFor: (userId: string) => Promise<ApiKeys>;
+  generateFor: (keys: ApiKeys, endpoint?: Endpoint, baseUrls?: ProviderBaseUrls) => Generate;
+  credentialsFor: (
+    userId: string,
+  ) => Promise<{ keys: ApiKeys; baseUrls: ProviderBaseUrls; connections: StoredLlmConnections }>;
 }
 
 const defaultDeps: RunJobDeps = {
   adapterFor: adapterForConnection,
   generateFor: createGenerate,
-  apiKeysFor,
+  credentialsFor: llmCredentialsFor,
 };
 
 // Decided here rather than in the webhook handler, because only now is the
@@ -84,19 +93,42 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     return;
   }
 
-  const keys = await deps.apiKeysFor(repo.connection.userId);
-  const { baseUrl, endpointKey } = config.llm;
-  if (endpointKey && !keys[endpointKey]) {
-    throw new Error(`No API key for ${endpointKey}: store one in settings or configure it on the server`);
+  const { keys, baseUrls, connections } = await deps.credentialsFor(repo.connection.userId);
+  const { connection, baseUrl, endpointKey } = config.llm;
+  let endpoint: Endpoint | undefined;
+  if (connection) {
+    const selected = connections[connection];
+    if (!selected) {
+      throw new Error(`The selected ${connection} LLM connection no longer exists: configure it in settings`);
+    }
+    if (selected.baseUrl) {
+      endpoint = { baseUrl: selected.baseUrl, apiKey: selected.apiKey };
+    } else {
+      const incompatible = [config.llm.model, ...config.llm.fallbackModels].find(
+        (model) => model.split("/")[0] !== connection,
+      );
+      if (incompatible) {
+        throw new Error(
+          `The ${connection} LLM connection uses its official API and cannot run model ${incompatible}`,
+        );
+      }
+    }
+  } else if (baseUrl) {
+    // Compatibility for settings saved before connections were referenced live.
+    if (endpointKey && !keys[endpointKey]) {
+      throw new Error(`No API key for ${endpointKey}: store one in settings or configure it on the server`);
+    }
+    endpoint = { baseUrl, apiKey: endpointKey ? keys[endpointKey] : undefined };
+  } else {
+    throw new Error("No LLM connection selected: choose one in Configuration > LLM Config");
   }
-  const endpoint = baseUrl ? { baseUrl, apiKey: endpointKey ? keys[endpointKey] : undefined } : undefined;
-  if (missingKeys([config.llm.model], keys, endpoint).length > 0) {
+  if (missingKeys([config.llm.model], keys, endpoint, baseUrls).length > 0) {
     const provider = config.llm.model.split("/")[0];
     throw new Error(`No API key for ${provider}: store one in settings or configure it on the server`);
   }
   const warnings = [...loaded.warnings];
   const fallbackModels = config.llm.fallbackModels.filter((model) => {
-    const usable = missingKeys([model], keys, endpoint).length === 0;
+    const usable = missingKeys([model], keys, endpoint, baseUrls).length === 0;
     if (!usable) warnings.push(`Fallback model ${model} skipped: no API key for its provider`);
     return usable;
   });
@@ -119,7 +151,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
 
   const result = await runReview(
     { changeSet, config: { ...config, llm: { ...config.llm, fallbackModels } }, warnings },
-    { generate: deps.generateFor(keys, endpoint) },
+    { generate: deps.generateFor(keys, endpoint, baseUrls) },
   );
 
   let publication = null;

@@ -13,6 +13,7 @@ const effective = {
     temperature: 0.2,
     maxTokens: 8000,
     contextBudget: null,
+    connection: null,
     baseUrl: null,
     endpointKey: null,
   },
@@ -71,6 +72,11 @@ async function openTab(name: string) {
   await userEvent.click(await screen.findByRole("tab", { name: new RegExp(`^${name}`) }))
 }
 
+async function selectOpenAiConnection() {
+  await userEvent.click(screen.getByRole("combobox", { name: "LLM connection" }))
+  await userEvent.click(screen.getByRole("option", { name: /OpenAI/ }))
+}
+
 const GLOBAL_SCOPE = /The global config applies to every repository/
 const globalRoutes = (extra: Record<string, unknown> = {}) => ({
   "GET /api/config/global": globalConfig(),
@@ -78,9 +84,10 @@ const globalRoutes = (extra: Record<string, unknown> = {}) => ({
   "GET /api/repos": { repos: [] },
   "GET /api/settings/api-keys": {
     keys: [
-      { provider: "anthropic", stored: false, last4: null, updatedAt: null, serverDefault: true },
-      { provider: "openai", stored: true, last4: "9rtr", updatedAt: "2026-10-04T00:00:00Z", serverDefault: false },
-      { provider: "google", stored: false, last4: null, updatedAt: null, serverDefault: false },
+      { provider: "anthropic", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: true },
+      { provider: "openai", stored: true, last4: "9rtr", baseUrl: null, updatedAt: "2026-10-04T00:00:00Z", serverDefault: false },
+      { provider: "google", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+      { provider: "ollama", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
     ],
   },
   ...extra,
@@ -94,7 +101,7 @@ describe("Configuration page", () => {
     await userEvent.click(await screen.findByRole("link", { name: "Configuration" }))
 
     expect(await screen.findByText(GLOBAL_SCOPE)).toBeInTheDocument()
-    expect(await screen.findByRole("tab", { name: "LLM Config", selected: true })).toBeInTheDocument()
+    expect(await screen.findByRole("tab", { name: /^LLM Config/, selected: true })).toBeInTheDocument()
   })
 
   it("splits the settings into tabs and keeps the open tab in the URL", async () => {
@@ -105,7 +112,7 @@ describe("Configuration page", () => {
     expect(screen.getByLabelText("Ignore paths")).toBeInTheDocument()
     expect(screen.queryByLabelText("Model")).not.toBeInTheDocument()
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
-      "LLM Config",
+      "LLM Config, has errors",
       "Finding Types",
       "Files",
       "Display",
@@ -131,10 +138,13 @@ describe("Configuration page", () => {
     renderWithProviders(<App />, { route: "/configuration" })
 
     expect(await screen.findByText("Effective: anthropic/claude-sonnet-5-5 (from default)")).toBeInTheDocument()
+    await selectOpenAiConnection()
     await userEvent.type(screen.getByLabelText("Model"), "openai/gpt-5")
     await userEvent.click(screen.getByRole("button", { name: "Save global config" }))
 
-    await waitFor(() => expect(body).toEqual({ settings: { llm: { model: "openai/gpt-5" } } }))
+    await waitFor(() =>
+      expect(body).toEqual({ settings: { llm: { model: "openai/gpt-5", connection: "openai" } } }),
+    )
     expect(await screen.findByText("Global config saved")).toBeInTheDocument()
   })
 
@@ -157,6 +167,7 @@ describe("Configuration page", () => {
     await userEvent.click(profile)
     await userEvent.click(screen.getByRole("option", { name: "balanced" }))
     expect(save).toBeDisabled()
+    await selectOpenAiConnection()
 
     // A profile's preset shows through on the other tabs without being pinned.
     await userEvent.click(profile)
@@ -178,7 +189,11 @@ describe("Configuration page", () => {
     // Edits from every tab go out in one save.
     await userEvent.click(screen.getByRole("button", { name: "Save global config" }))
 
-    await waitFor(() => expect(body).toEqual({ settings: { profile: "strict", output: { walkthrough: false } } }))
+    await waitFor(() =>
+      expect(body).toEqual({
+        settings: { profile: "strict", llm: { connection: "openai" }, output: { walkthrough: false } },
+      }),
+    )
   })
 
   it("edits every kind of setting in the global config", async () => {
@@ -196,12 +211,11 @@ describe("Configuration page", () => {
     await userEvent.type(await screen.findByLabelText("Context budget"), "auto")
     await userEvent.click(screen.getByRole("button", { name: "Add fallback model" }))
     await userEvent.type(screen.getByLabelText("Fallback model 1"), "openai/gpt-5")
-    await userEvent.type(screen.getByLabelText("Base URL"), "http://host.docker.internal:20128/v1")
-    await userEvent.click(screen.getByRole("combobox", { name: "API key" }))
-    // Only slots that hold a key are offered.
-    expect(screen.getByRole("option", { name: "Anthropic key (server)" })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("combobox", { name: "LLM connection" }))
+    // Only connections saved by this user are offered, not server defaults.
+    expect(screen.queryByRole("option", { name: /Anthropic/ })).not.toBeInTheDocument()
     expect(screen.queryByRole("option", { name: /Google/ })).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole("option", { name: "OpenAI key ending in 9rtr" }))
+    await userEvent.click(screen.getByRole("option", { name: /OpenAI/ }))
 
     await openTab("Finding Types")
     expect(screen.getByRole("checkbox", { name: "security" })).toBeChecked()
@@ -225,8 +239,7 @@ describe("Configuration page", () => {
           // "auto" is already the default context budget, so it is not pinned.
           llm: {
             fallbackModels: ["openai/gpt-5"],
-            baseUrl: "http://host.docker.internal:20128/v1",
-            endpointKey: "openai",
+            connection: "openai",
           },
           review: { categories: ["security", "style"], maxFindings: 10 },
           ignorePaths: ["gen/**", "docs/**"],
@@ -236,10 +249,38 @@ describe("Configuration page", () => {
     )
   })
 
+  it("requires a saved LLM connection and links to API key settings", async () => {
+    mockApi(
+      globalRoutes({
+        "GET /api/settings/api-keys": {
+          keys: [
+            { provider: "anthropic", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: true },
+            { provider: "openai", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+            { provider: "google", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+            { provider: "ollama", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+          ],
+        },
+      }),
+    )
+    renderWithProviders(<App />, { route: "/configuration" })
+
+    expect(await screen.findByText("Select an LLM connection")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByRole("link", { name: "Settings > API keys" })).toHaveLength(2))
+    const links = screen.getAllByRole("link", { name: "Settings > API keys" })
+    expect(links[1]!.closest("p")).toHaveTextContent("No saved connections")
+    for (const link of links) {
+      expect(link).toHaveAttribute("href", "/settings?tab=api-keys")
+    }
+    expect(screen.getByRole("button", { name: "Save global config" })).toBeDisabled()
+  })
+
   it("holds back a save while a value is out of range and marks the tab", async () => {
     mockApi(globalRoutes())
     renderWithProviders(<App />, { route: "/configuration?tab=files" })
 
+    await openTab("LLM Config")
+    await selectOpenAiConnection()
+    await openTab("Files")
     await userEvent.type(await screen.findByLabelText("Max chunks"), "500")
 
     expect(screen.getByText("Must be between 1 and 50")).toBeInTheDocument()
@@ -300,7 +341,10 @@ describe("Configuration page", () => {
     let body: unknown
     mockApi(
       globalRoutes({
-        "GET /api/config/global": globalConfig({ profile: "strict" }, { profile: "global" }),
+        "GET /api/config/global": globalConfig(
+          { profile: "strict", llm: { connection: "openai" } },
+          { profile: "global", "llm.connection": "global" },
+        ),
         "PUT /api/config/global": (init?: RequestInit) => {
           body = JSON.parse(String(init?.body))
           return jsonResponse(200, globalConfig())
@@ -311,7 +355,7 @@ describe("Configuration page", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Reset to defaults" }))
 
-    await waitFor(() => expect(body).toEqual({ settings: {} }))
+    await waitFor(() => expect(body).toEqual({ settings: { llm: { connection: "openai" } } }))
   })
 
   it("switches between the global config and a repository on the same tab", async () => {
@@ -452,5 +496,73 @@ describe("Configuration page", () => {
     // Back to what the global config gives, not the saved override.
     expect(walkthrough).toBeChecked()
     expect(screen.getByRole("button", { name: "Save settings" })).toBeEnabled()
+  })
+})
+
+describe("Model pickers", () => {
+  const openAiModels = { "GET /api/settings/api-keys/openai/models": { models: ["openai/gpt-5", "openai/gpt-5-mini"] } }
+
+  it("offers the selected connection's models for the model and fallback models", async () => {
+    let body: unknown
+    mockApi(
+      globalRoutes({
+        ...openAiModels,
+        "PUT /api/config/global": (init?: RequestInit) => {
+          body = JSON.parse(String(init?.body))
+          return jsonResponse(200, globalConfig())
+        },
+      }),
+    )
+    renderWithProviders(<App />, { route: "/configuration" })
+
+    await screen.findByText("Effective: anthropic/claude-sonnet-5-5 (from default)")
+    // No connection yet, so there is nothing to list.
+    expect(screen.queryByRole("button", { name: "Choose model from the connection" })).not.toBeInTheDocument()
+    await selectOpenAiConnection()
+
+    await userEvent.click(screen.getByRole("button", { name: "Choose model from the connection" }))
+    await userEvent.click(await screen.findByRole("option", { name: "openai/gpt-5" }))
+    expect(screen.getByLabelText("Model")).toHaveValue("openai/gpt-5")
+
+    await userEvent.click(screen.getByRole("button", { name: "Add fallback model" }))
+    await userEvent.click(screen.getByRole("button", { name: "Choose Fallback model 1 from the connection" }))
+    await userEvent.click(await screen.findByRole("option", { name: "openai/gpt-5-mini" }))
+    expect(screen.getByLabelText("Fallback model 1")).toHaveValue("openai/gpt-5-mini")
+
+    await userEvent.click(screen.getByRole("button", { name: "Save global config" }))
+    await waitFor(() =>
+      expect(body).toEqual({
+        settings: { llm: { model: "openai/gpt-5", fallbackModels: ["openai/gpt-5-mini"], connection: "openai" } },
+      }),
+    )
+  })
+
+  it("still accepts a typed model when the connection's models cannot be loaded", async () => {
+    mockApi(
+      globalRoutes({
+        "GET /api/settings/api-keys/openai/models": () => jsonResponse(400, { message: "Connection failed" }),
+      }),
+    )
+    renderWithProviders(<App />, { route: "/configuration" })
+
+    await screen.findByText("Effective: anthropic/claude-sonnet-5-5 (from default)")
+    await selectOpenAiConnection()
+    await userEvent.click(screen.getByRole("button", { name: "Choose model from the connection" }))
+    expect(await screen.findByText(/Could not load models from this connection/)).toBeInTheDocument()
+    await userEvent.keyboard("{Escape}")
+
+    await userEvent.type(screen.getByLabelText("Model"), "openai/gpt-custom")
+    expect(screen.getByLabelText("Model")).toHaveValue("openai/gpt-custom")
+  })
+
+  it("warns when an official connection cannot run a model", async () => {
+    mockApi(globalRoutes(openAiModels))
+    renderWithProviders(<App />, { route: "/configuration" })
+
+    await screen.findByText("Effective: anthropic/claude-sonnet-5-5 (from default)")
+    await selectOpenAiConnection()
+    await userEvent.type(screen.getByLabelText("Model"), "anthropic/claude-sonnet-5-5")
+
+    expect(screen.getByText("The OpenAI connection can only run openai/... models.")).toBeInTheDocument()
   })
 })

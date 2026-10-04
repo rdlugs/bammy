@@ -7,9 +7,10 @@ import { mockApi, testUser } from "@/test/apiRoutes"
 
 const noKeys = {
   keys: [
-    { provider: "anthropic", stored: false, last4: null, updatedAt: null, serverDefault: false },
-    { provider: "openai", stored: false, last4: null, updatedAt: null, serverDefault: true },
-    { provider: "google", stored: false, last4: null, updatedAt: null, serverDefault: false },
+    { provider: "anthropic", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+    { provider: "openai", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: true },
+    { provider: "google", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
+    { provider: "ollama", stored: false, last4: null, baseUrl: null, updatedAt: null, serverDefault: false },
   ],
 }
 
@@ -17,6 +18,7 @@ const storedAnthropic = {
   provider: "anthropic",
   stored: true,
   last4: "1234",
+  baseUrl: null,
   updatedAt: "2026-10-01T00:00:00.000Z",
   serverDefault: false,
 }
@@ -117,12 +119,16 @@ describe("Settings page", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Add API key" }))
     const sheet = await screen.findByRole("dialog")
-    const providers = within(within(sheet).getByRole("group", { name: "Provider" })).getAllByRole("button")
-    expect(providers.map((button) => button.textContent)).toEqual(["Anthropic", "OpenAI", "Google"])
-
-    await userEvent.click(within(sheet).getByRole("button", { name: "Anthropic" }))
+    await userEvent.click(within(sheet).getByRole("combobox", { name: "Provider" }))
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Anthropic",
+      "OpenAI",
+      "Google",
+      "Ollama",
+    ])
+    await userEvent.click(screen.getByRole("option", { name: "Anthropic" }))
     await userEvent.type(within(sheet).getByLabelText("Anthropic API key"), "sk-ant-secret-1234")
-    await userEvent.click(within(sheet).getByRole("button", { name: "Save key" }))
+    await userEvent.click(within(sheet).getByRole("button", { name: "Check and save" }))
 
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
     expect(await screen.findByText("••••1234")).toBeInTheDocument()
@@ -131,16 +137,97 @@ describe("Settings page", () => {
     })
   })
 
-  it("opens the sheet on the stored provider to replace its key", async () => {
-    mockApi({ "GET /api/settings/api-keys": { keys: [storedAnthropic, ...noKeys.keys.slice(1)] } })
+  it("adds a keyless Ollama connection with its default Docker host", async () => {
+    const ollama = {
+      provider: "ollama",
+      stored: true,
+      last4: null,
+      baseUrl: "http://host.docker.internal:11434/v1",
+      updatedAt: "2026-10-04T00:00:00.000Z",
+      serverDefault: false,
+    }
+    const fetchSpy = mockApi({
+      "GET /api/settings/api-keys": noKeys,
+      "PUT /api/settings/api-keys/ollama": { key: ollama },
+    })
     renderWithProviders(<App />, { route: "/settings?tab=api-keys" })
 
-    await userEvent.click(await screen.findByRole("button", { name: "Replace Anthropic key" }))
+    await userEvent.click(await screen.findByRole("button", { name: "Add API key" }))
+    const sheet = await screen.findByRole("dialog")
+    await userEvent.click(within(sheet).getByRole("combobox", { name: "Provider" }))
+    await userEvent.click(screen.getByRole("option", { name: "Ollama" }))
+
+    expect(within(sheet).getByLabelText("API base URL")).toHaveValue("http://host.docker.internal:11434/v1")
+    expect(within(sheet).getByLabelText("Ollama API key (optional)")).toHaveValue("")
+    await userEvent.click(within(sheet).getByRole("button", { name: "Check and save" }))
+
+    await waitFor(() => expect(calls(fetchSpy, "PUT", "/api/settings/api-keys/ollama")).toHaveLength(1))
+    expect(bodyOf(calls(fetchSpy, "PUT", "/api/settings/api-keys/ollama")[0]![1])).toEqual({
+      baseUrl: "http://host.docker.internal:11434/v1",
+    })
+  })
+
+  it("sends a custom host with a cloud provider key", async () => {
+    const fetchSpy = mockApi({
+      "GET /api/settings/api-keys": noKeys,
+      "PUT /api/settings/api-keys/anthropic": { key: storedAnthropic },
+    })
+    renderWithProviders(<App />, { route: "/settings?tab=api-keys" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add API key" }))
+    const sheet = await screen.findByRole("dialog")
+    await userEvent.click(within(sheet).getByRole("switch", { name: "Use custom host" }))
+    await userEvent.type(within(sheet).getByLabelText("API base URL"), "https://anthropic.example/v1")
+    await userEvent.type(within(sheet).getByLabelText("Anthropic API key"), "sk-ant-secret")
+    await userEvent.click(within(sheet).getByRole("button", { name: "Check and save" }))
+
+    await waitFor(() => expect(calls(fetchSpy, "PUT", "/api/settings/api-keys/anthropic")).toHaveLength(1))
+    expect(bodyOf(calls(fetchSpy, "PUT", "/api/settings/api-keys/anthropic")[0]![1])).toEqual({
+      apiKey: "sk-ant-secret",
+      baseUrl: "https://anthropic.example/v1",
+    })
+  })
+
+  it("keeps the sheet open and shows a failed connection on the field", async () => {
+    mockApi({
+      "GET /api/settings/api-keys": noKeys,
+      "PUT /api/settings/api-keys/anthropic": () =>
+        jsonResponse(400, { message: "Connection failed", errors: { apiKey: ["The API host rejected this key"] } }),
+    })
+    renderWithProviders(<App />, { route: "/settings?tab=api-keys" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Add API key" }))
+    const sheet = await screen.findByRole("dialog")
+    await userEvent.type(within(sheet).getByLabelText("Anthropic API key"), "sk-ant-invalid")
+    await userEvent.click(within(sheet).getByRole("button", { name: "Check and save" }))
+
+    expect(await within(sheet).findByText("The API host rejected this key")).toBeInTheDocument()
+    expect(sheet).toBeInTheDocument()
+  })
+
+  it("opens the stored provider and rechecks its status after replacement", async () => {
+    const fetchSpy = mockApi({
+      "GET /api/settings/api-keys": { keys: [storedAnthropic, ...noKeys.keys.slice(1)] },
+      "GET /api/settings/api-keys/anthropic/status": { status: "active" },
+      "PUT /api/settings/api-keys/anthropic": { key: storedAnthropic },
+    })
+    renderWithProviders(<App />, { route: "/settings?tab=api-keys" })
+
+    expect(await screen.findByText("Active")).toBeInTheDocument()
+    expect(calls(fetchSpy, "GET", "/api/settings/api-keys/anthropic/status")).toHaveLength(1)
+    expect(calls(fetchSpy, "GET", "/api/settings/api-keys/openai/status")).toHaveLength(0)
+    await userEvent.click(await screen.findByRole("button", { name: "Replace Anthropic connection" }))
     const sheet = await screen.findByRole("dialog")
 
-    expect(within(sheet).getByRole("button", { name: "Anthropic" })).toHaveAttribute("aria-pressed", "true")
+    expect(within(sheet).getByRole("combobox", { name: "Provider" })).toHaveTextContent("Anthropic")
     expect(within(sheet).getByText(/A key ending in 1234 is stored/)).toBeInTheDocument()
-    expect(within(sheet).getByRole("button", { name: "Replace key" })).toBeInTheDocument()
+    await userEvent.type(within(sheet).getByLabelText("Anthropic API key"), "sk-ant-replacement")
+    await userEvent.click(within(sheet).getByRole("button", { name: "Check and replace" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(calls(fetchSpy, "GET", "/api/settings/api-keys/anthropic/status")).toHaveLength(2),
+    )
   })
 
   it("removes a stored key after confirming", async () => {

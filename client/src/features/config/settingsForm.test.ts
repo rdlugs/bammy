@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { ConfigSchema } from "./api"
-import { INHERIT, PROVIDER_KEYS, baseConfig, isDirty, toForm, toSettings, validateForm, withoutDefaults } from "./settingsForm"
+import { INHERIT, baseConfig, isDirty, toForm, toSettings, validateForm, withoutDefaults } from "./settingsForm"
 
 const schema: ConfigSchema = {
   defaults: {
@@ -11,6 +11,7 @@ const schema: ConfigSchema = {
       temperature: 0.2,
       maxTokens: 8000,
       contextBudget: null,
+      connection: null,
       baseUrl: null,
       endpointKey: null,
     },
@@ -182,7 +183,6 @@ describe("validateForm", () => {
       ...form,
       model: "claude",
       fallbackModels: ["openai/a", "openai/b", "openai/c", "openai/d"],
-      baseUrl: "ftp://router",
       categories: [],
       numbers: { ...form.numbers, temperature: "2", maxTokens: "1.5", contextBudget: "lots" },
       languageInstructions: [
@@ -194,7 +194,6 @@ describe("validateForm", () => {
     expect(errors).toEqual({
       model: 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5',
       fallbackModels: "At most 3 fallback models",
-      baseUrl: "Enter an http or https URL",
       categories: "Choose at least one category",
       temperature: "Must be between 0 and 1",
       maxTokens: "Enter a whole number",
@@ -203,29 +202,37 @@ describe("validateForm", () => {
     })
   })
 
-  it("accepts router model ids and an http base URL", () => {
+  it("accepts router model ids", () => {
     expect(
       validateForm({
         ...form,
         model: "openai/cx/gpt-5.6-sol(medium)",
-        baseUrl: "http://host.docker.internal:20128/v1",
       }),
     ).toEqual({})
   })
+
+  it("accepts Ollama model ids", () => {
+    expect(validateForm({ ...form, model: "ollama/qwen3" })).toEqual({})
+  })
 })
 
-describe("endpoint", () => {
-  it("round-trips the base URL and the chosen key", () => {
-    const form = { ...toForm({}), baseUrl: " http://localhost:20128/v1 ", endpointKey: "openai" }
+describe("LLM connection", () => {
+  it("round-trips a live connection reference", () => {
+    const form = { ...toForm({}), connection: "openai" }
     const settings = toSettings({}, form)
-    expect(settings).toEqual({ llm: { baseUrl: "http://localhost:20128/v1", endpointKey: "openai" } })
-    expect(toForm(settings)).toMatchObject({ baseUrl: "http://localhost:20128/v1", endpointKey: "openai" })
-    expect(toSettings(settings, { ...form, baseUrl: "", endpointKey: INHERIT })).toEqual({})
+    expect(settings).toEqual({ llm: { connection: "openai" } })
+    expect(toForm(settings).connection).toBe("openai")
+    expect(toSettings(settings, { ...form, connection: INHERIT })).toEqual({})
   })
 
-  it("saves each model's provider key as null", () => {
-    const settings = toSettings({}, { ...toForm({}), endpointKey: PROVIDER_KEYS })
-    expect(settings).toEqual({ llm: { endpointKey: null } })
-    expect(toForm(settings).endpointKey).toBe(PROVIDER_KEYS)
+  it("converts a legacy endpoint key and removes copied endpoint values", () => {
+    const legacy = { llm: { baseUrl: "http://localhost:20128/v1", endpointKey: "openai" as const } }
+    const form = toForm(legacy)
+    expect(form.connection).toBe("openai")
+    expect(toSettings(legacy, form)).toEqual({ llm: { connection: "openai" } })
+  })
+
+  it("requires a connection for the global form", () => {
+    expect(validateForm(toForm({}), true)).toMatchObject({ connection: "Select an LLM connection" })
   })
 })

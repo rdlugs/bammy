@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { Link } from "react-router"
 import { Plus, RotateCcw, Trash2 } from "lucide-react"
 import { SearchableSelect } from "@/components/SearchableSelect"
 import { Badge } from "@/components/ui/badge"
@@ -20,8 +21,10 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { useApiKeys } from "@/features/settings/api"
+import { useApiKeys, useLlmModels } from "@/features/settings/api"
+import { LLM_PROVIDERS } from "@/features/settings/providers"
 import { useConfigSchema, type EffectiveConfig, type LlmProviderName } from "./api"
+import { ModelCombobox, type ModelSuggestions } from "./ModelCombobox"
 import { ReviewPreview, type PreviewSettings } from "./ReviewPreview"
 import { CONFIG_TABS, TAB_ERRORS, type ConfigTab } from "./tabs"
 import {
@@ -30,7 +33,6 @@ import {
   INHERIT,
   MAX_FALLBACK_MODELS,
   NUMBERS,
-  PROVIDER_KEYS,
   type FlagName,
   type FormErrors,
   type FormState,
@@ -75,14 +77,14 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
   },
 }
 
-const PROVIDER_LABEL: Record<LlmProviderName, string> = { anthropic: "Anthropic", openai: "OpenAI", google: "Google" }
+function connectionLabel(provider: LlmProviderName | null) {
+  return provider ? LLM_PROVIDERS[provider].label : "not configured"
+}
 
-// What an unset base URL means.
-const OFFICIAL_API = "each provider's official API"
-const PROVIDER_KEYS_LABEL = "Each model's provider key"
-
-function keyLabel(provider: LlmProviderName | null) {
-  return provider ? `${PROVIDER_LABEL[provider]} key` : PROVIDER_KEYS_LABEL.toLowerCase()
+function configuredConnectionLabel(llm: EffectiveConfig["llm"]) {
+  if (llm.connection) return connectionLabel(llm.connection)
+  if (llm.baseUrl) return llm.endpointKey ? `${connectionLabel(llm.endpointKey)} (legacy)` : "custom endpoint (legacy)"
+  return "not configured"
 }
 
 const NUMBER_INFO: Record<NumberName, { label: string; description: string }> = {
@@ -317,23 +319,23 @@ function FallbackModelsField(props: {
   effective?: string
   error?: string
   disabled?: boolean
+  suggestions?: ModelSuggestions
+  warning?: ReactNode
 }) {
   const { rows } = props
   return (
     <FieldSet data-disabled={props.disabled} data-invalid={props.error ? true : undefined}>
       <FieldLegend variant="label">Fallback models</FieldLegend>
-      <FieldDescription>
-        Tried in order when the model fails, up to {MAX_FALLBACK_MODELS}. {props.emptyHint}
-      </FieldDescription>
       {rows.map((model, index) => (
         <div key={index} className="flex items-center gap-2">
-          <Input
+          <ModelCombobox
             aria-label={`Fallback model ${index + 1}`}
             value={model}
-            onChange={(e) => props.onChange(rows.map((row, i) => (i === index ? e.target.value : row)))}
+            onChange={(value) => props.onChange(rows.map((row, i) => (i === index ? value : row)))}
             placeholder="openai/gpt-5"
             disabled={props.disabled}
             aria-invalid={props.error ? true : undefined}
+            suggestions={props.suggestions}
           />
           <Button
             type="button"
@@ -359,7 +361,11 @@ function FallbackModelsField(props: {
           Add fallback model
         </Button>
       </div>
+      <FieldDescription>
+        Tried in order when the model fails, up to {MAX_FALLBACK_MODELS}. {props.emptyHint}
+      </FieldDescription>
       {props.effective && <FieldDescription className="text-xs">{props.effective}</FieldDescription>}
+      {props.warning}
       {props.error && <FieldError>{props.error}</FieldError>}
     </FieldSet>
   )
@@ -376,26 +382,29 @@ function ChoiceField(props: {
   inherit?: { description?: string }
   // Shown instead of "inherit" when there is no Inherit option.
   fallback?: string
-  description?: string
+  description?: ReactNode
   effective?: string
+  error?: string
   disabled?: boolean
 }) {
   const { inherit } = props
   const value = !inherit && props.value === INHERIT ? (props.fallback ?? INHERIT) : props.value
   return (
-    <Field data-disabled={props.disabled}>
+    <Field data-disabled={props.disabled} data-invalid={props.error ? true : undefined}>
       <FieldLabel htmlFor={props.id}>{props.label}</FieldLabel>
       <SearchableSelect
         id={props.id}
         value={value}
         onValueChange={props.onChange}
         disabled={props.disabled}
+        aria-invalid={props.error ? true : undefined}
         options={
           inherit ? [{ value: INHERIT, label: "Inherit", description: inherit.description }, ...props.options] : props.options
         }
       />
       {props.description && <FieldDescription>{props.description}</FieldDescription>}
       {props.effective && <FieldDescription className="text-xs">{props.effective}</FieldDescription>}
+      {props.error && <FieldError>{props.error}</FieldError>}
     </Field>
   )
 }
@@ -478,6 +487,28 @@ export function ConfigFields(props: {
   const isRepo = mode === "repo"
   const schema = useConfigSchema()
   const apiKeys = useApiKeys()
+  // The model pickers list what the connection that will run the review
+  // offers: the inherited one while this scope does not pick its own.
+  const modelsProvider =
+    disabled || form.connection === INHERIT
+      ? (inherited?.llm.connection ?? null)
+      : (form.connection as LlmProviderName)
+  const llmModels = useLlmModels(modelsProvider)
+  const modelSuggestions: ModelSuggestions | undefined = modelsProvider
+    ? { models: llmModels.data?.models ?? [], loading: llmModels.isPending, error: llmModels.isError }
+    : undefined
+  // An official API only runs its own models (the worker refuses the rest);
+  // a custom host may serve any provider's protocol.
+  const officialProvider =
+    modelsProvider && apiKeys.data?.keys.some((key) => key.provider === modelsProvider && key.stored && !key.baseUrl)
+      ? modelsProvider
+      : null
+  const runsOn = (model: string) => !officialProvider || !model.trim() || model.trim().startsWith(`${officialProvider}/`)
+  const mismatchHint = officialProvider && (
+    <FieldDescription className="text-destructive">
+      The {LLM_PROVIDERS[officialProvider].label} connection can only run {officialProvider}/... models.
+    </FieldDescription>
+  )
   type TextKey = "profile" | "model" | "severityFloor" | "blockOn" | "ignorePaths" | "instructions"
   const setField = (key: TextKey) => (value: string) => props.onChange({ ...form, [key]: value })
   const setFlag = (name: FlagName) => (value: boolean | undefined) =>
@@ -575,17 +606,23 @@ export function ConfigFields(props: {
     model: (!disabled && form.model.trim()) || inherited?.llm.model,
   }
 
-  // Slots that hold a key, plus the saved choice even if its key was removed since.
-  const endpointKeyOptions = [
-    { value: PROVIDER_KEYS, label: PROVIDER_KEYS_LABEL },
-    ...(apiKeys.data?.keys ?? [])
-      .filter((key) => key.stored || key.serverDefault || key.provider === form.endpointKey)
-      .map((key) => ({
-        value: key.provider,
-        label: `${PROVIDER_LABEL[key.provider]} key${
-          key.stored ? ` ending in ${key.last4}` : key.serverDefault ? " (server)" : " (not stored)"
-        }`,
-      })),
+  const storedConnections = (apiKeys.data?.keys ?? []).filter((key) => key.stored)
+  const selectedProvider = form.connection === INHERIT ? null : (form.connection as LlmProviderName)
+  const selectedIsMissing = selectedProvider && !storedConnections.some((key) => key.provider === selectedProvider)
+  const connectionOptions = [
+    ...storedConnections.map((key) => ({
+      value: key.provider,
+      label: LLM_PROVIDERS[key.provider].label,
+      description: key.baseUrl ?? (key.last4 ? `key ending in ${key.last4}` : "saved connection"),
+      icon: LLM_PROVIDERS[key.provider].icon,
+    })),
+    ...(selectedIsMissing
+      ? [{
+          value: selectedProvider,
+          label: `${LLM_PROVIDERS[selectedProvider].label} (not configured)`,
+          disabled: true,
+        }]
+      : []),
   ]
 
   const severities = (schema.data?.severities ?? []).map((s) => ({ value: s, label: s }))
@@ -606,15 +643,51 @@ export function ConfigFields(props: {
             effective={config && effective("profile", config.profile)}
             disabled={disabled}
           />
+          <div className="flex flex-col gap-2">
+            <ChoiceField
+              id="llm-connection"
+              label="LLM connection"
+              value={form.connection}
+              onChange={(connection) => props.onChange({ ...form, connection })}
+              options={connectionOptions}
+              inherit={
+                isRepo
+                  ? { description: inherited && inheritedHint("llm.connection", configuredConnectionLabel(inherited.llm)) }
+                  : undefined
+              }
+              description={
+                <>
+                  Uses the latest key and API host configured in{" "}
+                  <Link className="underline underline-offset-4" to="/settings?tab=api-keys">Settings &gt; API keys</Link>.
+                </>
+              }
+              effective={config && effective("llm.connection", configuredConnectionLabel(config.llm))}
+              error={errors.connection}
+              disabled={disabled || apiKeys.isPending}
+            />
+            {apiKeys.isSuccess && storedConnections.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                No saved connections. Add one in{" "}
+                <Link className="underline underline-offset-4" to="/settings?tab=api-keys">
+                  Settings &gt; API keys
+                </Link>
+                .
+              </p>
+            )}
+            {apiKeys.isError && <p className="text-sm text-destructive">Could not load LLM connections.</p>}
+          </div>
+        </div>
+        <div className="grid gap-4 @md/field-group:grid-cols-2">
           <Field data-disabled={disabled}>
             <FieldLabel htmlFor="model">Model</FieldLabel>
-            <Input
+            <ModelCombobox
               id="model"
               value={form.model}
-              onChange={(e) => setField("model")(e.target.value)}
+              onChange={setField("model")}
               placeholder={inherited?.llm.model ?? config?.llm.model ?? "anthropic/claude-sonnet-5-5"}
               disabled={disabled}
               aria-invalid={errors.model ? true : undefined}
+              suggestions={modelSuggestions}
             />
             <FieldDescription>
               provider/model;{" "}
@@ -623,51 +696,18 @@ export function ConfigFields(props: {
                 : `leave empty to use the default${inherited ? ` (${inherited.llm.model})` : ""}.`}
             </FieldDescription>
             {config && <FieldDescription className="text-xs">{effective("llm.model", config.llm.model)}</FieldDescription>}
+            {!disabled && !runsOn(form.model) && mismatchHint}
             {errors.model && <FieldError>{errors.model}</FieldError>}
           </Field>
-        </div>
-        <FallbackModelsField
-          rows={form.fallbackModels}
-          onChange={(fallbackModels) => props.onChange({ ...form, fallbackModels })}
-          emptyHint={emptyHint("llm.fallbackModels", inherited?.llm.fallbackModels)}
-          effective={config && effective("llm.fallbackModels", config.llm.fallbackModels)}
-          error={errors.fallbackModels}
-          disabled={disabled}
-        />
-        <div className="grid gap-4 @md/field-group:grid-cols-2">
-          <TextField
-            id="base-url"
-            label="Base URL"
-            value={form.baseUrl}
-            onChange={(baseUrl) => props.onChange({ ...form, baseUrl })}
-            description={
-              <>
-                Send every model call to a compatible proxy such as 9router. One on this machine is reached as{" "}
-                <code>http://host.docker.internal:&lt;port&gt;</code>, not <code>localhost</code>.
-              </>
-            }
-            emptyHint={emptyHint("llm.baseUrl", inherited && (inherited.llm.baseUrl ?? OFFICIAL_API))}
-            placeholder={inherited?.llm.baseUrl ?? "http://host.docker.internal:20128/v1"}
-            type="url"
-            effective={config && effective("llm.baseUrl", config.llm.baseUrl ?? OFFICIAL_API)}
-            error={errors.baseUrl}
+          <FallbackModelsField
+            rows={form.fallbackModels}
+            onChange={(fallbackModels) => props.onChange({ ...form, fallbackModels })}
+            emptyHint={emptyHint("llm.fallbackModels", inherited?.llm.fallbackModels)}
+            effective={config && effective("llm.fallbackModels", config.llm.fallbackModels)}
+            error={errors.fallbackModels}
             disabled={disabled}
-          />
-          <ChoiceField
-            id="endpoint-key"
-            label="API key"
-            value={form.endpointKey}
-            onChange={(endpointKey) => props.onChange({ ...form, endpointKey })}
-            options={endpointKeyOptions}
-            inherit={
-              isRepo
-                ? { description: inherited && inheritedHint("llm.endpointKey", keyLabel(inherited.llm.endpointKey)) }
-                : undefined
-            }
-            fallback={inherited ? (inherited.llm.endpointKey ?? PROVIDER_KEYS) : undefined}
-            description="Sent to the base URL. Keys are managed in Settings > API keys."
-            effective={config && effective("llm.endpointKey", keyLabel(config.llm.endpointKey))}
-            disabled={disabled}
+            suggestions={modelSuggestions}
+            warning={!disabled && !form.fallbackModels.every(runsOn) ? mismatchHint : undefined}
           />
         </div>
         <div className="grid gap-4 @md/field-group:grid-cols-3">

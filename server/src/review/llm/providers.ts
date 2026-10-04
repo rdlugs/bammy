@@ -4,9 +4,10 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, Output, type LanguageModel } from "ai";
 import type { z } from "zod";
 
-export const PROVIDERS = ["anthropic", "openai", "google"] as const;
+export const PROVIDERS = ["anthropic", "openai", "google", "ollama"] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
 export type ApiKeys = Partial<Record<ProviderName, string>>;
+export type ProviderBaseUrls = Partial<Record<ProviderName, string>>;
 // A proxy every model call goes to instead of the providers' official APIs,
 // with the key to send it when the config picked one.
 export interface Endpoint {
@@ -28,16 +29,28 @@ export function providerOf(model: string): ProviderName {
 
 // Behind an endpoint no provider is missing a key: the endpoint decides
 // whether it needs one.
-export function missingKeys(models: string[], keys: ApiKeys, endpoint?: Endpoint): ProviderName[] {
+export function missingKeys(
+  models: string[],
+  keys: ApiKeys,
+  endpoint?: Endpoint,
+  baseUrls: ProviderBaseUrls = {},
+): ProviderName[] {
   if (endpoint) return [];
-  return [...new Set(models.map(providerOf))].filter((provider) => !keys[provider]);
+  return [...new Set(models.map(providerOf))].filter((provider) => !keys[provider] && !baseUrls[provider]);
 }
 
-function languageModel(model: string, keys: ApiKeys, endpoint?: Endpoint): LanguageModel {
+function languageModel(
+  model: string,
+  keys: ApiKeys,
+  endpoint?: Endpoint,
+  baseUrls: ProviderBaseUrls = {},
+): LanguageModel {
   const provider = providerOf(model);
   const modelId = model.slice(provider.length + 1);
-  const baseURL = endpoint?.baseUrl;
-  const apiKey = endpoint ? (endpoint.apiKey ?? keys[provider] ?? NO_KEY) : keys[provider];
+  const baseURL = endpoint?.baseUrl ?? baseUrls[provider];
+  const apiKey = endpoint
+    ? (endpoint.apiKey ?? keys[provider] ?? NO_KEY)
+    : (keys[provider] ?? (baseURL ? NO_KEY : undefined));
   if (!apiKey) throw new Error(`No API key for ${provider}`);
   switch (provider) {
     case "anthropic":
@@ -50,6 +63,10 @@ function languageModel(model: string, keys: ApiKeys, endpoint?: Endpoint): Langu
     }
     case "google":
       return createGoogleGenerativeAI({ apiKey, baseURL })(modelId);
+    case "ollama": {
+      const ollama = createOpenAI({ apiKey, baseURL });
+      return ollama.chat(modelId);
+    }
   }
 }
 
@@ -74,11 +91,11 @@ export interface GenerateResponse<T> {
 // The one seam between the engine and a model provider. Tests pass their own.
 export type Generate = <T>(request: GenerateRequest<T>) => Promise<GenerateResponse<T>>;
 
-export function createGenerate(keys: ApiKeys, endpoint?: Endpoint): Generate {
+export function createGenerate(keys: ApiKeys, endpoint?: Endpoint, baseUrls: ProviderBaseUrls = {}): Generate {
   return async <T>(request: GenerateRequest<T>): Promise<GenerateResponse<T>> => {
     const started = Date.now();
     const result = await generateText({
-      model: languageModel(request.model, keys, endpoint),
+      model: languageModel(request.model, keys, endpoint, baseUrls),
       system: request.system,
       prompt: request.prompt,
       temperature: request.temperature,

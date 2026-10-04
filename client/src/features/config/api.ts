@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import type { ForgeRepo, SavedRepo } from "@/features/forge/api"
 
-export type LlmProviderName = "anthropic" | "openai" | "google"
+export type LlmProviderName = "anthropic" | "openai" | "google" | "ollama"
 
 // A partial review config; mirrors server/src/review/config/schema.ts.
 export interface ConfigOverride {
@@ -13,7 +13,9 @@ export interface ConfigOverride {
     temperature?: number
     maxTokens?: number
     contextBudget?: number | null
-    // Only the global config and repository settings may set these.
+    // A live reference to a connection saved in Settings > API keys.
+    connection?: LlmProviderName | null
+    // Legacy endpoint fields are accepted until the setting is saved again.
     baseUrl?: string | null
     endpointKey?: LlmProviderName | null
   }
@@ -45,6 +47,8 @@ export interface EffectiveConfig {
     maxTokens: number
     // null derives the prompt budget from the model's context window.
     contextBudget: number | null
+    // The saved connection used for all model calls. Null is unconfigured.
+    connection: LlmProviderName | null
     // One endpoint for every model call; null means each provider's official API.
     baseUrl: string | null
     // The stored key sent to baseUrl; null sends each model's own provider key.

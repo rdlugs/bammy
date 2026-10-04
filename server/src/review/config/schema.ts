@@ -15,7 +15,7 @@ export type ProfileName = z.infer<typeof profileNameSchema>;
 // as "openai/cx/gpt-5.6-sol(medium)" do; the provider is what precedes the first slash.
 const modelString = z
   .string()
-  .regex(/^(anthropic|openai|google)\/[\w.:()/-]+$/, 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5');
+  .regex(/^(anthropic|openai|google|ollama)\/[\w.:()/-]+$/, 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5');
 
 
 const llmShape = {
@@ -30,13 +30,18 @@ const llmShape = {
 // Settable only from the dashboard, never from a repository file or a trigger.
 const dashboardLlmShape = {
   ...llmShape,
+  // A live reference to one of the owner's saved provider connections. The
+  // worker resolves its current key and host when the review runs.
+  connection: z.enum(["anthropic", "openai", "google", "ollama"]).nullable(),
+  // Legacy endpoint fields remain readable so settings saved by an older
+  // release keep working until the dashboard writes the new connection field.
   // One endpoint, such as a 9router proxy, for every model call; null means
   // each provider's official API. The model's provider prefix still picks the
   // wire format.
   baseUrl: z.url({ protocol: /^https?$/, error: "Enter an http or https URL" }).max(500).nullable(),
   // Which stored provider key is sent to baseUrl; null sends each model's own
   // provider key. Names a key slot, never holds the key.
-  endpointKey: z.enum(["anthropic", "openai", "google"]).nullable(),
+  endpointKey: z.enum(["anthropic", "openai", "google", "ollama"]).nullable(),
 };
 
 const reviewShape = {
@@ -116,6 +121,7 @@ export const DEFAULT_CONFIG: Config = {
     temperature: 0.2,
     maxTokens: 8000,
     contextBudget: null,
+    connection: null,
     baseUrl: null,
     endpointKey: null,
   },

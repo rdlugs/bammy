@@ -7,6 +7,13 @@ import { hashPassword, verifyPassword } from "../lib/password.ts";
 import { prisma } from "../lib/prisma.ts";
 import { PROVIDERS, type ProviderName } from "../review/llm/providers.ts";
 import {
+  LlmConnectionError,
+  listLlmModels,
+  normalizeBaseUrl,
+  verifyLlmConnection,
+  type LlmConnectionStatus,
+} from "../services/llmConnection.ts";
+import {
   apiKeyParamsSchema,
   changePasswordSchema,
   deleteAccountSchema,
@@ -21,6 +28,7 @@ const SERVER_KEYS: Record<ProviderName, boolean> = {
   anthropic: Boolean(env.ANTHROPIC_API_KEY),
   openai: Boolean(env.OPENAI_API_KEY),
   google: Boolean(env.GOOGLE_GENERATIVE_AI_API_KEY),
+  ollama: false,
 };
 
 async function requirePassword(userId: string, password: string, field: string) {
@@ -35,11 +43,15 @@ async function requirePassword(userId: string, password: string, field: string) 
 }
 
 // Only the last four characters ever leave the server, so the user can tell keys apart.
-function publicKey(provider: ProviderName, stored?: { encryptedKey: string; updatedAt: Date }) {
+function publicKey(
+  provider: ProviderName,
+  stored?: { encryptedKey: string | null; baseUrl: string | null; updatedAt: Date },
+) {
   return {
     provider,
     stored: Boolean(stored),
-    last4: stored ? decrypt(stored.encryptedKey).slice(-4) : null,
+    last4: stored?.encryptedKey ? decrypt(stored.encryptedKey).slice(-4) : null,
+    baseUrl: stored?.baseUrl ?? null,
     updatedAt: stored?.updatedAt ?? null,
     serverDefault: SERVER_KEYS[provider],
   };
@@ -83,15 +95,69 @@ export async function listApiKeys(req: Request, res: Response) {
   res.json({ keys: PROVIDERS.map((provider) => publicKey(provider, byProvider.get(provider))) });
 }
 
+// The stored secret stays server-side while the provider confirms whether it
+// still accepts the credential. Provider outages are distinct from rejection.
+export async function apiKeyStatus(req: Request, res: Response) {
+  const { provider } = apiKeyParamsSchema.parse(req.params);
+  const credential = await prisma.llmCredential.findUnique({
+    where: { userId_provider: { userId: req.userId!, provider } },
+  });
+  if (!credential) {
+    throw new HttpError(404, "No key stored for this provider");
+  }
+
+  let status: LlmConnectionStatus;
+  try {
+    await verifyLlmConnection(
+      provider,
+      credential.encryptedKey ? decrypt(credential.encryptedKey) : undefined,
+      credential.baseUrl ?? undefined,
+    );
+    status = "active";
+  } catch (error) {
+    status = error instanceof LlmConnectionError && error.connectionStatus === "revoked" ? "revoked" : "unreachable";
+  }
+  res.json({ status });
+}
+
+// Feeds the model picker; a host that rejects the key or is down answers with
+// the same 400 as saving, and the picker falls back to free text.
+export async function apiKeyModels(req: Request, res: Response) {
+  const { provider } = apiKeyParamsSchema.parse(req.params);
+  const credential = await prisma.llmCredential.findUnique({
+    where: { userId_provider: { userId: req.userId!, provider } },
+  });
+  if (!credential) {
+    throw new HttpError(404, "No key stored for this provider");
+  }
+
+  const models = await listLlmModels(
+    provider,
+    credential.encryptedKey ? decrypt(credential.encryptedKey) : undefined,
+    credential.baseUrl ?? undefined,
+  );
+  res.json({ models });
+}
+
 export async function saveApiKey(req: Request, res: Response) {
   const { provider } = apiKeyParamsSchema.parse(req.params);
-  const { apiKey } = saveApiKeySchema.parse(req.body);
+  const input = saveApiKeySchema.parse(req.body);
+  const apiKey = input.apiKey || undefined;
+  if (provider !== "ollama" && (!apiKey || apiKey.length < 8)) {
+    throw new HttpError(400, "Validation failed", { apiKey: ["That does not look like an API key"] });
+  }
+  if (provider === "ollama" && !input.baseUrl) {
+    throw new HttpError(400, "Validation failed", { baseUrl: ["Ollama requires an API base URL"] });
+  }
+
+  const baseUrl = input.baseUrl ? normalizeBaseUrl(input.baseUrl) : undefined;
+  await verifyLlmConnection(provider, apiKey, baseUrl);
   const userId = req.userId!;
-  const encryptedKey = encrypt(apiKey);
+  const encryptedKey = apiKey ? encrypt(apiKey) : null;
   const credential = await prisma.llmCredential.upsert({
     where: { userId_provider: { userId, provider } },
-    create: { userId, provider, encryptedKey },
-    update: { encryptedKey },
+    create: { userId, provider, encryptedKey, baseUrl },
+    update: { encryptedKey, baseUrl: baseUrl ?? null },
   });
   res.json({ key: publicKey(provider, credential) });
 }
