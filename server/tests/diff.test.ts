@@ -64,7 +64,15 @@ describe("parseUnifiedDiff against a real git diff", () => {
     expect(diffPosition(multi, 59)).toBe(diffPosition(multi, 58)! + 2);
   });
 
-  it("gives lines outside every hunk no position", () => {
+  it("records the old line of every context line", () => {
+    const multi = byPath.get("multi.txt")!;
+    // Two lines were added and one removed above, so new 33 was old 32.
+    expect(multi.hunks[1]!.contextOldLines["33"]).toBe(32);
+    expect(multi.hunks[0]!.contextOldLines["1"]).toBe(1);
+    expect(multi.hunks[0]!.contextOldLines["3"]).toBeUndefined();
+  });
+
+    it("gives lines outside every hunk no position", () => {
     expect(diffPosition(byPath.get("multi.txt")!, 15)).toBeUndefined();
   });
 
@@ -97,6 +105,7 @@ describe("parsePatch", () => {
     const [hunk] = parsePatch("@@ -1,2 +1,2 @@\r\n a\r\n-b\r\n+c\r\n");
     expect(hunk!.addedLines).toEqual([2]);
     expect(hunk!.newLineToPosition).toEqual({ "1": 1, "2": 3 });
+    expect(hunk!.contextOldLines).toEqual({ "1": 1 });
   });
 });
 

@@ -100,10 +100,20 @@ export interface ReviewListItem {
   repository: { id: string; provider: Provider; host: string; fullPath: string }
 }
 
+export interface Publication {
+  inlinePosted: { fingerprint: string; forgeCommentId: string }[]
+  inlineSkipped: number
+  inlineFailed: { fingerprint: string; error: string }[]
+  summaryCommentId: string | null
+  statusState: string | null
+  errors: string[]
+}
+
 export interface ReviewDetail extends ReviewListItem {
   baseSha: string | null
   attempts: number
   result: ReviewResult | null
+  publication: Publication | null
 }
 
 export function isActive(status: JobStatus) {

@@ -70,7 +70,24 @@ describe("Review detail page", () => {
     )
   })
 
-  it("explains a review that failed before producing a result", async () => {
+  it("says what was posted to the forge", async () => {
+    const publication = {
+      inlinePosted: [{ fingerprint: "a", forgeCommentId: "1" }, { fingerprint: "b", forgeCommentId: "2" }],
+      inlineSkipped: 1,
+      inlineFailed: [],
+      summaryCommentId: "9",
+      statusState: "failure",
+      errors: [],
+    }
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: { ...detail, publication } } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    expect(
+      await screen.findByText("Posted to GitHub: 2 inline comments, 1 already posted, summary, commit status (failure)"),
+    ).toBeInTheDocument()
+  })
+
+    it("explains a review that failed before producing a result", async () => {
     mockApi({
       [`GET /api/reviews/${detail.id}`]: {
         review: { ...detail, status: "failed", verdict: "error", result: null, error: "No API key for anthropic" },

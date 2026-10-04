@@ -80,7 +80,7 @@ export async function listReviews(req: Request, res: Response) {
 async function loadOwnedReview(userId: string, id: string) {
   const review = await prisma.reviewJob.findFirst({
     where: { id, ...ownedBy(userId) },
-    select: { ...listFields, baseSha: true, attempts: true, result: true, resolvedConfig: true },
+    select: { ...listFields, baseSha: true, attempts: true, result: true, publication: true, resolvedConfig: true },
   });
   if (!review) {
     throw new HttpError(404, "Review not found");

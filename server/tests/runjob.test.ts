@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "../src/lib/prisma.ts";
-import type { ForgeAdapter } from "../src/review/forge/types.ts";
+import type { InlineComment } from "../src/review/forge/types.ts";
+import type { Forge } from "../src/services/forge.ts";
 import { claimNext, enqueue } from "../src/worker/queue.ts";
 import { runJob, type RunJobDeps } from "../src/worker/runJob.ts";
 import { makeChangeSet } from "./helpers/changeSet.ts";
@@ -33,22 +34,47 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-function deps(files: Record<string, string>, answers: Parameters<typeof fakeModel>[0], keys = { anthropic: "k" }) {
+interface Published {
+  inline: { fingerprint: string; startLine: number }[];
+  summaries: string[];
+  statuses: string[];
+}
+
+function deps(
+  files: Record<string, string>,
+  answers: Parameters<typeof fakeModel>[0],
+  keys = { anthropic: "k" },
+  options: { failSummary?: boolean; onForge?: string[] } = {},
+) {
   const reads: string[] = [];
-  const adapter = {
+  const published: Published = { inline: [], summaries: [], statuses: [] };
+  const forge = {
     getChange: async () => ({ ...makeChangeSet(), forgeRef: { ...makeChangeSet().forgeRef, headSha: "newhead" } }),
     getFileAtRef: async (_p: string, path: string, ref: string) => {
       reads.push(`${ref}:${path}`);
       return files[`${ref}:${path}`] ?? null;
     },
-  } as unknown as ForgeAdapter;
+    listPostedFingerprints: async () => new Set(options.onForge ?? []),
+    postInlineComments: async (_ref: unknown, comments: InlineComment[]) => {
+      published.inline.push(...comments.map((c) => ({ fingerprint: c.fingerprint, startLine: c.startLine })));
+      return { posted: comments.map((c) => ({ fingerprint: c.fingerprint, forgeCommentId: `c-${c.fingerprint}` })), failed: [] };
+    },
+    upsertSummaryComment: async (_ref: unknown, body: string) => {
+      if (options.failSummary && !body.includes("Reviewing")) throw new Error("403 Forbidden");
+      published.summaries.push(body);
+      return "note-1";
+    },
+    setCommitStatus: async (_ref: unknown, status: { state: string }) => {
+      published.statuses.push(status.state);
+    },
+  } as unknown as Forge;
   const model = fakeModel(answers);
   const runDeps: RunJobDeps = {
-    adapterFor: () => adapter,
+    adapterFor: () => forge,
     generateFor: () => model.generate,
     apiKeysFor: async () => keys,
   };
-  return { runDeps, reads, model };
+  return { runDeps, reads, model, published };
 }
 
 async function claimedJob() {
@@ -110,5 +136,80 @@ describe("runJob", () => {
     expect((stored.result as { warnings: string[] }).warnings).toEqual([
       "Fallback model openai/gpt-5 skipped: no API key for its provider",
     ]);
+  });
+
+  it("posts progress first, then inline comments, the summary and the status", async () => {
+    const job = await claimedJob();
+    const { runDeps, published } = deps({}, { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    expect(published.summaries).toHaveLength(2);
+    expect(published.summaries[0]).toContain("Reviewing `newhead`");
+    expect(published.summaries[1]).toContain("## Bammy review");
+    expect(published.statuses).toEqual(["pending", "failure"]);
+    expect(published.inline).toHaveLength(1);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored.publication).toMatchObject({ summaryCommentId: "note-1", statusState: "failure", errors: [] });
+    expect(await prisma.postedFinding.count({ where: { repositoryId, number: 42 } })).toBe(1);
+  });
+
+  it("never posts the same finding twice across runs", async () => {
+    const answers = { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH };
+    await runJob(await claimedJob(), deps({}, answers).runDeps);
+
+    const second = deps({}, answers);
+    await enqueue({ repositoryId, number: 42, headSha: "again", trigger: "manual" });
+    await runJob((await claimNext())!, second.runDeps);
+
+    expect(second.published.inline).toEqual([]);
+    expect(await prisma.postedFinding.count()).toBe(1);
+  });
+
+  it("trusts markers already on the forge when the database has no row", async () => {
+    const answers = { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH };
+    const first = deps({}, answers);
+    await runJob(await claimedJob(), first.runDeps);
+    await prisma.postedFinding.deleteMany();
+
+    const second = deps({}, answers, { anthropic: "k" }, { onForge: [first.published.inline[0]!.fingerprint] });
+    await enqueue({ repositoryId, number: 42, headSha: "again", trigger: "manual" });
+    await runJob((await claimNext())!, second.runDeps);
+
+    expect(second.published.inline).toEqual([]);
+  });
+
+  it("marks the job partial when publishing fails, keeping the result", async () => {
+    const job = await claimedJob();
+    const { runDeps, published } = deps(
+      {},
+      { code_review: { findings: [] }, walkthrough: WALKTHROUGH },
+      { anthropic: "k" },
+      { failSummary: true },
+    );
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored).toMatchObject({ status: "partial", verdict: "pass", error: "Summary comment failed: 403 Forbidden" });
+    expect(stored.result).not.toBeNull();
+    // The status still went out even though the summary did not.
+    expect(published.statuses).toEqual(["pending", "success"]);
+  });
+
+  it("publishes nothing when every output is turned off", async () => {
+    await prisma.repository.update({
+      where: { id: repositoryId },
+      data: { settings: { output: { postInline: false, postSummary: false, postCheck: false } } },
+    });
+    const job = await claimedJob();
+    const { runDeps, published } = deps({}, { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH });
+
+    await runJob(job, runDeps);
+
+    expect(published).toEqual({ inline: [], summaries: [], statuses: [] });
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored.publication).toBeNull();
   });
 });

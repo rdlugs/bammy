@@ -1,10 +1,10 @@
 import { BUCKET_TITLE, SUMMARY_BUCKETS } from "../core/buckets.ts";
 import type { Finding, Omission, ReviewResult } from "../core/models.ts";
 import { SEVERITIES } from "../core/severity.ts";
+import { SUMMARY_MARKER } from "../core/markers.ts";
 import { summarize } from "./json.ts";
 
-// Marks Bammy's summary comment so a later run can find and update it.
-export const SUMMARY_MARKER = "<!-- bammy:summary -->";
+export { SUMMARY_MARKER };
 
 const VERDICT_LINE = {
   pass: "✅ **Pass**",

@@ -22,6 +22,9 @@ export const hunkSchema = z.object({
   // first @@). Covers added and context lines; a line missing here cannot carry
   // an inline comment.
   newLineToPosition: z.record(z.string(), z.number().int().positive()),
+  // New-file line to old-file line for unchanged context lines. GitLab needs
+  // both to anchor a comment on a line the change did not touch.
+  contextOldLines: z.record(z.string(), z.number().int().positive()),
 });
 export type Hunk = z.infer<typeof hunkSchema>;
 

@@ -62,6 +62,7 @@ export interface CompleteInput {
   verdict: ReviewJob["verdict"];
   result: unknown;
   summary?: unknown;
+  publication?: unknown;
   resolvedConfig?: unknown;
   error?: string | null;
 }
@@ -76,6 +77,7 @@ export async function complete(id: string, input: CompleteInput & Partial<Pick<R
       verdict: input.verdict,
       result: input.result as object,
       summary: input.summary as object | undefined,
+      publication: input.publication as object | undefined,
       resolvedConfig: input.resolvedConfig as object | undefined,
       error: input.error ?? null,
       lockedAt: null,
