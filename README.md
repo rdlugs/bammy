@@ -51,7 +51,9 @@ The `worker` container runs review jobs. It polls the `review_jobs` table (claim
 | DELETE | `/api/connections/:id` | Removes a connection and its repositories |
 | GET    | `/api/repos?connectionId=` | Repositories the connection can see, with their enabled flag |
 | POST   | `/api/repos`         | `{ connectionId, externalId }`, enables a repository for review |
-| PATCH  | `/api/repos/:id`     | `{ enabled }` |
+| PATCH  | `/api/repos/:id`     | `{ enabled?, settings? }`; `settings` replaces the saved review overrides |
+| GET    | `/api/repos/:id/config` | The effective review config for the default branch, where each value came from, and any repository-file warnings |
+| GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
 
 Register and login are rate limited (20 requests per 15 minutes per IP).
 
@@ -66,6 +68,47 @@ Register and login are rate limited (20 requests per 15 minutes per IP).
 - Copy the App ID, slug, client ID, a client secret and a generated private key into the `GITHUB_APP_*` variables.
 
 In production, self-hosted forge hosts must use https and resolve to public addresses.
+
+## Review configuration
+
+Settings resolve in this order, highest first:
+
+1. Overrides from whatever triggered the review
+2. `.bammy.yaml` (or `.bammy.yml`; the first found wins, they are not merged) in the repository, read from the PR's **base** revision so a change cannot loosen its own review
+3. Repository settings saved in the dashboard
+4. The selected profile: `balanced` (default), `fast`, `strict`, `security`
+5. Built-in defaults
+
+A field set explicitly in any layer beats the profile. An invalid repository file is ignored as a whole and reported as a warning; the review still runs. The file cannot hold API keys, tokens or endpoints.
+
+```yaml
+# .bammy.yaml - every key is optional
+profile: balanced
+llm:
+  model: anthropic/claude-sonnet-5-5   # provider/model: anthropic, openai or google
+  fallback_models: []
+  temperature: 0.2
+  max_tokens: 8000
+review:
+  categories: [security, bug, performance, logic, reliability]
+  severity_floor: minor     # what is reported
+  block_on: critical        # what fails the verdict and the commit status
+  max_findings: 25
+  max_chunks: 12
+  min_confidence: 0.5
+  require_evidence: true    # unproven critical/major findings are demoted
+  full_file: false          # allow findings on lines the change did not touch
+  committable_suggestions: true
+output:
+  walkthrough: true
+  post_inline: true
+  post_summary: true
+  post_check: true
+ignore_paths: ["**/*.lock", "**/dist/**"]   # replaces the default list
+instructions: "Controllers stay thin; business logic lives in services."
+language_instructions:
+  typescript: "Strict mode; no any."
+```
 
 ## Tests
 
