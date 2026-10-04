@@ -1,5 +1,4 @@
 import type { ReactNode } from "react"
-import { Cloud } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
 
 export function AuthLayout({ children }: { children: ReactNode }) {
@@ -10,9 +9,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
       </div>
       <div className="flex w-full max-w-sm flex-col gap-6">
         <div className="flex items-center gap-2 self-center font-medium">
-          <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Cloud className="size-4" />
-          </div>
+          <img src="/bammy.svg" alt="" className="size-6 rounded-md" />
           Bammy
         </div>
         {children}

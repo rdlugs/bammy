@@ -1,0 +1,11 @@
+{
+  "name": "Bammy",
+  "short_name": "Bammy",
+  "icons": [
+    { "src": "/bammy-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/bammy-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "theme_color": "#3949AB",
+  "background_color": "#ffffff",
+  "display": "standalone"
+}
