@@ -23,9 +23,10 @@ export class ForgeHttp {
   async request(path: string, init: RequestInit = {}): Promise<Response> {
     const url = path.startsWith("http") ? path : `${this.options.baseUrl}${path}`;
     const doFetch = this.options.fetch ?? globalThis.fetch;
+    const json: Record<string, string> = typeof init.body === "string" ? { "Content-Type": "application/json" } : {};
     const res = await doFetch(url, {
       ...init,
-      headers: { ...(await this.options.headers()), ...init.headers },
+      headers: { ...json, ...(await this.options.headers()), ...(init.headers as Record<string, string> | undefined) },
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");

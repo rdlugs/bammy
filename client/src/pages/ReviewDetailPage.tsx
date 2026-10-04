@@ -11,7 +11,14 @@ import { fetchReviewMarkdown, useRerunReview, useReview } from "@/features/revie
 import { StatusBadge, VerdictBadge } from "@/features/reviews/badges"
 import { FindingCard } from "@/features/reviews/FindingCard"
 import { changeLabel } from "@/features/reviews/links"
-import { BUCKET_ORDER, BUCKET_TITLE, isActive, type Finding, type ReviewResult } from "@/features/reviews/types"
+import {
+  BUCKET_ORDER,
+  BUCKET_TITLE,
+  isActive,
+  type Finding,
+  type Publication,
+  type ReviewResult,
+} from "@/features/reviews/types"
 
 const OMISSION_TEXT: Record<string, string> = {
   ignored: "ignored by configuration",
@@ -21,6 +28,20 @@ const OMISSION_TEXT: Record<string, string> = {
   too_large: "too large for one review pass",
   budget: "review pass limit reached",
   chunk_failed: "review pass failed",
+}
+
+function plural(count: number, word: string) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`
+}
+
+// One line on what reached the forge, so nobody has to go and check.
+function publicationText(publication: Publication, forge: string) {
+  const parts: string[] = []
+  if (publication.inlinePosted.length) parts.push(plural(publication.inlinePosted.length, "inline comment"))
+  if (publication.inlineSkipped) parts.push(`${publication.inlineSkipped} already posted`)
+  if (publication.summaryCommentId) parts.push("summary")
+  if (publication.statusState) parts.push(`commit status (${publication.statusState})`)
+  return parts.length ? `Posted to ${forge}: ${parts.join(", ")}` : `Nothing posted to ${forge}`
 }
 
 function groupByFile(findings: Finding[]) {
@@ -193,6 +214,11 @@ export function ReviewDetailPage() {
           <div className="flex items-center gap-2 pt-1">
             <StatusBadge status={review.status} />
             <VerdictBadge verdict={review.verdict} />
+            {review.publication && (
+              <span className="text-xs text-muted-foreground">
+                {publicationText(review.publication, review.repository.provider === "github" ? "GitHub" : "GitLab")}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex gap-2">

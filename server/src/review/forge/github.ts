@@ -1,12 +1,26 @@
-import type { ChangeSet, ChangeType } from "../core/models.ts";
+import { markersIn, SUMMARY_MARKER } from "../core/markers.ts";
+import type { ChangeSet, ChangeType, ForgeRef } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
-import { ForgeHttp, isNotFound, linkHeaderNext, type FetchLike } from "./http.ts";
+import { ForgeError, ForgeHttp, isNotFound, linkHeaderNext, type FetchLike } from "./http.ts";
 import { githubApiBase } from "./githubApp.ts";
-import type { ChangeHead, ForgeAccount, ForgeAdapter, ForgeRepo } from "./types.ts";
+import {
+  STATUS_CONTEXT,
+  type ChangeHead,
+  type CommitStatus,
+  type ForgeAccount,
+  type ForgeAdapter,
+  type ForgePublisher,
+  type ForgeRepo,
+  type InlineComment,
+  type InlineResult,
+} from "./types.ts";
 
 export interface GitHubAdapterOptions {
   host: string;
   token: () => Promise<string>;
+  // The login Bammy posts as (an app's is "<slug>[bot]"), used to find its own
+  // comments again.
+  selfLogin?: string;
   // App installations have no user; their account comes from the installation.
   account?: () => Promise<ForgeAccount>;
   fetch?: FetchLike;
@@ -71,7 +85,23 @@ function toRepo(repo: GhRepo): ForgeRepo {
   };
 }
 
-export class GitHubAdapter implements ForgeAdapter {
+interface GhComment {
+  id: number;
+  body: string;
+  user: { login: string } | null;
+}
+
+function reviewComment(comment: InlineComment) {
+  return {
+    path: comment.path,
+    line: comment.endLine,
+    side: "RIGHT" as const,
+    ...(comment.endLine > comment.startLine ? { start_line: comment.startLine, start_side: "RIGHT" as const } : {}),
+    body: comment.body,
+  };
+}
+
+export class GitHubAdapter implements ForgeAdapter, ForgePublisher {
   readonly provider = "github" as const;
   readonly host: string;
   private http: ForgeHttp;
@@ -174,5 +204,85 @@ export class GitHubAdapter implements ForgeAdapter {
       }
       throw err;
     }
+  }
+
+  private isSelf(comment: GhComment): boolean {
+    return Boolean(this.options.selfLogin) && comment.user?.login === this.options.selfLogin;
+  }
+
+  // One review carries every inline comment, posted as COMMENT: Bammy never
+  // approves or requests changes. If GitHub rejects the batch (one bad anchor
+  // fails the whole request), each comment is retried on its own so one
+  // problem does not lose the rest.
+  async postInlineComments(ref: ForgeRef, comments: InlineComment[]): Promise<InlineResult> {
+    if (comments.length === 0) return { posted: [], failed: [] };
+    const pulls = `${repoApiPath(ref.project)}/pulls/${ref.number}`;
+    try {
+      const review = await this.http.json<{ id: number }>(`${pulls}/reviews`, {
+        method: "POST",
+        body: JSON.stringify({ commit_id: ref.headSha, event: "COMMENT", comments: comments.map(reviewComment) }),
+      });
+      const created = await this.http.paginate<GhComment>(
+        `${pulls}/reviews/${review.id}/comments?per_page=100`,
+        linkHeaderNext,
+      );
+      const idByPrint = new Map<string, string>();
+      for (const comment of created) {
+        for (const print of markersIn(comment.body)) idByPrint.set(print, String(comment.id));
+      }
+      return {
+        posted: comments.map((c) => ({ fingerprint: c.fingerprint, forgeCommentId: idByPrint.get(c.fingerprint) ?? `review:${review.id}` })),
+        failed: [],
+      };
+    } catch (err) {
+      if (!(err instanceof ForgeError) || err.status !== 422) throw err;
+    }
+
+    const result: InlineResult = { posted: [], failed: [] };
+    for (const comment of comments) {
+      try {
+        const created = await this.http.json<GhComment>(`${pulls}/comments`, {
+          method: "POST",
+          body: JSON.stringify({ commit_id: ref.headSha, ...reviewComment(comment) }),
+        });
+        result.posted.push({ fingerprint: comment.fingerprint, forgeCommentId: String(created.id) });
+      } catch (err) {
+        result.failed.push({ fingerprint: comment.fingerprint, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return result;
+  }
+
+  async listPostedFingerprints(ref: ForgeRef): Promise<Set<string>> {
+    const comments = await this.http.paginate<GhComment>(
+      `${repoApiPath(ref.project)}/pulls/${ref.number}/comments?per_page=100`,
+      linkHeaderNext,
+    );
+    return new Set(comments.filter((c) => this.isSelf(c)).flatMap((c) => markersIn(c.body)));
+  }
+
+  async upsertSummaryComment(ref: ForgeRef, body: string): Promise<string> {
+    const issue = `${repoApiPath(ref.project)}/issues/${ref.number}`;
+    const comments = await this.http.paginate<GhComment>(`${issue}/comments?per_page=100`, linkHeaderNext);
+    const existing = comments.filter((c) => this.isSelf(c) && c.body.includes(SUMMARY_MARKER)).at(-1);
+    const saved = existing
+      ? await this.http.json<GhComment>(`${repoApiPath(ref.project)}/issues/comments/${existing.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ body }),
+        })
+      : await this.http.json<GhComment>(`${issue}/comments`, { method: "POST", body: JSON.stringify({ body }) });
+    return String(saved.id);
+  }
+
+  async setCommitStatus(ref: ForgeRef, status: CommitStatus): Promise<void> {
+    await this.http.request(`${repoApiPath(ref.project)}/statuses/${ref.headSha}`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: status.state,
+        context: STATUS_CONTEXT,
+        description: status.description.slice(0, 140),
+        ...(status.targetUrl ? { target_url: status.targetUrl } : {}),
+      }),
+    });
   }
 }

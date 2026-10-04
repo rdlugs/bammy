@@ -1,11 +1,26 @@
-import type { ChangeSet, ChangeType } from "../core/models.ts";
+import { markersIn, SUMMARY_MARKER } from "../core/markers.ts";
+import type { ChangeSet, ChangeType, ForgeRef } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
 import { ForgeHttp, isNotFound, type FetchLike } from "./http.ts";
-import { hostOrigin, type ChangeHead, type ForgeAccount, type ForgeAdapter, type ForgeRepo } from "./types.ts";
+import {
+  hostOrigin,
+  STATUS_CONTEXT,
+  type ChangeHead,
+  type CommitState,
+  type CommitStatus,
+  type ForgeAccount,
+  type ForgeAdapter,
+  type ForgePublisher,
+  type ForgeRepo,
+  type InlineComment,
+  type InlineResult,
+} from "./types.ts";
 
 export interface GitLabAdapterOptions {
   host: string;
   token: () => Promise<string>;
+  // The username Bammy posts as (the token's user), to find its own notes.
+  selfLogin?: string;
   fetch?: FetchLike;
 }
 
@@ -68,12 +83,34 @@ function nextPage(res: Response, current: string): string | null {
   return `${url.pathname}${url.search}`;
 }
 
-export class GitLabAdapter implements ForgeAdapter {
+interface GlNote {
+  id: number;
+  body: string;
+  system: boolean;
+  author: { username: string };
+}
+
+interface GlDiscussion {
+  id: string;
+  notes: GlNote[];
+}
+
+// GitLab has no "error" state; a review that could not finish fails the check.
+const GITLAB_STATE: Record<CommitState, string> = {
+  pending: "running",
+  success: "success",
+  failure: "failed",
+  error: "failed",
+};
+
+export class GitLabAdapter implements ForgeAdapter, ForgePublisher {
   readonly provider = "gitlab" as const;
   readonly host: string;
   private http: ForgeHttp;
+  private selfLogin: string | undefined;
 
   constructor(options: GitLabAdapterOptions) {
+    this.selfLogin = options.selfLogin;
     this.host = options.host;
     this.http = new ForgeHttp({
       baseUrl: `${hostOrigin(options.host)}/api/v4`,
@@ -163,5 +200,76 @@ export class GitLabAdapter implements ForgeAdapter {
       }
       throw err;
     }
+  }
+
+  private mergeRequest(ref: ForgeRef): string {
+    return `${this.project(ref.project)}/merge_requests/${ref.number}`;
+  }
+
+  private isSelf(note: GlNote): boolean {
+    return !note.system && Boolean(this.selfLogin) && note.author.username === this.selfLogin;
+  }
+
+  // GitLab has no batch review API, so each finding is its own discussion. A
+  // multi-line finding is anchored on its first line; its suggestion block
+  // carries the range.
+  async postInlineComments(ref: ForgeRef, comments: InlineComment[]): Promise<InlineResult> {
+    const result: InlineResult = { posted: [], failed: [] };
+    for (const comment of comments) {
+      const position = {
+        position_type: "text",
+        base_sha: ref.baseSha,
+        start_sha: ref.startSha,
+        head_sha: ref.headSha,
+        new_path: comment.path,
+        old_path: comment.previousPath ?? comment.path,
+        new_line: comment.startLine,
+        ...(comment.oldLine !== undefined ? { old_line: comment.oldLine } : {}),
+      };
+      try {
+        const discussion = await this.http.json<GlDiscussion>(`${this.mergeRequest(ref)}/discussions`, {
+          method: "POST",
+          body: JSON.stringify({ body: comment.body, position }),
+        });
+        result.posted.push({ fingerprint: comment.fingerprint, forgeCommentId: discussion.id });
+      } catch (err) {
+        result.failed.push({ fingerprint: comment.fingerprint, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    return result;
+  }
+
+  async listPostedFingerprints(ref: ForgeRef): Promise<Set<string>> {
+    const discussions = await this.http.paginate<GlDiscussion>(
+      `${this.mergeRequest(ref)}/discussions?per_page=100`,
+      nextPage,
+    );
+    return new Set(
+      discussions.flatMap((d) => d.notes.slice(0, 1)).filter((n) => this.isSelf(n)).flatMap((n) => markersIn(n.body)),
+    );
+  }
+
+  async upsertSummaryComment(ref: ForgeRef, body: string): Promise<string> {
+    const notes = await this.http.paginate<GlNote>(`${this.mergeRequest(ref)}/notes?per_page=100&sort=asc`, nextPage);
+    const existing = notes.filter((n) => this.isSelf(n) && n.body.includes(SUMMARY_MARKER)).at(-1);
+    const saved = existing
+      ? await this.http.json<GlNote>(`${this.mergeRequest(ref)}/notes/${existing.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ body }),
+        })
+      : await this.http.json<GlNote>(`${this.mergeRequest(ref)}/notes`, { method: "POST", body: JSON.stringify({ body }) });
+    return String(saved.id);
+  }
+
+  async setCommitStatus(ref: ForgeRef, status: CommitStatus): Promise<void> {
+    await this.http.request(`${this.project(ref.project)}/statuses/${ref.headSha}`, {
+      method: "POST",
+      body: JSON.stringify({
+        state: GITLAB_STATE[status.state],
+        name: STATUS_CONTEXT,
+        description: status.description.slice(0, 255),
+        ...(status.targetUrl ? { target_url: status.targetUrl } : {}),
+      }),
+    });
   }
 }

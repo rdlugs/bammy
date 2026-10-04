@@ -52,6 +52,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      # Commit statuses link back to the review in the dashboard.
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN}
       GITHUB_HOST: ${GITHUB_HOST:-github.com}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}

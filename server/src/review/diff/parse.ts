@@ -46,6 +46,7 @@ export function parsePatch(patch: string): Hunk[] {
         content: "",
         addedLines: [],
         newLineToPosition: {},
+        contextOldLines: {},
         lines: [line],
       };
       continue;
@@ -67,6 +68,7 @@ export function parsePatch(patch: string): Hunk[] {
       // "\ No newline at end of file": occupies a position, maps to no line.
     } else {
       current.newLineToPosition[String(newLine)] = position;
+      current.contextOldLines[String(newLine)] = oldLine;
       oldLine += 1;
       newLine += 1;
     }

@@ -1,16 +1,19 @@
+import { env } from "../config/env.ts";
 import type { ForgeConnection, ReviewJob } from "../generated/prisma/client.ts";
 import { prisma } from "../lib/prisma.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
-import type { ForgeAdapter } from "../review/forge/types.ts";
 import { createGenerate, missingKeys, type ApiKeys, type Generate } from "../review/llm/providers.ts";
 import { runReview } from "../review/pipeline.ts";
+import { publishes, publishReview } from "../review/publish/publisher.ts";
+import { pendingStatus } from "../review/publish/status.ts";
 import { summarize } from "../review/render/json.ts";
-import { adapterForConnection } from "../services/forge.ts";
+import { progressMarkdown } from "../review/render/progress.ts";
+import { adapterForConnection, type Forge } from "../services/forge.ts";
 import { apiKeysFor } from "../services/llm.ts";
 import { complete } from "./queue.ts";
 
 export interface RunJobDeps {
-  adapterFor: (connection: ForgeConnection) => ForgeAdapter;
+  adapterFor: (connection: ForgeConnection) => Forge;
   generateFor: (keys: ApiKeys) => Generate;
   apiKeysFor: (userId: string) => Promise<ApiKeys>;
 }
@@ -21,10 +24,15 @@ const defaultDeps: RunJobDeps = {
   apiKeysFor,
 };
 
-// Loads everything a review needs, runs it, and stores the result. Anything
-// thrown here (the repository vanished, the forge is down, no model key) fails
-// the job through the worker; problems inside the review are recorded in the
-// result instead.
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// Loads everything a review needs, runs it, publishes it and stores the
+// result. Anything thrown before the review starts (the repository vanished,
+// the forge is down, no model key) fails the job through the worker, and
+// nothing has been posted yet. Problems inside the review or while publishing
+// are recorded instead.
 export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Promise<void> {
   const repo = await prisma.repository.findUnique({
     where: { id: job.repositoryId },
@@ -34,12 +42,12 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     throw new Error("The repository is no longer connected");
   }
 
-  const adapter = deps.adapterFor(repo.connection);
+  const forge = deps.adapterFor(repo.connection);
   // The PR may have moved since the job was queued; review what is there now
   // and record which head that was.
-  const changeSet = await adapter.getChange(repo.fullPath, job.number);
+  const changeSet = await forge.getChange(repo.fullPath, job.number);
   const loaded = await loadReviewConfig({
-    adapter,
+    adapter: forge,
     project: repo.fullPath,
     ref: changeSet.forgeRef.baseSha,
     repoSettings: repo.settings,
@@ -58,19 +66,67 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     return usable;
   });
 
+  const targetUrl = `${env.CLIENT_ORIGIN}/reviews/${job.id}`;
+  const ref = changeSet.forgeRef;
+  if (publishes(config)) {
+    // Best effort: a review must not fail because its progress note did.
+    if (config.output.postSummary) {
+      await forge.upsertSummaryComment(ref, progressMarkdown(changeSet)).catch((err: unknown) => {
+        warnings.push(`Progress comment failed: ${message(err)}`);
+      });
+    }
+    if (config.output.postCheck) {
+      await forge.setCommitStatus(ref, pendingStatus(targetUrl)).catch((err: unknown) => {
+        warnings.push(`Pending status failed: ${message(err)}`);
+      });
+    }
+  }
+
   const result = await runReview(
     { changeSet, config: { ...config, llm: { ...config.llm, fallbackModels } }, warnings },
     { generate: deps.generateFor(keys) },
   );
 
+  let publication = null;
+  if (publishes(config)) {
+    const already = await prisma.postedFinding.findMany({
+      where: { repositoryId: repo.id, number: job.number },
+      select: { fingerprint: true },
+    });
+    publication = await publishReview({
+      publisher: forge,
+      changeSet,
+      result,
+      config,
+      postedFingerprints: new Set(already.map((row) => row.fingerprint)),
+      targetUrl,
+    });
+    if (publication.inlinePosted.length) {
+      await prisma.postedFinding.createMany({
+        data: publication.inlinePosted.map((posted) => ({
+          repositoryId: repo.id,
+          number: job.number,
+          fingerprint: posted.fingerprint,
+          forgeCommentId: posted.forgeCommentId,
+        })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  // A review that ran but could not be fully published is partial: the result
+  // stands, and the job says what did not reach the forge.
+  const errors = [...result.errors, ...(publication?.errors ?? [])];
+  const status = result.status === "completed" && publication?.errors.length ? "partial" : result.status;
   await complete(job.id, {
-    status: result.status,
+    status,
     verdict: result.verdict.verdict,
     result,
     summary: summarize(result),
+    publication,
     resolvedConfig: { config, sources: loaded.sources, repoFile: loaded.repoFile },
-    error: result.errors.length ? result.errors.join("\n") : null,
-    headSha: changeSet.forgeRef.headSha,
-    baseSha: changeSet.forgeRef.baseSha,
+    error: errors.length ? errors.join("\n") : null,
+    headSha: ref.headSha,
+    baseSha: ref.baseSha,
   });
 }

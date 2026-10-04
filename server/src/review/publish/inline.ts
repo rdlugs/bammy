@@ -1,0 +1,60 @@
+import type { ChangeSet, Finding, ForgeProvider } from "../core/models.ts";
+import { fingerprintMarker } from "../core/markers.ts";
+import type { InlineComment } from "../forge/types.ts";
+import { sanitize } from "../render/markdown.ts";
+
+function fence(code: string, info: string): string {
+  const longest = Math.max(2, ...[...code.matchAll(/`+/g)].map((m) => m[0].length));
+  const ticks = "`".repeat(longest + 1);
+  return `${ticks}${info}\n${code.replace(/\n$/, "")}\n${ticks}`;
+}
+
+// GitHub's suggestion replaces exactly the commented range. GitLab anchors on
+// the first line, so the block says how many lines below it to replace.
+function suggestionInfo(finding: Finding, provider: ForgeProvider): string {
+  return provider === "gitlab" ? `suggestion:-0+${finding.endLine - finding.startLine}` : "suggestion";
+}
+
+export function inlineBody(finding: Finding, provider: ForgeProvider): string {
+  const lines = [
+    `**${finding.severity}** · ${finding.category}${finding.kind === "potential_issue" ? "" : ` · ${finding.kind.replace(/_/g, " ")}`}`,
+    "",
+    `**${sanitize(finding.title)}**`,
+    "",
+    sanitize(finding.body),
+  ];
+  if (finding.evidenceNote) lines.push("", `<sub>Evidence: ${sanitize(finding.evidenceNote)}</sub>`);
+  if (finding.suggestion) lines.push("", fence(finding.suggestion, suggestionInfo(finding, provider)));
+  lines.push("", fingerprintMarker(finding.fingerprint));
+  return lines.join("\n");
+}
+
+// Only actionable findings become inline threads; everything else lives in
+// the summary. The bucket was decided once, when the finding was validated.
+export function inlineComments(
+  findings: Finding[],
+  changeSet: ChangeSet,
+  provider: ForgeProvider,
+  alreadyPosted: Set<string>,
+): InlineComment[] {
+  const files = new Map(changeSet.files.map((file) => [file.path, file]));
+  const comments: InlineComment[] = [];
+  for (const finding of findings) {
+    if (finding.bucket !== "actionable" || alreadyPosted.has(finding.fingerprint)) continue;
+    const file = files.get(finding.file);
+    if (!file) continue;
+    const oldLine = file.hunks
+      .map((hunk) => hunk.contextOldLines[String(finding.startLine)])
+      .find((line) => line !== undefined);
+    comments.push({
+      fingerprint: finding.fingerprint,
+      path: file.path,
+      ...(file.previousPath ? { previousPath: file.previousPath } : {}),
+      startLine: finding.startLine,
+      endLine: finding.endLine,
+      ...(oldLine !== undefined ? { oldLine } : {}),
+      body: inlineBody(finding, provider),
+    });
+  }
+  return comments;
+}

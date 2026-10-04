@@ -74,6 +74,16 @@ Register and login are rate limited (20 requests per 15 minutes per IP).
 
 In production, self-hosted forge hosts must use https and resolve to public addresses.
 
+## Publishing to the forge
+
+When a review starts, Bammy posts a "reviewing" summary comment and sets a pending `bammy/review` commit status. When it finishes it publishes, each step independently:
+
+- **Inline comments** for actionable findings only (GitHub: one review posted as `COMMENT`, never approve or request changes; GitLab: one discussion per finding). Suggestions use each forge's suggestion syntax. Each comment carries a hidden fingerprint, so a later run never posts the same finding twice, even if Bammy's own records are lost.
+- **The summary comment**, edited in place: exactly the markdown served by `GET /api/reviews/:id/markdown`.
+- **The commit status**: `success` (pass), `failure` (blocked) or `error` (incomplete; GitLab shows it as `failed`), linking to the review in the dashboard. Branch protection can require it.
+
+Turn each one off with `output.post_inline`, `output.post_summary` and `output.post_check`. If publishing fails, the review is kept and the job is marked partial with the reason.
+
 ## Review configuration
 
 Settings resolve in this order, highest first:

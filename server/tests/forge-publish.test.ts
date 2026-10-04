@@ -1,0 +1,216 @@
+import { describe, expect, it } from "vitest";
+import { SUMMARY_MARKER, fingerprintMarker } from "../src/review/core/markers.ts";
+import type { ForgeRef } from "../src/review/core/models.ts";
+import { GitHubAdapter } from "../src/review/forge/github.ts";
+import { GitLabAdapter } from "../src/review/forge/gitlab.ts";
+import type { InlineComment } from "../src/review/forge/types.ts";
+import { fetchStub, type StubRoute } from "./helpers/fetchStub.ts";
+
+const ghRef: ForgeRef = {
+  provider: "github",
+  host: "github.com",
+  project: "acme/web",
+  number: 42,
+  baseSha: "base",
+  startSha: "base",
+  headSha: "head",
+};
+const glRef: ForgeRef = { ...ghRef, provider: "gitlab", host: "gitlab.com", project: "team/app", startSha: "start" };
+
+const comment = (fingerprint: string, extra: Partial<InlineComment> = {}): InlineComment => ({
+  fingerprint,
+  path: "src/a.ts",
+  startLine: 11,
+  endLine: 11,
+  body: `Problem\n\n${fingerprintMarker(fingerprint)}`,
+  ...extra,
+});
+
+const github = (routes: StubRoute[]) => {
+  const stub = fetchStub(routes);
+  return { ...stub, gh: new GitHubAdapter({ host: "github.com", token: async () => "t", selfLogin: "bammy[bot]", fetch: stub.fetch }) };
+};
+const gitlab = (routes: StubRoute[]) => {
+  const stub = fetchStub(routes);
+  return { ...stub, gl: new GitLabAdapter({ host: "gitlab.com", token: async () => "t", selfLogin: "bammy-bot", fetch: stub.fetch }) };
+};
+const body = (call: { body?: string }) => JSON.parse(call.body ?? "{}");
+
+describe("GitHub publishing", () => {
+  it("posts one COMMENT review at the head commit with right-side line anchors", async () => {
+    const { gh, calls } = github([
+      { method: "POST", url: /\/pulls\/42\/reviews$/, body: { id: 7 } },
+      {
+        url: /\/pulls\/42\/reviews\/7\/comments/,
+        body: [
+          { id: 101, body: comment("aaaaaaaaaaaaaaaa").body, user: { login: "bammy[bot]" } },
+          { id: 102, body: comment("bbbbbbbbbbbbbbbb").body, user: { login: "bammy[bot]" } },
+        ],
+      },
+    ]);
+
+    const result = await gh.postInlineComments(ghRef, [
+      comment("aaaaaaaaaaaaaaaa"),
+      comment("bbbbbbbbbbbbbbbb", { startLine: 11, endLine: 12 }),
+    ]);
+
+    expect(body(calls[0]!)).toEqual({
+      commit_id: "head",
+      event: "COMMENT",
+      comments: [
+        { path: "src/a.ts", line: 11, side: "RIGHT", body: comment("aaaaaaaaaaaaaaaa").body },
+        { path: "src/a.ts", line: 12, side: "RIGHT", start_line: 11, start_side: "RIGHT", body: comment("bbbbbbbbbbbbbbbb").body },
+      ],
+    });
+    expect(calls[0]!.headers["content-type"]).toBe("application/json");
+    expect(result).toEqual({
+      posted: [
+        { fingerprint: "aaaaaaaaaaaaaaaa", forgeCommentId: "101" },
+        { fingerprint: "bbbbbbbbbbbbbbbb", forgeCommentId: "102" },
+      ],
+      failed: [],
+    });
+  });
+
+  it("falls back to one comment at a time when the batch is rejected", async () => {
+    let n = 0;
+    const { gh } = github([
+      { method: "POST", url: /\/pulls\/42\/reviews$/, status: 422, body: { message: "Line could not be resolved" } },
+      {
+        method: "POST",
+        url: /\/pulls\/42\/comments$/,
+        get status() {
+          return n++ === 0 ? 201 : 422;
+        },
+        body: { id: 201 },
+      },
+    ]);
+
+    const result = await gh.postInlineComments(ghRef, [comment("aaaaaaaaaaaaaaaa"), comment("bbbbbbbbbbbbbbbb")]);
+
+    expect(result.posted).toEqual([{ fingerprint: "aaaaaaaaaaaaaaaa", forgeCommentId: "201" }]);
+    expect(result.failed.map((f) => f.fingerprint)).toEqual(["bbbbbbbbbbbbbbbb"]);
+  });
+
+  it("edits its own summary and ignores a lookalike from someone else", async () => {
+    const { gh, calls } = github([
+      {
+        url: /\/issues\/42\/comments\?per_page=100$/,
+        body: [
+          { id: 1, body: `quoted ${SUMMARY_MARKER}`, user: { login: "mallory" } },
+          { id: 2, body: `old ${SUMMARY_MARKER}`, user: { login: "bammy[bot]" } },
+        ],
+      },
+      { method: "PATCH", url: /\/issues\/comments\/2$/, body: { id: 2 } },
+    ]);
+
+    expect(await gh.upsertSummaryComment(ghRef, "new")).toBe("2");
+    expect(calls.at(-1)).toMatchObject({ method: "PATCH" });
+    expect(body(calls.at(-1)!)).toEqual({ body: "new" });
+  });
+
+  it("creates the summary when none of its own exists", async () => {
+    const { gh, calls } = github([
+      { url: /\/issues\/42\/comments\?per_page=100$/, body: [] },
+      { method: "POST", url: /\/issues\/42\/comments$/, body: { id: 9 } },
+    ]);
+    expect(await gh.upsertSummaryComment(ghRef, "hello")).toBe("9");
+    expect(calls.at(-1)!.method).toBe("POST");
+  });
+
+  it("reads fingerprints only from its own inline comments", async () => {
+    const { gh } = github([
+      {
+        url: /\/pulls\/42\/comments\?per_page=100$/,
+        body: [
+          { id: 1, body: fingerprintMarker("aaaaaaaaaaaaaaaa"), user: { login: "bammy[bot]" } },
+          { id: 2, body: fingerprintMarker("bbbbbbbbbbbbbbbb"), user: { login: "mallory" } },
+        ],
+      },
+    ]);
+    expect(await gh.listPostedFingerprints(ghRef)).toEqual(new Set(["aaaaaaaaaaaaaaaa"]));
+  });
+
+  it("sets the bammy/review status on the head commit", async () => {
+    const { gh, calls } = github([{ method: "POST", url: /\/statuses\/head$/, body: {} }]);
+    await gh.setCommitStatus(ghRef, { state: "failure", description: "x".repeat(200), targetUrl: "http://app/r/1" });
+    expect(body(calls[0]!)).toEqual({
+      state: "failure",
+      context: "bammy/review",
+      description: "x".repeat(140),
+      target_url: "http://app/r/1",
+    });
+  });
+});
+
+describe("GitLab publishing", () => {
+  it("opens one discussion per finding with a full text position", async () => {
+    const { gl, calls } = gitlab([
+      { method: "POST", url: /\/merge_requests\/42\/discussions$/, body: { id: "d1", notes: [] } },
+    ]);
+
+    const result = await gl.postInlineComments(glRef, [
+      comment("aaaaaaaaaaaaaaaa", { previousPath: "src/old.ts" }),
+      comment("bbbbbbbbbbbbbbbb", { startLine: 13, endLine: 13, oldLine: 11 }),
+    ]);
+
+    expect(body(calls[0]!).position).toEqual({
+      position_type: "text",
+      base_sha: "base",
+      start_sha: "start",
+      head_sha: "head",
+      new_path: "src/a.ts",
+      old_path: "src/old.ts",
+      new_line: 11,
+    });
+    expect(body(calls[1]!).position).toMatchObject({ new_line: 13, old_line: 11, old_path: "src/a.ts" });
+    expect(calls[0]!.headers["content-type"]).toBe("application/json");
+    expect(result.posted).toEqual([
+      { fingerprint: "aaaaaaaaaaaaaaaa", forgeCommentId: "d1" },
+      { fingerprint: "bbbbbbbbbbbbbbbb", forgeCommentId: "d1" },
+    ]);
+  });
+
+  it("records a rejected position as a failure and carries on", async () => {
+    let n = 0;
+    const { gl } = gitlab([
+      {
+        method: "POST",
+        url: /\/discussions$/,
+        get status() {
+          return n++ === 0 ? 400 : 201;
+        },
+        body: { id: "d2", notes: [], message: "line_code can't be blank" },
+      },
+    ]);
+
+    const result = await gl.postInlineComments(glRef, [comment("aaaaaaaaaaaaaaaa"), comment("bbbbbbbbbbbbbbbb")]);
+
+    expect(result.failed.map((f) => f.fingerprint)).toEqual(["aaaaaaaaaaaaaaaa"]);
+    expect(result.posted).toEqual([{ fingerprint: "bbbbbbbbbbbbbbbb", forgeCommentId: "d2" }]);
+  });
+
+  it("edits its own summary note, skipping system notes and other authors", async () => {
+    const { gl, calls } = gitlab([
+      {
+        url: /\/merge_requests\/42\/notes\?per_page=100&sort=asc$/,
+        body: [
+          { id: 1, body: SUMMARY_MARKER, system: true, author: { username: "bammy-bot" } },
+          { id: 2, body: SUMMARY_MARKER, system: false, author: { username: "mallory" } },
+          { id: 3, body: SUMMARY_MARKER, system: false, author: { username: "bammy-bot" } },
+        ],
+      },
+      { method: "PUT", url: /\/notes\/3$/, body: { id: 3 } },
+    ]);
+    expect(await gl.upsertSummaryComment(glRef, "new")).toBe("3");
+    expect(body(calls.at(-1)!)).toEqual({ body: "new" });
+  });
+
+  it("maps states onto GitLab's commit status names", async () => {
+    const { gl, calls } = gitlab([{ method: "POST", url: /\/projects\/team%2Fapp\/statuses\/head$/, body: {} }]);
+    await gl.setCommitStatus(glRef, { state: "error", description: "Review incomplete" });
+    await gl.setCommitStatus(glRef, { state: "pending", description: "Review in progress" });
+    expect(calls.map((c) => body(c).state)).toEqual(["failed", "running"]);
+    expect(body(calls[0]!).name).toBe("bammy/review");
+  });
+});
