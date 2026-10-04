@@ -1,5 +1,5 @@
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router"
-import { ChevronsUpDown, FolderGit2, GitPullRequest, LayoutDashboard, LogOut, Plug } from "lucide-react"
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router"
+import { ChevronsUpDown, FolderGit2, GitPullRequest, LayoutDashboard, LogOut, Plug, Settings } from "lucide-react"
 import { toast } from "sonner"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -36,6 +36,7 @@ const NAV = [
 
 function pageTitle(pathname: string) {
   if (pathname.startsWith("/reviews/")) return "Review"
+  if (pathname.startsWith("/settings")) return "Settings"
   return NAV.find((item) => pathname.startsWith(item.to))?.label ?? "Dashboard"
 }
 
@@ -122,6 +123,12 @@ export function DashboardLayout() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to="/settings">
+                      <Settings />
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={handleLogout}>
                     <LogOut />
                     Log out

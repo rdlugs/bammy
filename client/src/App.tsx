@@ -9,6 +9,7 @@ import { RegisterPage } from "@/pages/RegisterPage"
 import { RepositoriesPage } from "@/pages/RepositoriesPage"
 import { ReviewDetailPage } from "@/pages/ReviewDetailPage"
 import { ReviewsPage } from "@/pages/ReviewsPage"
+import { SettingsPage } from "@/pages/SettingsPage"
 
 export function App() {
   return (
@@ -24,6 +25,7 @@ export function App() {
           <Route path="/reviews/:id" element={<ReviewDetailPage />} />
           <Route path="/repositories" element={<RepositoriesPage />} />
           <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
