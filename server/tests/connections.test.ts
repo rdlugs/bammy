@@ -82,6 +82,72 @@ describe("POST /api/connections/gitlab", () => {
   });
 });
 
+describe("POST /api/connections/github", () => {
+  it("validates an Enterprise Server token against /api/v3 and stores it encrypted", async () => {
+    const { fetch, calls } = fetchStub([{ url: /ghe\.acme\.com\/api\/v3\/user$/, body: { login: "dev" } }]);
+    vi.stubGlobal("fetch", fetch);
+
+    const res = await request(app)
+      .post("/api/connections/github")
+      .set("Cookie", cookie)
+      .send({ host: "https://ghe.acme.com/", token: "ghp-secret" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.connection).toMatchObject({ provider: "github", kind: "token", host: "ghe.acme.com", accountLogin: "dev" });
+    expect(JSON.stringify(res.body)).not.toContain("ghp-secret");
+    expect(calls[0]!.headers.authorization).toBe("Bearer ghp-secret");
+
+    const stored = await prisma.forgeConnection.findFirstOrThrow({ where: { userId } });
+    expect(decrypt(stored.encryptedToken!)).toBe("ghp-secret");
+  });
+
+  it("updates the token when the same account reconnects", async () => {
+    vi.stubGlobal("fetch", fetchStub([{ url: /\/user$/, body: { login: "dev" } }]).fetch);
+
+    const send = (token: string) =>
+      request(app).post("/api/connections/github").set("Cookie", cookie).send({ host: "ghe.acme.com", token });
+    await send("one");
+    const res = await send("two");
+
+    expect(res.status).toBe(200);
+    const stored = await prisma.forgeConnection.findMany({ where: { userId } });
+    expect(stored).toHaveLength(1);
+    expect(decrypt(stored[0]!.encryptedToken!)).toBe("two");
+  });
+
+  it("rejects a token GitHub refuses", async () => {
+    vi.stubGlobal("fetch", fetchStub([{ url: /\/user$/, status: 401, body: { message: "Bad credentials" } }]).fetch);
+
+    const res = await request(app)
+      .post("/api/connections/github")
+      .set("Cookie", cookie)
+      .send({ host: "ghe.acme.com", token: "bad" });
+
+    expect(res.status).toBe(400);
+    expect(await prisma.forgeConnection.count()).toBe(0);
+  });
+
+  it("sends github.com to the GitHub App and requires a host", async () => {
+    const dotcom = await request(app)
+      .post("/api/connections/github")
+      .set("Cookie", cookie)
+      .send({ host: "github.com", token: "x" });
+    const missing = await request(app).post("/api/connections/github").set("Cookie", cookie).send({ token: "x" });
+
+    expect(dotcom.status).toBe(400);
+    expect(Object.keys(dotcom.body.errors)).toEqual(["host"]);
+    expect(missing.status).toBe(400);
+    expect(Object.keys(missing.body.errors)).toContain("host");
+  });
+});
+
+describe("POST /api/connections/:provider", () => {
+  it("404s for a provider Bammy does not know", async () => {
+    const res = await request(app).post("/api/connections/bitbucket").set("Cookie", cookie).send({ token: "x" });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("GET /api/connections", () => {
   it("lists only the caller's connections without secrets", async () => {
     const other = await createUser("other@example.com");
@@ -95,7 +161,7 @@ describe("GET /api/connections", () => {
     const res = await request(app).get("/api/connections").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
-    expect(res.body.githubAvailable).toBe(true);
+    expect(res.body.availableApps).toEqual(["github"]);
     expect(res.body.connections).toHaveLength(1);
     expect(res.body.connections[0]).toMatchObject({ accountLogin: "me" });
     expect(res.body.connections[0].encryptedToken).toBeUndefined();

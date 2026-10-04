@@ -1,5 +1,6 @@
 import { Link } from "react-router"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { PROVIDERS } from "@/features/forge/providers"
 import { timeAgo } from "@/lib/time"
 import { SeverityBadge, StatusBadge, VerdictBadge } from "./badges"
 import { changeLabel } from "./links"
@@ -39,7 +40,7 @@ export function ReviewsTable({ reviews }: { reviews: ReviewListItem[] }) {
             <TableCell className="max-w-md">
               <Link to={`/reviews/${review.id}`} className="font-medium hover:underline">
                 {review.summary?.title ??
-                  `${review.repository.provider === "gitlab" ? "Merge" : "Pull"} request ${changeLabel(review.repository.provider, review.number)}`}
+                  `${PROVIDERS[review.repository.provider].changeNoun} ${changeLabel(review.repository.provider, review.number)}`}
               </Link>
               <div className="truncate text-xs text-muted-foreground">
                 {review.repository.fullPath} {changeLabel(review.repository.provider, review.number)} ·{" "}

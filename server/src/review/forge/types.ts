@@ -34,6 +34,19 @@ export interface ForgeAdapter {
   getFileAtRef(project: string, path: string, ref: string): Promise<string | null>;
 }
 
+// Webhooks Bammy registers on one repository, for forges (or connection kinds)
+// that do not deliver events through an app.
+export interface HookTarget {
+  externalId: string;
+  fullPath: string;
+}
+
+export interface ForgeHooks {
+  createHook(repo: HookTarget, url: string, secret: string): Promise<string>;
+  // Succeeds when the hook is already gone.
+  deleteHook(repo: HookTarget, hookId: string): Promise<void>;
+}
+
 // "gitlab.com" means https; a self-hosted plain-http instance keeps its scheme.
 export function hostOrigin(host: string): string {
   return /^https?:\/\//.test(host) ? host.replace(/\/+$/, "") : `https://${host}`;

@@ -17,7 +17,7 @@ describe("routing and auth", () => {
   it("shows the dashboard with setup steps for a new user", async () => {
     mockFetch((url) =>
       url.includes("/connections")
-        ? jsonResponse(200, { connections: [], githubAvailable: true })
+        ? jsonResponse(200, { connections: [], availableApps: ["github"] })
         : url.includes("/reviews")
           ? jsonResponse(200, { reviews: [], nextCursor: null })
           : jsonResponse(200, { user }),

@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { fetchReviewMarkdown, useRerunReview, useReview } from "@/features/reviews/api"
 import { StatusBadge, VerdictBadge } from "@/features/reviews/badges"
 import { FindingCard } from "@/features/reviews/FindingCard"
+import { PROVIDERS } from "@/features/forge/providers"
 import { changeLabel } from "@/features/reviews/links"
 import {
   BUCKET_ORDER,
@@ -205,7 +206,7 @@ export function ReviewDetailPage() {
               <>
                 {" · "}
                 <a href={webUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:underline">
-                  Open on {review.repository.provider === "github" ? "GitHub" : "GitLab"}
+                  Open on {PROVIDERS[review.repository.provider].label}
                   <ExternalLink className="size-3" />
                 </a>
               </>
@@ -216,7 +217,7 @@ export function ReviewDetailPage() {
             <VerdictBadge verdict={review.verdict} />
             {review.publication && (
               <span className="text-xs text-muted-foreground">
-                {publicationText(review.publication, review.repository.provider === "github" ? "GitHub" : "GitLab")}
+                {publicationText(review.publication, PROVIDERS[review.repository.provider].label)}
               </span>
             )}
           </div>

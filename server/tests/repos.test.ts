@@ -1,7 +1,7 @@
 import request from "supertest";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app.ts";
-import { encrypt } from "../src/lib/crypto.ts";
+import { decrypt, encrypt } from "../src/lib/crypto.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { fetchStub } from "./helpers/fetchStub.ts";
 import { createUser } from "./helpers/users.ts";
@@ -275,5 +275,46 @@ describe("GitLab webhooks follow the enabled switch", () => {
     expect(res.body.repo.enabled).toBe(true);
     expect(res.body.webhook.active).toBe(false);
     expect(res.body.webhook.error).toMatch(/Automatic reviews are off/);
+  });
+});
+
+describe("GitHub token connections get their own repository hook", () => {
+  it("registers a signed hook when enabling and removes it when disabling", async () => {
+    const connection = await prisma.forgeConnection.create({
+      data: {
+        userId: (await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } })).userId,
+        provider: "github",
+        host: "ghe.acme.com",
+        kind: "token",
+        accountLogin: "dev",
+        encryptedToken: encrypt("ghp"),
+      },
+    });
+    const { fetch, calls } = fetchStub([
+      {
+        url: /ghe\.acme\.com\/api\/v3\/repositories\/5$/,
+        body: { id: 5, full_name: "acme/api", default_branch: "main", private: true, html_url: "u" },
+      },
+      { method: "POST", url: /\/repos\/acme\/api\/hooks$/, body: { id: 616 } },
+      { method: "DELETE", url: /\/repos\/acme\/api\/hooks\/616$/, status: 204, body: "" },
+    ]);
+    vi.stubGlobal("fetch", fetch);
+
+    const enabled = await request(app)
+      .post("/api/repos")
+      .set("Cookie", cookie)
+      .send({ connectionId: connection.id, externalId: "5" });
+
+    expect(enabled.body.webhook).toEqual({ active: true });
+    const hook = JSON.parse(calls.find((c) => c.method === "POST")!.body!);
+    expect(hook.config.url).toBe(`https://bammy.example.com/api/webhooks/github/${enabled.body.repo.id}`);
+    const stored = await prisma.repository.findUniqueOrThrow({ where: { id: enabled.body.repo.id } });
+    expect(stored.webhookId).toBe("616");
+    expect(decrypt(stored.encryptedWebhookSecret!)).toBe(hook.config.secret);
+
+    await request(app).patch(`/api/repos/${enabled.body.repo.id}`).set("Cookie", cookie).send({ enabled: false });
+
+    expect(calls.some((c) => c.method === "DELETE")).toBe(true);
+    expect((await prisma.repository.findUniqueOrThrow({ where: { id: enabled.body.repo.id } })).webhookId).toBeNull();
   });
 });

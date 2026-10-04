@@ -69,15 +69,18 @@ export interface ConfigSchema {
 export function useConnections() {
   return useQuery({
     queryKey: ["connections"],
-    queryFn: () => api<{ connections: Connection[]; githubAvailable: boolean }>("/connections"),
+    queryFn: () => api<{ connections: Connection[]; availableApps: Provider[] }>("/connections"),
   })
 }
 
-export function useConnectGitlab() {
+// host and token, plus any extra fields the provider's connect method declares.
+export type TokenConnectInput = Record<string, string>
+
+export function useConnectToken(provider: Provider) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: { host: string; token: string }) =>
-      api<{ connection: Connection }>("/connections/gitlab", { method: "POST", body: JSON.stringify(input) }),
+    mutationFn: (input: TokenConnectInput) =>
+      api<{ connection: Connection }>(`/connections/${provider}`, { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
   })
 }

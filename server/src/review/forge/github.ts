@@ -9,8 +9,10 @@ import {
   type CommitStatus,
   type ForgeAccount,
   type ForgeAdapter,
+  type ForgeHooks,
   type ForgePublisher,
   type ForgeRepo,
+  type HookTarget,
   type InlineComment,
   type InlineResult,
 } from "./types.ts";
@@ -23,6 +25,8 @@ export interface GitHubAdapterOptions {
   selfLogin?: string;
   // App installations have no user; their account comes from the installation.
   account?: () => Promise<ForgeAccount>;
+  // An app lists the repositories it is installed on; a token lists the user's.
+  repoSource?: "installation" | "user";
   fetch?: FetchLike;
 }
 
@@ -101,7 +105,7 @@ function reviewComment(comment: InlineComment) {
   };
 }
 
-export class GitHubAdapter implements ForgeAdapter, ForgePublisher {
+export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
   readonly provider = "github" as const;
   readonly host: string;
   private http: ForgeHttp;
@@ -128,6 +132,14 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher {
   }
 
   async listRepos(): Promise<ForgeRepo[]> {
+    if (this.options.repoSource === "user") {
+      const repos = await this.http.paginate<GhRepo>(
+        "/user/repos?per_page=100&affiliation=owner,collaborator,organization_member",
+        linkHeaderNext,
+        10,
+      );
+      return repos.map(toRepo);
+    }
     const repos = await this.http.paginate<GhRepo>(
       "/installation/repositories?per_page=100",
       linkHeaderNext,
@@ -284,5 +296,26 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher {
         ...(status.targetUrl ? { target_url: status.targetUrl } : {}),
       }),
     });
+  }
+
+  async createHook(repo: HookTarget, url: string, secret: string): Promise<string> {
+    const hook = await this.http.json<{ id: number }>(`${repoApiPath(repo.fullPath)}/hooks`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: "web",
+        active: true,
+        events: ["pull_request", "issue_comment"],
+        config: { url, secret, content_type: "json", insecure_ssl: "0" },
+      }),
+    });
+    return String(hook.id);
+  }
+
+  async deleteHook(repo: HookTarget, hookId: string): Promise<void> {
+    try {
+      await this.http.request(`${repoApiPath(repo.fullPath)}/hooks/${encodeURIComponent(hookId)}`, { method: "DELETE" });
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
   }
 }

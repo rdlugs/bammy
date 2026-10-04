@@ -5,11 +5,12 @@ import { encrypt } from "../lib/crypto.ts";
 import { assertSafeForgeHost } from "../lib/hostSafety.ts";
 import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
-import { GitLabAdapter } from "../review/forge/gitlab.ts";
 import { ForgeError } from "../review/forge/http.ts";
-import { getGitHubApp, githubConfigured, githubInstallUrl } from "../services/forge.ts";
+import { FORGE_PROVIDERS, forgeName } from "../review/forge/providers.ts";
+import { getGitHubApp, githubInstallUrl } from "../services/githubApp.ts";
+import { isForgeProvider, PROVIDERS } from "../services/providers/index.ts";
 import { removeWebhook } from "../services/webhooks.ts";
-import { githubCallbackSchema, gitlabConnectSchema } from "../schemas/connections.schema.ts";
+import { githubCallbackSchema } from "../schemas/connections.schema.ts";
 
 const publicConnection = {
   id: true,
@@ -28,32 +29,43 @@ export async function listConnections(req: Request, res: Response) {
     select: publicConnection,
     orderBy: { createdAt: "asc" },
   });
-  res.json({ connections, githubAvailable: githubConfigured() });
+  const availableApps = FORGE_PROVIDERS.filter((provider) => PROVIDERS[provider].appAvailable?.());
+  res.json({ connections, availableApps });
 }
 
-export async function connectGitlab(req: Request, res: Response) {
-  const { host, token } = gitlabConnectSchema.parse(req.body);
+// Any forge whose provider definition accepts a pasted host and token.
+export async function connectWithToken(req: Request, res: Response) {
+  const provider = String(req.params.provider);
+  if (!isForgeProvider(provider)) {
+    throw new HttpError(404, "Unknown provider");
+  }
+  const tokenConnect = PROVIDERS[provider].tokenConnect;
+  if (!tokenConnect) {
+    throw new HttpError(404, `${forgeName(provider)} does not connect with a token`);
+  }
+  const { host, token } = tokenConnect.schema.parse(req.body);
   await assertSafeForgeHost(host);
 
+  const name = forgeName(provider);
   let login: string;
   try {
-    ({ login } = await new GitLabAdapter({ host, token: async () => token }).currentAccount());
+    ({ login } = await tokenConnect.account(host, token));
   } catch (err) {
     if (err instanceof ForgeError && (err.status === 401 || err.status === 403)) {
-      throw new HttpError(400, "GitLab rejected this token");
+      throw new HttpError(400, `${name} rejected this token`);
     }
-    throw new HttpError(502, `Could not reach GitLab at ${host}`);
+    throw new HttpError(502, `Could not reach ${name} at ${host}`);
   }
 
   const userId = req.userId!;
   const existing = await prisma.forgeConnection.findFirst({
-    where: { userId, provider: "gitlab", host, accountLogin: login },
+    where: { userId, provider, kind: "token", host, accountLogin: login },
   });
   const data = { encryptedToken: encrypt(token) };
   const connection = existing
     ? await prisma.forgeConnection.update({ where: { id: existing.id }, data, select: publicConnection })
     : await prisma.forgeConnection.create({
-        data: { ...data, userId, provider: "gitlab", host, kind: "token", accountLogin: login },
+        data: { ...data, userId, provider, host, kind: "token", accountLogin: login },
         select: publicConnection,
       });
 
