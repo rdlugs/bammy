@@ -17,5 +17,142 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  connections    ForgeConnection[]
+  llmCredentials LlmCredential[]
+
   @@map("users")
+}
+
+enum ForgeProvider {
+  github
+  gitlab
+
+  @@map("forge_provider")
+}
+
+enum ConnectionKind {
+  github_app
+  token
+
+  @@map("connection_kind")
+}
+
+enum ReviewTrigger {
+  manual
+  webhook
+  comment
+
+  @@map("review_trigger")
+}
+
+enum ReviewStatus {
+  queued
+  running
+  completed
+  partial
+  failed
+  superseded
+
+  @@map("review_status")
+}
+
+enum ReviewVerdict {
+  pass
+  blocked
+  error
+
+  @@map("review_verdict")
+}
+
+model ForgeConnection {
+  id             String         @id @default(uuid()) @db.Uuid
+  userId         String         @map("user_id") @db.Uuid
+  provider       ForgeProvider
+  host           String
+  kind           ConnectionKind
+  installationId String?        @map("installation_id")
+  encryptedToken String?        @map("encrypted_token")
+  accountLogin   String         @map("account_login")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repositories Repository[]
+
+  @@index([userId])
+  @@map("forge_connections")
+}
+
+model Repository {
+  id            String        @id @default(uuid()) @db.Uuid
+  connectionId  String        @map("connection_id") @db.Uuid
+  provider      ForgeProvider
+  host          String
+  fullPath      String        @map("full_path")
+  externalId    String        @map("external_id")
+  defaultBranch String        @map("default_branch")
+  enabled       Boolean       @default(false)
+  settings      Json          @default("{}")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  connection     ForgeConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  reviewJobs     ReviewJob[]
+  postedFindings PostedFinding[]
+
+  @@unique([connectionId, externalId])
+  @@map("repositories")
+}
+
+model ReviewJob {
+  id             String         @id @default(uuid()) @db.Uuid
+  repositoryId   String         @map("repository_id") @db.Uuid
+  number         Int
+  headSha        String         @map("head_sha")
+  baseSha        String?        @map("base_sha")
+  trigger        ReviewTrigger
+  status         ReviewStatus   @default(queued)
+  verdict        ReviewVerdict?
+  resolvedConfig Json?          @map("resolved_config")
+  result         Json?
+  error          String?
+  attempts       Int            @default(0)
+  lockedAt       DateTime?      @map("locked_at") @db.Timestamptz
+  startedAt      DateTime?      @map("started_at") @db.Timestamptz
+  finishedAt     DateTime?      @map("finished_at") @db.Timestamptz
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([repositoryId, number])
+  @@map("review_jobs")
+}
+
+model PostedFinding {
+  id             String   @id @default(uuid()) @db.Uuid
+  repositoryId   String   @map("repository_id") @db.Uuid
+  number         Int
+  fingerprint    String
+  forgeCommentId String   @map("forge_comment_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, number, fingerprint])
+  @@map("posted_findings")
+}
+
+model LlmCredential {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  provider     String
+  encryptedKey String   @map("encrypted_key")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("llm_credentials")
 }

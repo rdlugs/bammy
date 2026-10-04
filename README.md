@@ -22,7 +22,7 @@ Requires Docker with Compose.
 
 ```sh
 cp .env.example .env
-# set JWT_SECRET, e.g. with: openssl rand -hex 32
+# set JWT_SECRET and ENCRYPTION_KEY, each with: openssl rand -hex 32
 docker compose up --build
 ```
 
@@ -33,6 +33,8 @@ docker compose up --build
 If you change `CLIENT_HOST_PORT`, update `CLIENT_ORIGIN` to match.
 
 Migrations are applied automatically when the `server` container starts.
+
+The `worker` container runs review jobs. It polls the `review_jobs` table (claimed with `FOR UPDATE SKIP LOCKED`, so several workers can run side by side); tune it with `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_LOCK_TIMEOUT_MS` and `WORKER_MAX_ATTEMPTS`.
 
 ## API
 
@@ -63,6 +65,6 @@ docker compose exec server npx prisma migrate dev --name <change>
 
 ```
 client/   React SPA (shadcn components live in src/components/ui)
-server/   Express API (src/routes, src/controllers, prisma/schema.prisma)
+server/   Express API (src/routes, src/controllers, prisma/schema.prisma) and the review worker (src/worker)
 docker/   Postgres init script (creates the test database)
 ```
