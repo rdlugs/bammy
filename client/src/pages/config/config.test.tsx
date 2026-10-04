@@ -145,6 +145,15 @@ describe("Configuration page", () => {
       "Guidance",
     ])
 
+    await openTab("LLM Config")
+    for (const name of ["Connection", "Models", "Model calls"]) {
+      expect(screen.getByRole("group", { name })).toBeInTheDocument()
+    }
+    await openTab("Finding Types")
+    for (const name of ["Severity", "What gets reported", "Review rules"]) {
+      expect(screen.getByRole("group", { name })).toBeInTheDocument()
+    }
+
     await openTab("Triggers")
     expect(screen.getByRole("switch", { name: "Allow review command" })).toBeInTheDocument()
     expect(screen.queryByLabelText("Ignore paths")).not.toBeInTheDocument()
