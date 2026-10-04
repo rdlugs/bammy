@@ -1,0 +1,40 @@
+import { z } from "zod";
+
+// Stored hosts are bare for https ("gitlab.acme.com") and keep the scheme only
+// for plain http, matching how change URLs are parsed.
+export function normalizeHost(input: string): string | null {
+  const raw = /^https?:\/\//i.test(input) ? input : `https://${input}`;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.pathname.replace(/\/+$/, "") !== "" || url.search || url.hash || url.username) {
+    return null;
+  }
+  return url.protocol === "http:" ? `http://${url.host}` : url.host;
+}
+
+export const gitlabConnectSchema = z.object({
+  host: z
+    .string()
+    .trim()
+    .default("gitlab.com")
+    .transform((value, ctx) => {
+      const host = normalizeHost(value || "gitlab.com");
+      if (!host) {
+        ctx.addIssue({ code: "custom", message: "Enter a host such as gitlab.com" });
+        return z.NEVER;
+      }
+      return host;
+    }),
+  token: z.string().trim().min(1, "Token is required"),
+});
+
+export const githubCallbackSchema = z.object({
+  installation_id: z.string().regex(/^\d+$/).optional(),
+  setup_action: z.string().optional(),
+  state: z.string().min(1),
+  code: z.string().optional(),
+});
