@@ -25,7 +25,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useApiKeys, useLlmModels } from "@/features/settings/api"
 import { LLM_PROVIDERS } from "@/features/settings/providers"
-import { useConfigSchema, type EffectiveConfig, type LlmProviderName } from "./api"
+import { useConfigSchema, type EffectiveConfig, type LlmProviderName, type SummaryLocation } from "./api"
 import { ModelCombobox, type ModelSuggestions } from "./ModelCombobox"
 import { ReviewPreview, type PreviewSettings } from "./ReviewPreview"
 import { CONFIG_TABS, TAB_ERRORS, type ConfigTab } from "./tabs"
@@ -65,7 +65,8 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
   },
   walkthrough: {
     label: "Walkthrough",
-    description: "Summarise what the change does. Where it is posted is set on the Triggers tab.",
+    description:
+      "Summarise what the change does in the PR/MR description or a comment of its own. When automatic reviews include it is set on the Triggers tab.",
   },
   postInline: { label: "Post inline comments", description: "Comment on the lines each finding refers to." },
   postSummary: { label: "Post summary comment", description: "Post the review summary as a comment on the change." },
@@ -73,12 +74,12 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
   blastRadiusLabel: {
     label: "Publish blast radius label",
     description:
-      'Add a native PR/MR label with the estimated blast radius (e.g. "Large blast radius"). Supported on GitHub and GitLab.',
+      'Add a native PR/MR label with the estimated blast radius (e.g. "Large blast radius"). Needs the walkthrough. Supported on GitHub and GitLab.',
   },
   effortLabel: {
     label: "Publish review time estimate label",
     description:
-      'Add a native PR/MR label with the estimated review effort (e.g. "10-20 Minutes"). Supported on GitHub and GitLab.',
+      'Add a native PR/MR label with the estimated review effort (e.g. "10-20 Minutes"). Needs the walkthrough. Supported on GitHub and GitLab.',
   },
   reviewOnPush: {
     label: "Review automatically on push",
@@ -628,7 +629,8 @@ export function ConfigFields(props: {
     return inherited ? (inherited[section] as Record<string, unknown>)[name] as boolean : undefined
   }
 
-  function toggles(names: FlagName[]) {
+  // `off` greys out settings that do nothing right now, e.g. labels without a summary.
+  function toggles(names: FlagName[], off = false) {
     return names.map((name) => {
       const { section } = FLAGS.find((flag) => flag.name === name)!
       const path = `${section}.${name}`
@@ -643,7 +645,7 @@ export function ConfigFields(props: {
           resettable={isRepo}
           inheritedHint={inheritedHint(path, fallback)}
           effective={config && effective(path, (config[section] as Record<string, unknown>)[name])}
-          disabled={disabled}
+          disabled={disabled || off}
         />
       )
     })
@@ -655,7 +657,7 @@ export function ConfigFields(props: {
     return `Leave empty to use the default${inherited ? ` (${describe(value, undefined)})` : ""}.`
   }
 
-  function choiceField(name: ChoiceName) {
+  function choiceField(name: ChoiceName, off = false) {
     const { section } = CHOICES.find((choice) => choice.name === name)!
     const path = `${section}.${name}`
     const fallback = inherited ? ((inherited[section] as Record<string, unknown>)[name] as string) : undefined
@@ -672,7 +674,7 @@ export function ConfigFields(props: {
         {...(isRepo ? { inherit: { description: inheritedHint(path, fallback && label(fallback)) } } : { fallback })}
         description={info.description}
         effective={config && effective(path, label((config[section] as Record<string, unknown>)[name]))}
-        disabled={disabled}
+        disabled={disabled || off}
       />
     )
   }
@@ -747,6 +749,10 @@ export function ConfigFields(props: {
     severityFloor: shownChoice(form.severityFloor, inherited?.review.severityFloor),
     blockOn: shownChoice(form.blockOn, inherited?.review.blockOn),
     model: (!disabled && form.model.trim()) || inherited?.llm.model,
+    summaryLocation: (shownChoice(form.choices.summaryLocation, inherited?.output.summaryLocation) ??
+      "dynamic") as SummaryLocation,
+    blastRadiusLabel: shownFlag("blastRadiusLabel"),
+    effortLabel: shownFlag("effortLabel"),
   }
 
   const storedConnections = (apiKeys.data?.keys ?? []).filter((key) => key.stored)
@@ -920,20 +926,33 @@ export function ConfigFields(props: {
         {numberField("maxChunks")}
       </>
     ),
-    display: toggles(["walkthrough", "postInline", "postSummary", "postCheck"]),
-    triggers: (
+    display: (
       <>
-        <Section title="Code reviews" description="When Bammy reviews a pull or merge request on its own.">
-          <div className="grid gap-4 @md/field-group:grid-cols-2">{choiceField("review")}</div>
-          <ToggleList>{toggles(["reviewOnPush", "command"])}</ToggleList>
+        <Section title="Review comments" description="What the review leaves on the change.">
+          <ToggleList>{toggles(["postInline", "postSummary", "postCheck"])}</ToggleList>
         </Section>
         <FieldSeparator />
-        <Section title="PR summary" description="When the summary is written, where it goes, and the labels it adds.">
+        <Section title="PR summary" description="A summary of what the change does, and labels from its estimates.">
+          <ToggleList>{toggles(["walkthrough"])}</ToggleList>
+          {/* Placement and labels only apply while there is a summary to place. */}
           <div className="grid gap-4 @md/field-group:grid-cols-2">
-            {choiceField("summary")}
-            {choiceField("summaryLocation")}
+            {choiceField("summaryLocation", !preview.walkthrough)}
           </div>
-          <ToggleList>{toggles(["blastRadiusLabel", "effortLabel"])}</ToggleList>
+          <ToggleList>{toggles(["blastRadiusLabel", "effortLabel"], !preview.walkthrough)}</ToggleList>
+        </Section>
+      </>
+    ),
+    triggers: (
+      <>
+        <Section
+          title="Code reviews"
+          description="When Bammy reviews a pull or merge request, and writes its summary, on its own."
+        >
+          <div className="grid gap-4 @md/field-group:grid-cols-2">
+            {choiceField("review")}
+            {choiceField("summary")}
+          </div>
+          <ToggleList>{toggles(["reviewOnPush", "command"])}</ToggleList>
         </Section>
         <FieldSeparator />
         <Section
