@@ -1,0 +1,284 @@
+import { generateKeyPairSync } from "node:crypto";
+import jwt from "jsonwebtoken";
+import { describe, expect, it } from "vitest";
+import { GitHubAdapter } from "../src/review/forge/github.ts";
+import { GitHubApp, githubApiBase } from "../src/review/forge/githubApp.ts";
+import { GitLabAdapter } from "../src/review/forge/gitlab.ts";
+import { ForgeError } from "../src/review/forge/http.ts";
+import { fetchStub } from "./helpers/fetchStub.ts";
+
+const PATCH = "@@ -1,2 +1,3 @@\n a\n+b\n c";
+
+describe("GitHubAdapter", () => {
+  const adapter = (routes: Parameters<typeof fetchStub>[0]) => {
+    const stub = fetchStub(routes);
+    return {
+      ...stub,
+      adapter: new GitHubAdapter({ host: "github.com", token: async () => "tok", fetch: stub.fetch }),
+    };
+  };
+
+  it("builds a ChangeSet from a pull request and its paginated files", async () => {
+    const { adapter: gh, calls } = adapter([
+      {
+        url: /\/repos\/acme\/web\/pulls\/42$/,
+        body: {
+          title: "Add b",
+          body: null,
+          draft: true,
+          html_url: "https://github.com/acme/web/pull/42",
+          base: { sha: "base1", ref: "main" },
+          head: { sha: "head1", ref: "feature" },
+        },
+      },
+      {
+        url: /\/pulls\/42\/files\?per_page=100$/,
+        body: [{ filename: "src/a.ts", status: "modified", patch: PATCH, changes: 1 }],
+        headers: {
+          link: '<https://api.github.com/repos/acme/web/pulls/42/files?per_page=100&page=2>; rel="next"',
+        },
+      },
+      {
+        url: /\/pulls\/42\/files\?per_page=100&page=2$/,
+        body: [
+          { filename: "img.png", status: "added", changes: 0 },
+          { filename: "huge.json", status: "modified", changes: 90000 },
+          { filename: "new.ts", previous_filename: "old.ts", status: "renamed", changes: 0 },
+        ],
+      },
+    ]);
+
+    const change = await gh.getChange("acme/web", 42);
+
+    expect(change.forgeRef).toMatchObject({
+      provider: "github",
+      project: "acme/web",
+      number: 42,
+      baseSha: "base1",
+      startSha: "base1",
+      headSha: "head1",
+    });
+    expect(change).toMatchObject({ title: "Add b", description: "", isDraft: true, headRef: "feature" });
+    expect(change.files.map((f) => [f.path, f.changeType, f.patchUnavailable])).toEqual([
+      ["src/a.ts", "modified", false],
+      ["img.png", "added", false],
+      ["huge.json", "modified", true],
+      ["new.ts", "renamed", false],
+    ]);
+    expect(change.files[0]!.hunks[0]!.addedLines).toEqual([2]);
+    expect(calls[0]!.headers.authorization).toBe("Bearer tok");
+  });
+
+  it("returns null for a file missing at a ref", async () => {
+    const { adapter: gh } = adapter([
+      { url: /\/contents\/\.bammy\.yaml\?ref=base1$/, status: 404, body: { message: "Not Found" } },
+    ]);
+    expect(await gh.getFileAtRef("acme/web", ".bammy.yaml", "base1")).toBeNull();
+  });
+
+  it("reads raw file content at a ref", async () => {
+    const { adapter: gh, calls } = adapter([
+      { url: /\/contents\/dir\/a%20b\.ts\?ref=main$/, body: "export {}" },
+    ]);
+    expect(await gh.getFileAtRef("acme/web", "dir/a b.ts", "main")).toBe("export {}");
+    expect(calls[0]!.headers.accept).toBe("application/vnd.github.raw+json");
+  });
+
+  it("surfaces forge failures with their status", async () => {
+    const { adapter: gh } = adapter([
+      { url: /\/pulls\/1$/, status: 403, body: { message: "Resource not accessible" } },
+    ]);
+    await expect(gh.getChange("acme/web", 1)).rejects.toMatchObject({
+      constructor: ForgeError,
+      status: 403,
+    });
+  });
+
+  it("lists installation repositories", async () => {
+    const { adapter: gh } = adapter([
+      {
+        url: /\/installation\/repositories/,
+        body: {
+          repositories: [
+            { id: 9, full_name: "acme/web", default_branch: "main", private: true, html_url: "u" },
+          ],
+        },
+      },
+    ]);
+    expect(await gh.listRepos()).toEqual([
+      { externalId: "9", fullPath: "acme/web", defaultBranch: "main", private: true, webUrl: "u" },
+    ]);
+  });
+});
+
+describe("GitHubApp", () => {
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+  const make = (routes: Parameters<typeof fetchStub>[0]) => {
+    const stub = fetchStub(routes);
+    const app = new GitHubApp({
+      appId: "123",
+      privateKey: pem,
+      clientId: "cid",
+      clientSecret: "secret",
+      webOrigin: "https://github.com",
+      apiBaseUrl: "https://api.github.com",
+      fetch: stub.fetch,
+    });
+    return { app, ...stub };
+  };
+
+  it("signs an RS256 app JWT issued by the app id", () => {
+    const { app } = make([]);
+    const payload = jwt.verify(app.appJwt(), publicKey, { algorithms: ["RS256"] });
+    expect(payload).toMatchObject({ iss: "123" });
+  });
+
+  it("caches installation tokens until they near expiry", async () => {
+    const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const { app, calls } = make([
+      {
+        method: "POST",
+        url: /\/app\/installations\/7\/access_tokens$/,
+        body: { token: "inst-tok", expires_at: expires },
+      },
+    ]);
+
+    expect(await app.installationToken("7")).toBe("inst-tok");
+    expect(await app.installationToken("7")).toBe("inst-tok");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("refreshes a token about to expire", async () => {
+    const soon = new Date(Date.now() + 60 * 1000).toISOString();
+    const { app, calls } = make([
+      {
+        method: "POST",
+        url: /access_tokens$/,
+        body: { token: "inst-tok", expires_at: soon },
+      },
+    ]);
+
+    await app.installationToken("7");
+    await app.installationToken("7");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("accepts an installation only when the OAuth user can see it", async () => {
+    const routes = [
+      { method: "POST", url: /\/login\/oauth\/access_token$/, body: { access_token: "user-tok" } },
+      { url: /\/user\/installations/, body: { installations: [{ id: 7 }, { id: 8 }] } },
+    ];
+    expect(await make(routes).app.userHasInstallation("code", "7")).toBe(true);
+    expect(await make(routes).app.userHasInstallation("code", "99")).toBe(false);
+  });
+
+  it("rejects a bad OAuth code", async () => {
+    const { app } = make([
+      { method: "POST", url: /\/login\/oauth\/access_token$/, body: { error: "bad_verification_code" } },
+    ]);
+    expect(await app.userHasInstallation("nope", "7")).toBe(false);
+  });
+
+  it("uses /api/v3 for GitHub Enterprise Server", () => {
+    expect(githubApiBase("github.com")).toBe("https://api.github.com");
+    expect(githubApiBase("ghe.acme.com")).toBe("https://ghe.acme.com/api/v3");
+  });
+});
+
+describe("GitLabAdapter", () => {
+  const adapter = (routes: Parameters<typeof fetchStub>[0], host = "gitlab.acme.com") => {
+    const stub = fetchStub(routes);
+    return { ...stub, adapter: new GitLabAdapter({ host, token: async () => "glpat", fetch: stub.fetch }) };
+  };
+
+  it("builds a ChangeSet with GitLab's diff refs and follows x-next-page", async () => {
+    const { adapter: gl, calls } = adapter([
+      {
+        url: /\/projects\/team%2Fapp\/merge_requests\/7$/,
+        body: {
+          title: "Draft: thing",
+          description: "Closes #1",
+          draft: true,
+          web_url: "https://gitlab.acme.com/team/app/-/merge_requests/7",
+          source_branch: "feature",
+          target_branch: "main",
+          diff_refs: { base_sha: "b", start_sha: "s", head_sha: "h" },
+        },
+      },
+      {
+        url: /\/merge_requests\/7\/diffs\?per_page=100$/,
+        headers: { "x-next-page": "2" },
+        body: [
+          {
+            old_path: "a.ts",
+            new_path: "a.ts",
+            new_file: false,
+            renamed_file: false,
+            deleted_file: false,
+            diff: PATCH,
+          },
+        ],
+      },
+      {
+        url: /\/merge_requests\/7\/diffs\?per_page=100&page=2$/,
+        headers: { "x-next-page": "" },
+        body: [
+          {
+            old_path: "gone.ts",
+            new_path: "gone.ts",
+            new_file: false,
+            renamed_file: false,
+            deleted_file: true,
+            diff: "@@ -1 +0,0 @@\n-x",
+          },
+          {
+            old_path: "big.sql",
+            new_path: "big.sql",
+            new_file: true,
+            renamed_file: false,
+            deleted_file: false,
+            diff: "",
+            too_large: true,
+          },
+        ],
+      },
+    ]);
+
+    const change = await gl.getChange("team/app", 7);
+
+    expect(change.forgeRef).toMatchObject({ baseSha: "b", startSha: "s", headSha: "h", host: "gitlab.acme.com" });
+    expect(change).toMatchObject({ isDraft: true, description: "Closes #1", baseRef: "main" });
+    expect(change.files.map((f) => [f.path, f.changeType, f.patchUnavailable])).toEqual([
+      ["a.ts", "modified", false],
+      ["gone.ts", "deleted", false],
+      ["big.sql", "added", true],
+    ]);
+    expect(calls[0]!.url.startsWith("https://gitlab.acme.com/api/v4/")).toBe(true);
+    expect(calls[0]!.headers["private-token"]).toBe("glpat");
+  });
+
+  it("refuses a merge request with no diff yet", async () => {
+    const { adapter: gl } = adapter([
+      {
+        url: /\/merge_requests\/7$/,
+        body: { title: "t", description: null, web_url: "u", source_branch: "f", target_branch: "m", diff_refs: null },
+      },
+    ]);
+    await expect(gl.getChange("team/app", 7)).rejects.toThrow(/no diff/);
+  });
+
+  it("keeps a plain-http host's scheme", async () => {
+    const { adapter: gl, calls } = adapter([{ url: /\/user$/, body: { username: "dev" } }], "http://gl.local:8080");
+    expect(await gl.currentAccount()).toEqual({ login: "dev" });
+    expect(calls[0]!.url).toBe("http://gl.local:8080/api/v4/user");
+  });
+
+  it("returns null for a file missing at a ref", async () => {
+    const { adapter: gl, calls } = adapter([
+      { url: /\/repository\/files\/config%2F\.bammy\.yaml\/raw\?ref=b$/, status: 404, body: {} },
+    ]);
+    expect(await gl.getFileAtRef("team/app", "config/.bammy.yaml", "b")).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+});

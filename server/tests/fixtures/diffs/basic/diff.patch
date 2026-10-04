@@ -1,0 +1,71 @@
+diff --git a/added.ts b/added.ts
+new file mode 100644
+index 0000000..109a021
+--- /dev/null
++++ b/added.ts
+@@ -0,0 +1,2 @@
++export const x = 1;
++export const y = 2;
+diff --git a/deleted.txt b/deleted.txt
+deleted file mode 100644
+index fedc263..0000000
+--- a/deleted.txt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-gone 1
+-gone 2
+-gone 3
+diff --git a/multi.txt b/multi.txt
+index 8b2034d..6d43e0d 100644
+--- a/multi.txt
++++ b/multi.txt
+@@ -1,6 +1,6 @@
+ line 1
+ line 2
+-line 3
++line three
+ line 4
+ line 5
+ line 6
+@@ -28,7 +28,8 @@ line 27
+ line 28
+ line 29
+ line 30
+-line 31
++inserted A
++inserted B
+ line 32
+ line 33
+ line 34
+@@ -55,6 +56,6 @@ line 54
+ line 55
+ line 56
+ line 57
+-line 58
++line fifty-eight
+ line 59
+ line 60
+diff --git a/noeol.txt b/noeol.txt
+index 1c943a9..f8f7a32 100644
+--- a/noeol.txt
++++ b/noeol.txt
+@@ -1,3 +1,4 @@
+ a
+-b
+-c
+\ No newline at end of file
++B
++c
++d
+\ No newline at end of file
+diff --git a/rename-old.txt b/renamed.txt
+similarity index 60%
+rename from rename-old.txt
+rename to renamed.txt
+index 6569f89..715282d 100644
+--- a/rename-old.txt
++++ b/renamed.txt
+@@ -1,2 +1,3 @@
+ keep me
+ and me
++plus this
