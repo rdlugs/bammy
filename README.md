@@ -53,6 +53,11 @@ The `worker` container runs review jobs: it fetches the PR/MR, resolves the revi
 | POST   | `/api/repos`         | `{ connectionId, externalId }`, enables a repository for review |
 | PATCH  | `/api/repos/:id`     | `{ enabled?, settings? }`; `settings` replaces the saved review overrides |
 | GET    | `/api/repos/:id/config` | The effective review config for the default branch, where each value came from, and any repository-file warnings |
+| POST   | `/api/reviews`       | `{ url }` of a pull or merge request on an enabled repository; queues a review of its current head |
+| GET    | `/api/reviews?repoId=&status=&cursor=&limit=` | The caller's reviews, newest first, with a summary but not the full result |
+| GET    | `/api/reviews/:id`   | One review with its full result |
+| GET    | `/api/reviews/:id/markdown` | The review as the markdown document that is posted to the forge |
+| POST   | `/api/reviews/:id/rerun` | Queues a fresh review of the PR's latest head |
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
 
 Register and login are rate limited (20 requests per 15 minutes per IP).

@@ -1,7 +1,7 @@
 import type { ChangeSet, ChangeType } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
 import { ForgeHttp, isNotFound, type FetchLike } from "./http.ts";
-import { hostOrigin, type ForgeAccount, type ForgeAdapter, type ForgeRepo } from "./types.ts";
+import { hostOrigin, type ChangeHead, type ForgeAccount, type ForgeAdapter, type ForgeRepo } from "./types.ts";
 
 export interface GitLabAdapterOptions {
   host: string;
@@ -18,6 +18,8 @@ interface GlProject {
 }
 
 interface GlMergeRequest {
+  state: "opened" | "closed" | "merged" | "locked";
+  sha: string;
   title: string;
   description: string | null;
   draft?: boolean;
@@ -136,6 +138,16 @@ export class GitLabAdapter implements ForgeAdapter {
           patch: diff.too_large || diff.collapsed ? undefined : diff.diff,
         }),
       ),
+    };
+  }
+
+  async getChangeHead(project: string, number: number): Promise<ChangeHead> {
+    const mr = await this.http.json<GlMergeRequest>(`${this.project(project)}/merge_requests/${number}`);
+    return {
+      headSha: mr.diff_refs?.head_sha ?? mr.sha,
+      title: mr.title,
+      state: mr.state === "merged" ? "merged" : mr.state === "closed" ? "closed" : "open",
+      isDraft: mr.draft ?? mr.work_in_progress ?? false,
     };
   }
 

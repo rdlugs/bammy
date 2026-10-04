@@ -4,6 +4,7 @@ import { loadReviewConfig } from "../review/config/load.ts";
 import type { ForgeAdapter } from "../review/forge/types.ts";
 import { createGenerate, missingKeys, type ApiKeys, type Generate } from "../review/llm/providers.ts";
 import { runReview } from "../review/pipeline.ts";
+import { summarize } from "../review/render/json.ts";
 import { adapterForConnection } from "../services/forge.ts";
 import { apiKeysFor } from "../services/llm.ts";
 import { complete } from "./queue.ts";
@@ -66,6 +67,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     status: result.status,
     verdict: result.verdict.verdict,
     result,
+    summary: summarize(result),
     resolvedConfig: { config, sources: loaded.sources, repoFile: loaded.repoFile },
     error: result.errors.length ? result.errors.join("\n") : null,
     headSha: changeSet.forgeRef.headSha,
