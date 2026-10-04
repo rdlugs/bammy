@@ -19,13 +19,13 @@ export const CONFIG_TABS = [
     value: "display",
     label: "Display",
     icon: MessageSquare,
-    description: "What Bammy posts back to the pull or merge request.",
+    description: "What Bammy posts back to the pull or merge request, and where.",
   },
   {
     value: "triggers",
     label: "Triggers",
     icon: Zap,
-    description: "When reviews and summaries run on their own, what they label, and which changes are skipped.",
+    description: "When reviews and summaries run on their own, and which changes are skipped.",
   },
   {
     value: "guidance",

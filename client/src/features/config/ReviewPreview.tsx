@@ -3,8 +3,10 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 // What the settings on the Display tab change about a review, shown on a made
-// up change. The layout follows server/src/review/render/markdown.ts so the
-// preview reads like the real summary comment without rendering markdown.
+// up change: the PR/MR itself (labels, and the walkthrough when it goes in the
+// description), then each comment and the status. The layout follows
+// server/src/review/render/markdown.ts and the placement rules in
+// server/src/review/publish/publisher.ts, without rendering markdown.
 
 export interface PreviewSettings {
   walkthrough: boolean
@@ -15,7 +17,15 @@ export interface PreviewSettings {
   severityFloor?: string
   blockOn?: string
   model?: string
+  summaryLocation: "dynamic" | "description" | "comment"
+  blastRadiusLabel: boolean
+  effortLabel: boolean
 }
+
+// The sample's estimates, named as server/src/review/publish/labels.ts names them.
+const SAMPLE_BLAST_RADIUS = "medium"
+const SAMPLE_BLAST_RADIUS_LABEL = "Medium blast radius"
+const SAMPLE_EFFORT_LABEL = "5-10 Minutes"
 
 // Mirrors server/src/review/core/severity.ts.
 const RANK: Record<string, number> = { critical: 3, major: 2, minor: 1, info: 0 }
@@ -127,6 +137,70 @@ function InlineComment({ finding, committable }: { finding: SampleFinding; commi
   )
 }
 
+function Walkthrough() {
+  return (
+    <div className="flex flex-col gap-2" aria-label="Walkthrough" role="group">
+      <h5 className="font-semibold">Bammy summary</h5>
+      <p>Adds a lookup endpoint for users and documents how to run it locally.</p>
+      <p className="text-xs text-muted-foreground">
+        Labels: <code>api</code>, <code>security</code> · Review effort: 2/5 · Blast radius: {SAMPLE_BLAST_RADIUS}
+      </p>
+      <Fold summary="Changes (2 files)">
+        <p className="text-xs">
+          <code>src/api/users.ts</code>: new GET /users/:id handler
+        </p>
+        <p className="text-xs">
+          <code>README.md</code>: setup steps for the API
+        </p>
+      </Fold>
+    </div>
+  )
+}
+
+// The sample PR has no description of its own, so "dynamic" fills it.
+function PullRequest(props: { settings: PreviewSettings; inDescription: boolean }) {
+  const { settings } = props
+  const labels = settings.walkthrough
+    ? [
+        settings.blastRadiusLabel && SAMPLE_BLAST_RADIUS_LABEL,
+        settings.effortLabel && SAMPLE_EFFORT_LABEL,
+      ].filter((label): label is string => Boolean(label))
+    : []
+  return (
+    <section aria-label="Pull request" className="overflow-hidden rounded-lg border bg-background">
+      <header className="flex flex-col gap-2 border-b bg-muted/50 px-3 py-2">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="font-semibold">Add user lookup endpoint</span>
+          <span className="text-muted-foreground">#42</span>
+        </div>
+        {labels.length > 0 && (
+          <ul aria-label="Labels" className="flex flex-wrap gap-1">
+            {labels.map((label) => (
+              <li key={label}>
+                <Badge variant="outline">{label}</Badge>
+              </li>
+            ))}
+          </ul>
+        )}
+      </header>
+      <div className="flex flex-col gap-3 p-3 text-sm">
+        {props.inDescription ? (
+          <>
+            <Walkthrough />
+            {settings.summaryLocation === "dynamic" && (
+              <p className="text-xs text-muted-foreground">
+                Dynamic: this change had no description, so the summary fills it. With one, it is posted as a comment.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-muted-foreground italic">No description provided.</p>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function SummaryComment(props: {
   settings: PreviewSettings
   reported: SampleFinding[]
@@ -169,23 +243,6 @@ function SummaryComment(props: {
               reported.length - actionable.length
             } in the sections below.`}
       </p>
-      {settings.walkthrough && (
-        <div className="flex flex-col gap-2" aria-label="Walkthrough" role="group">
-          <h5 className="font-semibold">Walkthrough</h5>
-          <p>Adds a lookup endpoint for users and documents how to run it locally.</p>
-          <p className="text-xs text-muted-foreground">
-            Labels: <code>api</code>, <code>security</code> · Review effort: 2/5
-          </p>
-          <Fold summary="Changes (2 files)">
-            <p className="text-xs">
-              <code>src/api/users.ts</code>: new GET /users/:id handler
-            </p>
-            <p className="text-xs">
-              <code>README.md</code>: setup steps for the API
-            </p>
-          </Fold>
-        </div>
-      )}
       {actionable.length > 0 && (
         <Fold summary={`Actionable comments (${actionable.length})`}>
           {actionable.map((finding) => (
@@ -219,7 +276,9 @@ export function ReviewPreview({ settings }: { settings: PreviewSettings }) {
   const reported = FINDINGS.filter((f) => rank(f.severity) >= rank(settings.severityFloor))
   const blocking = reported.filter((f) => settings.blockOn !== undefined && rank(f.severity) >= rank(settings.blockOn))
   const inline = reported.find((f) => f.bucket === "actionable")
-  const nothing = !settings.postInline && !settings.postSummary && !settings.postCheck
+  // Mirrors publishes() in server/src/review/publish/publisher.ts; labels need the walkthrough.
+  const nothing = !settings.postInline && !settings.postSummary && !settings.postCheck && !settings.walkthrough
+  const inDescription = settings.walkthrough && settings.summaryLocation !== "comment"
 
   return (
     <div className="flex flex-col gap-3">
@@ -230,10 +289,16 @@ export function ReviewPreview({ settings }: { settings: PreviewSettings }) {
         </div>
       ) : (
         <>
+          <PullRequest settings={settings} inDescription={inDescription} />
           {settings.postCheck && (
             <StatusCheck blocked={blocking.length > 0} blockOn={settings.blockOn} blocking={blocking.length} />
           )}
           {settings.postSummary && <SummaryComment settings={settings} reported={reported} blocking={blocking} />}
+          {settings.walkthrough && !inDescription && (
+            <Comment label="PR summary comment" title="commented">
+              <Walkthrough />
+            </Comment>
+          )}
           {settings.postInline && inline && (
             <InlineComment finding={inline} committable={settings.committableSuggestions} />
           )}

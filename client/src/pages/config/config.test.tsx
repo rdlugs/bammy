@@ -290,28 +290,21 @@ describe("Configuration page", () => {
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Code review trigger" })).toHaveTextContent("Published PRs"),
     )
-    expect(screen.getByRole("combobox", { name: "Comment location" })).toHaveTextContent("Dynamic location")
-    for (const name of ["Code reviews", "PR summary", "Skip rules"]) {
+    for (const name of ["Code reviews", "Skip rules"]) {
       expect(screen.getByRole("group", { name })).toBeInTheDocument()
     }
-    for (const name of [
-      "Review automatically on push",
-      "Publish blast radius label",
-      "Publish review time estimate label",
-      "Allow review command",
-    ]) {
+    for (const name of ["Review automatically on push", "Allow review command"]) {
       expect(screen.getByRole("switch", { name })).toBeInTheDocument()
     }
+    // What gets posted, and where, lives on the Display tab.
+    expect(screen.queryByRole("combobox", { name: "Comment location" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("switch", { name: "Publish blast radius label" })).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole("combobox", { name: "Code review trigger" }))
     await userEvent.click(screen.getByRole("option", { name: "Draft and published PRs" }))
     await userEvent.click(screen.getByRole("combobox", { name: "PR summary trigger" }))
     await userEvent.click(screen.getByRole("option", { name: "Manual only" }))
-    await userEvent.click(screen.getByRole("combobox", { name: "Comment location" }))
-    await userEvent.click(screen.getByRole("option", { name: "Standalone comment" }))
     await userEvent.click(screen.getByRole("switch", { name: "Review automatically on push" }))
-    await userEvent.click(screen.getByRole("switch", { name: "Publish blast radius label" }))
-    await userEvent.click(screen.getByRole("switch", { name: "Publish review time estimate label" }))
     await userEvent.type(screen.getByLabelText("Ignore by title"), "WIP{enter}Draft,")
     // "[[" types a literal bracket.
     await userEvent.type(screen.getByLabelText("Skip by author"), "dependabot[[bot]{enter}")
@@ -320,6 +313,12 @@ describe("Configuration page", () => {
     // Left in the box: it is added when the box loses focus.
     await userEvent.type(screen.getByLabelText("Skip by target branch"), "legacy")
     expect(screen.getByRole("button", { name: "Remove Draft" })).toBeInTheDocument()
+
+    await openTab("Display")
+    await userEvent.click(screen.getByRole("combobox", { name: "Comment location" }))
+    await userEvent.click(screen.getByRole("option", { name: "Standalone comment" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Publish blast radius label" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Publish review time estimate label" }))
     await selectConnectionOnLlmTab()
     await userEvent.click(screen.getByRole("button", { name: "Save global config" }))
 
@@ -395,9 +394,11 @@ describe("Configuration page", () => {
     renderWithProviders(<App />, { route: "/configuration?tab=display" })
 
     const preview = await screen.findByRole("region", { name: "Review preview" })
+    for (const name of ["Review comments", "PR summary"]) {
+      expect(screen.getByRole("group", { name })).toBeInTheDocument()
+    }
     // The sample's major finding is below the default critical block level.
     expect(await within(preview).findByRole("region", { name: "Commit status" })).toHaveTextContent("Pass")
-    expect(within(preview).getByRole("group", { name: "Walkthrough" })).toBeInTheDocument()
     expect(within(preview).getByText("Suggested change")).toBeInTheDocument()
     // The settings and the preview are separate cards.
     expect(within(preview).queryByRole("switch")).not.toBeInTheDocument()
@@ -405,14 +406,49 @@ describe("Configuration page", () => {
       preview.closest("[data-slot=card]"),
     )
 
+    // Dynamic fills the sample's empty description, and the review comment leaves it out.
+    const pr = within(preview).getByRole("region", { name: "Pull request" })
+    expect(within(pr).getByRole("group", { name: "Walkthrough" })).toHaveTextContent("Blast radius: medium")
+    expect(within(pr).getByText(/so the summary fills it/)).toBeInTheDocument()
+    const summary = within(preview).getByRole("region", { name: "Summary comment" })
+    expect(within(summary).queryByRole("group", { name: "Walkthrough" })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Comment location" }))
+    await userEvent.click(screen.getByRole("option", { name: "Standalone comment" }))
+    expect(within(pr).queryByRole("group", { name: "Walkthrough" })).not.toBeInTheDocument()
+    expect(within(pr).getByText("No description provided.")).toBeInTheDocument()
+    const standalone = within(preview).getByRole("region", { name: "PR summary comment" })
+    expect(within(standalone).getByRole("group", { name: "Walkthrough" })).toBeInTheDocument()
+
+    expect(within(pr).queryByRole("list", { name: "Labels" })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("switch", { name: "Publish blast radius label" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Publish review time estimate label" }))
+    expect(within(pr).getByRole("list", { name: "Labels" })).toHaveTextContent(/Medium blast radius.*5-10 Minutes/)
+
+    // Without a summary there is nothing to place or label.
     await userEvent.click(screen.getByRole("switch", { name: "Walkthrough" }))
     expect(within(preview).queryByRole("group", { name: "Walkthrough" })).not.toBeInTheDocument()
+    expect(within(pr).queryByRole("list", { name: "Labels" })).not.toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Comment location" })).toBeDisabled()
+    expect(screen.getByRole("switch", { name: "Publish blast radius label" })).toBeDisabled()
 
     await userEvent.click(screen.getByRole("switch", { name: "Post inline comments" }))
     expect(within(preview).queryByRole("region", { name: "Inline comment" })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole("switch", { name: "Post summary comment" }))
     await userEvent.click(screen.getByRole("switch", { name: "Post commit status" }))
     expect(within(preview).getByText(/Bammy posts nothing to the change/)).toBeInTheDocument()
+  })
+
+  it("still publishes the summary when every review comment is off", async () => {
+    mockApi(globalRoutes())
+    renderWithProviders(<App />, { route: "/configuration?tab=display" })
+
+    const preview = await screen.findByRole("region", { name: "Review preview" })
+    await userEvent.click(await screen.findByRole("switch", { name: "Post inline comments" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Post summary comment" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Post commit status" }))
+    expect(within(preview).queryByText(/Bammy posts nothing/)).not.toBeInTheDocument()
+    expect(within(preview).getByRole("group", { name: "Walkthrough" })).toBeInTheDocument()
   })
 
   it("previews a blocked review and plain suggestions from the finding settings", async () => {
