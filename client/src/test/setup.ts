@@ -26,3 +26,10 @@ Object.defineProperty(window, "matchMedia", {
 Element.prototype.hasPointerCapture ??= () => false
 Element.prototype.releasePointerCapture ??= () => {}
 Element.prototype.scrollIntoView ??= () => {}
+
+// jsdom lacks ResizeObserver, which cmdk (SearchableSelect) uses to size its list
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}

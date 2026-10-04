@@ -1,0 +1,231 @@
+import { describe, expect, it } from "vitest"
+import type { ConfigSchema } from "./api"
+import { INHERIT, PROVIDER_KEYS, baseConfig, isDirty, toForm, toSettings, validateForm, withoutDefaults } from "./settingsForm"
+
+const schema: ConfigSchema = {
+  defaults: {
+    profile: "balanced",
+    llm: {
+      model: "anthropic/claude-sonnet-5-5",
+      fallbackModels: [],
+      temperature: 0.2,
+      maxTokens: 8000,
+      contextBudget: null,
+      baseUrl: null,
+      endpointKey: null,
+    },
+    review: {
+      categories: ["security", "bug"],
+      severityFloor: "minor",
+      blockOn: "critical",
+      maxFindings: 25,
+      maxChunks: 12,
+      minConfidence: 0.5,
+      requireEvidence: true,
+      fullFile: false,
+      committableSuggestions: true,
+    },
+    output: { walkthrough: true, postInline: true, postSummary: true, postCheck: true },
+    triggers: { onPush: true, drafts: false, command: true },
+    ignorePaths: ["**/*.lock"],
+    instructions: "",
+    languageInstructions: {},
+  },
+  profiles: { balanced: {}, fast: { output: { walkthrough: false } }, strict: { review: { blockOn: "major" } } },
+  severities: ["critical", "major", "minor"],
+  categories: ["security", "bug", "style"],
+}
+
+describe("toSettings", () => {
+  it("round-trips saved settings through the form", () => {
+    const saved = {
+      profile: "strict",
+      llm: { model: "openai/gpt-5" },
+      review: { blockOn: "major", fullFile: true },
+      output: { walkthrough: false, postCheck: true },
+      triggers: { drafts: true, command: false },
+      instructions: "Keep it lean",
+    }
+    expect(toSettings(saved, toForm(saved))).toEqual(saved)
+  })
+
+  it("round-trips every other field, including an explicit auto context budget", () => {
+    const saved = {
+      llm: { fallbackModels: ["openai/gpt-5", "google/gemini-3"], temperature: 0, maxTokens: 4000, contextBudget: null },
+      review: { categories: ["style"], maxFindings: 10, maxChunks: 3, minConfidence: 0.75 },
+      ignorePaths: ["gen/**", "**/*.{png,svg}"],
+      languageInstructions: { Go: "Wrap errors", Python: "Type hints" },
+    }
+    const form = toForm(saved)
+    expect(form.numbers.contextBudget).toBe("auto")
+    expect(toSettings(saved, form)).toEqual(saved)
+  })
+
+  it("trims lists, keeps commas in globs and drops incomplete language rows", () => {
+    const form = {
+      ...toForm({}),
+      fallbackModels: [" openai/gpt-5 ", "", "google/gemini-3"],
+      ignorePaths: "  **/*.{png,svg}\n\n gen/** ",
+      numbers: { ...toForm({}).numbers, maxFindings: " 12 " },
+      languageInstructions: [
+        { language: " Go ", text: " Wrap errors " },
+        { language: "Rust", text: "  " },
+      ],
+    }
+
+    expect(toSettings({}, form)).toEqual({
+      llm: { fallbackModels: ["openai/gpt-5", "google/gemini-3"] },
+      review: { maxFindings: 12 },
+      ignorePaths: ["**/*.{png,svg}", "gen/**"],
+      languageInstructions: { Go: "Wrap errors" },
+    })
+  })
+
+  it("removes inherited values and empty sections but keeps keys the form does not show", () => {
+    const saved = { review: { blockOn: "major", maxFindings: 10 }, output: { walkthrough: true }, ignorePaths: ["gen/**"] }
+    const base = toForm(saved)
+    const form = { ...base, blockOn: INHERIT, flags: { ...base.flags, walkthrough: undefined } }
+
+    expect(toSettings(saved, form)).toEqual({ review: { maxFindings: 10 }, ignorePaths: ["gen/**"] })
+  })
+
+  it("saves flags turned off and trims text", () => {
+    const base = toForm({})
+    const form = {
+      ...base,
+      model: "  anthropic/claude-opus-5-5 ",
+      instructions: "   ",
+      flags: { ...base.flags, postInline: false, requireEvidence: false },
+    }
+
+    expect(toSettings({}, form)).toEqual({
+      llm: { model: "anthropic/claude-opus-5-5" },
+      review: { requireEvidence: false },
+      output: { postInline: false },
+    })
+  })
+})
+
+describe("isDirty", () => {
+  const saved = { output: { walkthrough: false }, instructions: "Keep it lean" }
+
+  it("is clean for the saved settings and for edits that save the same thing", () => {
+    expect(isDirty(saved, toForm(saved))).toBe(false)
+    expect(isDirty(saved, { ...toForm(saved), instructions: "Keep it lean  " })).toBe(false)
+  })
+
+  it("is dirty once a value changes or a flag goes back to inheriting", () => {
+    const form = toForm(saved)
+    expect(isDirty(saved, { ...form, flags: { ...form.flags, drafts: true } })).toBe(true)
+    expect(isDirty(saved, { ...form, flags: { ...form.flags, walkthrough: undefined } })).toBe(true)
+  })
+})
+
+describe("baseConfig", () => {
+  it("puts the profile's preset on top of the defaults", () => {
+    const base = baseConfig(schema, "strict")
+    expect(base.profile).toBe("strict")
+    expect(base.review).toMatchObject({ blockOn: "major", severityFloor: "minor" })
+    expect(baseConfig(schema).review.blockOn).toBe("critical")
+  })
+})
+
+describe("withoutDefaults", () => {
+  it("drops values the profile and defaults already give and keeps the rest", () => {
+    const settings = {
+      profile: "fast",
+      llm: { model: "anthropic/claude-sonnet-5-5" },
+      review: { blockOn: "critical", severityFloor: "major", maxFindings: 10 },
+      output: { walkthrough: false, postInline: true },
+      ignorePaths: ["gen/**"],
+    }
+
+    expect(withoutDefaults(settings, schema)).toEqual({
+      profile: "fast",
+      review: { severityFloor: "major", maxFindings: 10 },
+      ignorePaths: ["gen/**"],
+    })
+  })
+
+  it("compares lists by value", () => {
+    const settings = {
+      llm: { fallbackModels: [] },
+      review: { categories: ["security", "bug"] },
+      ignorePaths: ["**/*.lock"],
+      languageInstructions: {},
+    }
+    expect(withoutDefaults(settings, schema)).toEqual({})
+    expect(withoutDefaults({ review: { categories: ["bug"] } }, schema)).toEqual({ review: { categories: ["bug"] } })
+  })
+
+  it("drops the default profile and sections left empty", () => {
+    expect(withoutDefaults({ profile: "balanced", triggers: { drafts: false } }, schema)).toEqual({})
+  })
+
+  it("lets isDirty ignore picking a value the defaults already give", () => {
+    const form = { ...toForm({}), blockOn: "critical" }
+    expect(isDirty({}, form, (settings) => withoutDefaults(settings, schema))).toBe(false)
+    expect(isDirty({}, form)).toBe(true)
+  })
+})
+
+describe("validateForm", () => {
+  const form = toForm({})
+
+  it("accepts an untouched form and auto", () => {
+    expect(validateForm(form)).toEqual({})
+    expect(validateForm({ ...form, numbers: { ...form.numbers, contextBudget: "auto" } })).toEqual({})
+  })
+
+  it("reports values the server would reject", () => {
+    const errors = validateForm({
+      ...form,
+      model: "claude",
+      fallbackModels: ["openai/a", "openai/b", "openai/c", "openai/d"],
+      baseUrl: "ftp://router",
+      categories: [],
+      numbers: { ...form.numbers, temperature: "2", maxTokens: "1.5", contextBudget: "lots" },
+      languageInstructions: [
+        { language: "Go", text: "a" },
+        { language: "go", text: "b" },
+      ],
+    })
+
+    expect(errors).toEqual({
+      model: 'Use "provider/model", e.g. anthropic/claude-sonnet-5-5',
+      fallbackModels: "At most 3 fallback models",
+      baseUrl: "Enter an http or https URL",
+      categories: "Choose at least one category",
+      temperature: "Must be between 0 and 1",
+      maxTokens: "Enter a whole number",
+      contextBudget: 'Enter a whole number or "auto"',
+      languageInstructions: "Each language can only be listed once",
+    })
+  })
+
+  it("accepts router model ids and an http base URL", () => {
+    expect(
+      validateForm({
+        ...form,
+        model: "openai/cx/gpt-5.6-sol(medium)",
+        baseUrl: "http://host.docker.internal:20128/v1",
+      }),
+    ).toEqual({})
+  })
+})
+
+describe("endpoint", () => {
+  it("round-trips the base URL and the chosen key", () => {
+    const form = { ...toForm({}), baseUrl: " http://localhost:20128/v1 ", endpointKey: "openai" }
+    const settings = toSettings({}, form)
+    expect(settings).toEqual({ llm: { baseUrl: "http://localhost:20128/v1", endpointKey: "openai" } })
+    expect(toForm(settings)).toMatchObject({ baseUrl: "http://localhost:20128/v1", endpointKey: "openai" })
+    expect(toSettings(settings, { ...form, baseUrl: "", endpointKey: INHERIT })).toEqual({})
+  })
+
+  it("saves each model's provider key as null", () => {
+    const settings = toSettings({}, { ...toForm({}), endpointKey: PROVIDER_KEYS })
+    expect(settings).toEqual({ llm: { endpointKey: null } })
+    expect(toForm(settings).endpointKey).toBe(PROVIDER_KEYS)
+  })
+})

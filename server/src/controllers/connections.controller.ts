@@ -21,6 +21,7 @@ const publicConnection = {
   kind: true,
   accountLogin: true,
   createdAt: true,
+  user: { select: { name: true, email: true } },
 } as const;
 
 const INSTALL_STATE_PURPOSE = "github-install";

@@ -1,5 +1,14 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router"
-import { ChevronsUpDown, FolderGit2, GitPullRequest, LayoutDashboard, LogOut, Plug, Settings } from "lucide-react"
+import {
+  ChevronsUpDown,
+  FolderGit2,
+  GitPullRequest,
+  LayoutDashboard,
+  LogOut,
+  Plug,
+  Settings,
+  SlidersHorizontal,
+} from "lucide-react"
 import { toast } from "sonner"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -32,6 +41,7 @@ const NAV = [
   { to: "/reviews", label: "Reviews", icon: GitPullRequest },
   { to: "/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/connections", label: "Connections", icon: Plug },
+  { to: "/configuration", label: "Configuration", icon: SlidersHorizontal },
 ]
 
 function pageTitle(pathname: string) {

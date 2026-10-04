@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router"
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute"
 import { PublicOnlyRoute } from "@/features/auth/PublicOnlyRoute"
 import { DashboardLayout } from "@/layouts/DashboardLayout"
+import { ConfigurationPage } from "@/pages/config/ConfigurationPage"
 import { ConnectionsPage } from "@/pages/forge/ConnectionsPage"
 import { DashboardPage } from "@/pages/dashboard/DashboardPage"
 import { LoginPage } from "@/pages/auth/LoginPage"
@@ -25,6 +26,7 @@ export function App() {
           <Route path="/reviews/:id" element={<ReviewDetailPage />} />
           <Route path="/repositories" element={<RepositoriesPage />} />
           <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/configuration" element={<ConfigurationPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>

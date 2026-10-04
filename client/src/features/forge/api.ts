@@ -1,5 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
+import type { ConfigOverride } from "@/features/config/api"
 import type { JobStatus, Provider, Verdict } from "@/features/reviews/types"
 
 export interface Connection {
@@ -9,12 +10,21 @@ export interface Connection {
   kind: "github_app" | "token"
   accountLogin: string
   createdAt: string
+  // The Bammy user who added the connection.
+  user: { name: string; email: string }
 }
 
 export type ConnectionStatus = "active" | "revoked" | "unreachable"
 
+// Healthy connections first; ones still being checked sink to the bottom.
+const STATUS_RANK: Record<ConnectionStatus, number> = { active: 0, unreachable: 1, revoked: 2 }
+
+export function statusRank(status: ConnectionStatus | undefined) {
+  return status ? STATUS_RANK[status] : 3
+}
+
 export interface ConnectionDetails {
-  connection: Connection & { installationId: string | null; updatedAt: string }
+  connection: Omit<Connection, "user"> & { installationId: string | null; updatedAt: string }
   repositories: {
     id: string
     fullPath: string
@@ -35,15 +45,25 @@ export interface ConnectionDetails {
   }
 }
 
+// A repository the user has added to Bammy.
 export interface ForgeRepo {
-  id: string | null
+  id: string
+  connectionId: string
+  account: { login: string; provider: Provider; host: string }
   externalId: string
   fullPath: string
   defaultBranch: string
-  private: boolean
   webUrl: string
   enabled: boolean
   settings: ConfigOverride
+  // Ignore `settings` and use the global config.
+  followGlobal: boolean
+}
+
+// A repository the forge account can see; id is null until it is added.
+export interface AvailableRepo extends Omit<ForgeRepo, "id" | "connectionId" | "account" | "followGlobal"> {
+  id: string | null
+  private: boolean
 }
 
 export interface SavedRepo {
@@ -52,42 +72,12 @@ export interface SavedRepo {
   fullPath: string
   enabled: boolean
   settings: ConfigOverride
-}
-
-// A partial review config; mirrors server/src/review/config/schema.ts.
-export interface ConfigOverride {
-  profile?: string
-  llm?: { model?: string }
-  review?: { severityFloor?: string; blockOn?: string }
-  output?: { walkthrough?: boolean; postInline?: boolean; postSummary?: boolean; postCheck?: boolean }
-  triggers?: { onPush?: boolean; drafts?: boolean; command?: boolean }
-  instructions?: string
-  [key: string]: unknown
-}
-
-export interface ResolvedConfig {
-  ref: string
-  repoFile: string | null
-  warnings: string[]
-  sources: Record<string, string>
-  config: {
-    profile: string
-    llm: { model: string }
-    review: { severityFloor: string; blockOn: string }
-    output: { walkthrough: boolean; postInline: boolean; postSummary: boolean; postCheck: boolean }
-    triggers: { onPush: boolean; drafts: boolean; command: boolean }
-    instructions: string
-  }
+  followGlobal: boolean
 }
 
 export interface WebhookState {
   active: boolean
   error?: string
-}
-
-export interface ConfigSchema {
-  profiles: Record<string, unknown>
-  severities: string[]
 }
 
 export function useConnections() {
@@ -156,52 +146,74 @@ export function useDeleteConnection() {
   })
 }
 
-export function useRepos(connectionId: string | undefined) {
+// Added repositories across every connection.
+export function useRepos() {
   return useQuery({
-    queryKey: ["repos", connectionId],
-    queryFn: () => api<{ repos: ForgeRepo[] }>(`/repos?connectionId=${connectionId}`),
-    enabled: Boolean(connectionId),
+    queryKey: ["repos"],
+    queryFn: () => api<{ repos: ForgeRepo[] }>("/repos"),
   })
 }
 
-export function useSetRepoEnabled(connectionId: string) {
+// Asks the forge for every repository the account can see, which can be slow,
+// so only while the picker is open.
+export function useAvailableRepos(connectionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["repos", connectionId, "available"],
+    queryFn: () => api<{ repos: AvailableRepo[] }>(`/repos/available?connectionId=${connectionId}`),
+    enabled,
+  })
+}
+
+type EnableResult = { repo: SavedRepo; webhook?: WebhookState }
+
+export interface AddReposResult {
+  added: { repo: AvailableRepo; webhook?: WebhookState }[]
+  failed: { repo: AvailableRepo; error: string }[]
+}
+
+// One request per repository, so one failure does not undo the others.
+export function useAddRepos(connectionId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ repo, enabled }: { repo: ForgeRepo; enabled: boolean }) =>
-      repo.id
-        ? api<{ repo: SavedRepo; webhook?: WebhookState }>(`/repos/${repo.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ enabled }),
-          })
-        : api<{ repo: SavedRepo; webhook?: WebhookState }>("/repos", {
+    mutationFn: async (repos: AvailableRepo[]): Promise<AddReposResult> => {
+      const results = await Promise.allSettled(
+        repos.map((repo) =>
+          api<EnableResult>("/repos", {
             method: "POST",
             body: JSON.stringify({ connectionId, externalId: repo.externalId }),
           }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repos", connectionId] }),
+        ),
+      )
+      const outcome: AddReposResult = { added: [], failed: [] }
+      results.forEach((result, index) => {
+        const repo = repos[index]!
+        if (result.status === "fulfilled") outcome.added.push({ repo, webhook: result.value.webhook })
+        else outcome.failed.push({ repo, error: result.reason instanceof Error ? result.reason.message : "Could not add" })
+      })
+      return outcome
+    },
+    // The prefix also refreshes the picker's list.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
   })
 }
 
-export function useRepoConfig(repoId: string | null) {
-  return useQuery({
-    queryKey: ["repo-config", repoId],
-    queryFn: () => api<ResolvedConfig>(`/repos/${repoId}/config`),
-    enabled: Boolean(repoId),
-  })
-}
-
-export function useSaveRepoSettings() {
+export function useSetRepoEnabled() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ repoId, settings }: { repoId: string; settings: ConfigOverride }) =>
-      api<{ repo: SavedRepo }>(`/repos/${repoId}`, { method: "PATCH", body: JSON.stringify({ settings }) }),
-    onSuccess: (_data, { repoId }) => queryClient.invalidateQueries({ queryKey: ["repo-config", repoId] }),
+    mutationFn: ({ repo, enabled }: { repo: ForgeRepo; enabled: boolean }) =>
+      api<EnableResult>(`/repos/${repo.id}`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
   })
 }
 
-export function useConfigSchema() {
-  return useQuery({
-    queryKey: ["config-schema"],
-    queryFn: () => api<ConfigSchema>("/config/schema"),
-    staleTime: Infinity,
+export function useRemoveRepo() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (repo: ForgeRepo) => api<void>(`/repos/${repo.id}`, { method: "DELETE" }),
+    onSuccess: (_data, repo) => {
+      queryClient.invalidateQueries({ queryKey: ["repos"] })
+      // The connection details sheet lists its repositories.
+      queryClient.invalidateQueries({ queryKey: ["connections", repo.connectionId, "details"] })
+    },
   })
 }

@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useSearchParams } from "react-router"
-import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, Plug, Plus } from "lucide-react"
+import { Loader2, Plug, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { z } from "zod"
+import { SearchableSelect } from "@/components/SearchableSelect"
+import { SortableHead } from "@/components/SortableHead"
+import { useSort } from "@/hooks/use-sort"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -21,13 +24,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { TextField } from "@/features/auth/TextField"
 import { applyServerErrors } from "@/features/auth/applyServerErrors"
 import {
+  statusRank,
   useConnectionStatuses,
   useConnectToken,
   useConnections,
@@ -139,13 +142,7 @@ function TokenForm({
   )
 }
 
-type SortKey = "account" | "forge" | "host" | "active" | "createdAt"
-// Null leaves the API order (oldest first).
-type Sort = { key: SortKey; dir: "asc" | "desc" } | null
-
-// Healthy connections first; ones still being checked sink to the bottom.
-const STATUS_RANK: Record<ConnectionStatus, number> = { active: 0, unreachable: 1, revoked: 2 }
-
+type SortKey = "account" | "forge" | "host" | "active" | "addedBy" | "createdAt"
 function kindLabel(connection: Connection) {
   return PROVIDERS[connection.provider].kindLabel[connection.kind] ?? connection.kind
 }
@@ -163,13 +160,10 @@ function compareConnections(
       return kindLabel(a).localeCompare(kindLabel(b))
     case "host":
       return a.host.localeCompare(b.host)
-    case "active": {
-      const rank = (connection: Connection) => {
-        const status = statuses[connection.id]
-        return status ? STATUS_RANK[status] : 3
-      }
-      return rank(a) - rank(b)
-    }
+    case "active":
+      return statusRank(statuses[a.id]) - statusRank(statuses[b.id])
+    case "addedBy":
+      return a.user.name.localeCompare(b.user.name)
     case "createdAt":
       return Date.parse(a.createdAt) - Date.parse(b.createdAt)
   }
@@ -179,42 +173,11 @@ function formatDate(value: string) {
   return new Date(value).toLocaleDateString(undefined, { dateStyle: "medium" })
 }
 
-function SortableHead({
-  label,
-  sortKey,
-  sort,
-  onSort,
-}: {
-  label: string
-  sortKey: SortKey
-  sort: Sort
-  onSort: (key: SortKey) => void
-}) {
-  const dir = sort?.key === sortKey ? sort.dir : null
-  const Icon = dir === "asc" ? ArrowUp : dir === "desc" ? ArrowDown : ArrowUpDown
-  const next = dir === "asc" ? "Sort descending" : dir === "desc" ? "Remove sorting" : "Sort ascending"
-  return (
-    <TableHead aria-sort={dir ? (dir === "asc" ? "ascending" : "descending") : undefined}>
-      <Button variant="ghost" size="sm" className="-ml-2.5" title={next} onClick={() => onSort(sortKey)}>
-        {label}
-        <Icon className={dir ? undefined : "text-muted-foreground"} />
-      </Button>
-    </TableHead>
-  )
-}
-
 function ConnectionsTable({ connections }: { connections: Connection[] }) {
   const statuses = useConnectionStatuses(connections)
-  const [sort, setSort] = useState<Sort>(null)
+  // Unsorted keeps the API order (oldest first).
+  const { sort, onSort } = useSort<SortKey>()
   const [selected, setSelected] = useState<Connection | null>(null)
-
-  // Each header cycles ascending -> descending -> unsorted.
-  function onSort(key: SortKey) {
-    setSort((current) => {
-      if (current?.key !== key) return { key, dir: "asc" }
-      return current.dir === "asc" ? { key, dir: "desc" } : null
-    })
-  }
 
   const sorted = useMemo(() => {
     if (!sort) return connections
@@ -235,6 +198,7 @@ function ConnectionsTable({ connections }: { connections: Connection[] }) {
             <SortableHead label="Forge" sortKey="forge" {...head} />
             <SortableHead label="Host" sortKey="host" {...head} />
             <SortableHead label="Active" sortKey="active" {...head} />
+            <SortableHead label="Added by" sortKey="addedBy" {...head} />
             <SortableHead label="Created" sortKey="createdAt" {...head} />
             <TableHead />
           </TableRow>
@@ -254,6 +218,9 @@ function ConnectionsTable({ connections }: { connections: Connection[] }) {
                 <TableCell className="text-muted-foreground">{connection.host}</TableCell>
                 <TableCell>
                   <ConnectionStatusBadge status={statuses[connection.id]} />
+                </TableCell>
+                <TableCell className="text-muted-foreground" title={connection.user.email}>
+                  {connection.user.name}
                 </TableCell>
                 <TableCell className="text-muted-foreground" title={new Date(connection.createdAt).toLocaleString()}>
                   {formatDate(connection.createdAt)}
@@ -356,22 +323,13 @@ function AddConnectionSheet({
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="provider">Provider</FieldLabel>
-              <Select value={providerId} onValueChange={(value) => setProviderId(value as Provider)}>
-                <SelectTrigger id="provider" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDER_IDS.map((id) => {
-                    const Icon = PROVIDERS[id].icon
-                    return (
-                      <SelectItem key={id} value={id}>
-                        <Icon />
-                        {PROVIDERS[id].label}
-                      </SelectItem>
-                    )
-                  })}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                id="provider"
+                value={providerId}
+                onValueChange={(value) => setProviderId(value as Provider)}
+                searchPlaceholder="Search providers..."
+                options={PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDERS[id].label, icon: PROVIDERS[id].icon }))}
+              />
             </Field>
             {provider.hosting.selfHosted && (
               <Field orientation="horizontal">

@@ -65,6 +65,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+    # Lets an LLM base URL reach a proxy on the host (e.g. 9router) as
+    # http://host.docker.internal:<port>; "localhost" is the container itself.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./server:/app
       - /app/node_modules

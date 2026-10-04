@@ -163,7 +163,10 @@ describe("GET /api/connections", () => {
     expect(res.status).toBe(200);
     expect(res.body.availableApps).toEqual(["github"]);
     expect(res.body.connections).toHaveLength(1);
-    expect(res.body.connections[0]).toMatchObject({ accountLogin: "me" });
+    expect(res.body.connections[0]).toMatchObject({
+      accountLogin: "me",
+      user: { name: "Dev", email: "dev@example.com" },
+    });
     expect(res.body.connections[0].encryptedToken).toBeUndefined();
   });
 });
