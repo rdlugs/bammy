@@ -5,7 +5,8 @@ import { CATEGORIES, SEVERITIES } from "../review/core/severity.ts";
 import { PROFILES } from "../review/config/profiles.ts";
 import { resolveConfig } from "../review/config/resolve.ts";
 import { DEFAULT_CONFIG, PROFILE_NAMES, dashboardOverrideSchema } from "../review/config/schema.ts";
-import { updateGlobalConfigSchema } from "../schemas/config.schema.ts";
+import { previewPublication } from "../review/preview/preview.ts";
+import { configPreviewSchema, updateGlobalConfigSchema } from "../schemas/config.schema.ts";
 import { requireStoredLlmConnection } from "../services/llm.ts";
 
 // What the settings UI needs to render choices and show inherited values.
@@ -46,4 +47,12 @@ export async function updateGlobalConfig(req: Request, res: Response) {
     select: { reviewSettings: true },
   });
   res.json(globalConfigBody(user.reviewSettings));
+}
+
+// Renders what a review of a sample change would post with these settings. No
+// model call and nothing stored: the sample's model answers are scripted.
+export async function previewConfig(req: Request, res: Response) {
+  const { provider, base, settings } = configPreviewSchema.parse(req.body);
+  const { config } = resolveConfig({ global: base, repoSettings: settings });
+  res.json(await previewPublication(config, provider));
 }

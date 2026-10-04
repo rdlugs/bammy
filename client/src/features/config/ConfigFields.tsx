@@ -26,9 +26,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useApiKeys, useLlmModels } from "@/features/settings/api"
 import { LLM_PROVIDERS } from "@/features/settings/providers"
-import { useConfigSchema, type EffectiveConfig, type LlmProviderName, type SummaryLocation } from "./api"
+import { useConfigSchema, type ConfigOverride, type EffectiveConfig, type LlmProviderName } from "./api"
 import { ModelCombobox, type ModelSuggestions } from "./ModelCombobox"
-import { ReviewPreview, type PreviewSettings } from "./ReviewPreview"
+import { ReviewPreview } from "./ReviewPreview"
 import { CONFIG_TABS, TAB_ERRORS, type ConfigTab } from "./tabs"
 import {
   AUTO,
@@ -37,6 +37,7 @@ import {
   INHERIT,
   MAX_FALLBACK_MODELS,
   NUMBERS,
+  toSettings,
   type ChoiceName,
   type FlagName,
   type ListName,
@@ -739,25 +740,19 @@ export function ConfigFields(props: {
     )
   }
 
-  // The preview follows the form, unsaved edits included. A repository that
-  // follows the global config ignores its overrides, so it shows the global values.
+  // A repository that follows the global config ignores its overrides, so it
+  // shows (and previews) the global values.
   const shownFlag = (name: FlagName) => (disabled ? inheritedFlag(name) : (form.flags[name] ?? inheritedFlag(name))) ?? false
-  const shownChoice = (value: string, fallback: string | undefined) =>
-    disabled || value === INHERIT ? fallback : value
-  const preview: PreviewSettings = {
-    walkthrough: shownFlag("walkthrough"),
-    postInline: shownFlag("postInline"),
-    postSummary: shownFlag("postSummary"),
-    postCheck: shownFlag("postCheck"),
-    committableSuggestions: shownFlag("committableSuggestions"),
-    severityFloor: shownChoice(form.severityFloor, inherited?.review.severityFloor),
-    blockOn: shownChoice(form.blockOn, inherited?.review.blockOn),
-    model: (!disabled && form.model.trim()) || inherited?.llm.model,
-    summaryLocation: (shownChoice(form.choices.summaryLocation, inherited?.output.summaryLocation) ??
-      "dynamic") as SummaryLocation,
-    blastRadiusLabel: shownFlag("blastRadiusLabel"),
-    effortLabel: shownFlag("effortLabel"),
-  }
+  const walkthroughOn = shownFlag("walkthrough")
+
+  // The preview follows the form, unsaved edits included: the server layers
+  // what the form sets over what it inherits. Values the server would reject
+  // hold the preview back (the connection is not part of it).
+  const blocking = Object.entries(errors).some(([key, message]) => key !== "connection" && message)
+  const previewRequest =
+    inherited && !blocking
+      ? { base: inherited as ConfigOverride, settings: disabled ? {} : toSettings({}, form) }
+      : null
 
   const storedConnections = (apiKeys.data?.keys ?? []).filter((key) => key.stored)
   const selectedProvider = form.connection === INHERIT ? null : (form.connection as LlmProviderName)
@@ -959,9 +954,9 @@ export function ConfigFields(props: {
           <ToggleList>{toggles(["walkthrough"])}</ToggleList>
           {/* Placement and labels only apply while there is a summary to place. */}
           <div className="grid gap-4 @md/field-group:grid-cols-2">
-            {choiceField("summaryLocation", !preview.walkthrough)}
+            {choiceField("summaryLocation", !walkthroughOn)}
           </div>
-          <ToggleList>{toggles(["blastRadiusLabel", "effortLabel"], !preview.walkthrough)}</ToggleList>
+          <ToggleList>{toggles(["blastRadiusLabel", "effortLabel"], !walkthroughOn)}</ToggleList>
         </Section>
       </>
     ),
@@ -1061,10 +1056,12 @@ export function ConfigFields(props: {
                 <Card role="region" aria-label="Review preview" className="@3xl:sticky @3xl:top-4">
                   <CardHeader>
                     <CardTitle>Preview</CardTitle>
-                    <CardDescription>A sample change reviewed with these settings, including unsaved edits.</CardDescription>
+                    <CardDescription>
+                      What Bammy would post on a sample change with these settings, including unsaved edits.
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <ReviewPreview settings={preview} />
+                    <ReviewPreview request={previewRequest} />
                   </CardContent>
                 </Card>
               </div>

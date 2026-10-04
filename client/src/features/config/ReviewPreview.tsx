@@ -1,308 +1,306 @@
-import { CircleCheck, CircleX, MessageSquareOff } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { useState, type ReactNode } from "react"
+import { CircleCheck, CircleDot, CircleX, Clock, GitPullRequest, MessageSquareOff, RotateCcw } from "lucide-react"
+import { SearchableSelect } from "@/components/SearchableSelect"
+import { Button } from "@/components/ui/button"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Skeleton } from "@/components/ui/skeleton"
+import { PROVIDER_IDS, PROVIDERS } from "@/features/forge/providers"
 import { cn } from "@/lib/utils"
+import {
+  useConfigPreview,
+  type ForgeProvider,
+  type PreviewPublication,
+  type PreviewRequest,
+} from "./api"
+import { ForgeMarkdown } from "./ForgeMarkdown"
 
-// What the settings on the Display tab change about a review, shown on a made
-// up change: the PR/MR itself (labels, and the walkthrough when it goes in the
-// description), then each comment and the status. The layout follows
-// server/src/review/render/markdown.ts and the placement rules in
-// server/src/review/publish/publisher.ts, without rendering markdown.
+// What a review posts with the settings in the form, drawn as the PR/MR page
+// it lands on. The content is not mocked here: the server runs the real
+// pipeline and renderers on a sample change (server/src/review/preview), so
+// every word matches what Bammy would post.
 
-export interface PreviewSettings {
-  walkthrough: boolean
-  postInline: boolean
-  postSummary: boolean
-  postCheck: boolean
-  committableSuggestions: boolean
-  severityFloor?: string
-  blockOn?: string
-  model?: string
-  summaryLocation: "dynamic" | "description" | "comment"
-  blastRadiusLabel: boolean
-  effortLabel: boolean
-}
+type Inline = PreviewPublication["inline"][number]
+type Status = NonNullable<PreviewPublication["status"]>
 
-// The sample's estimates, named as server/src/review/publish/labels.ts names them.
-const SAMPLE_BLAST_RADIUS = "medium"
-const SAMPLE_BLAST_RADIUS_LABEL = "Medium blast radius"
-const SAMPLE_EFFORT_LABEL = "5-10 Minutes"
+const FORGES = PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDERS[id].label, icon: PROVIDERS[id].icon }))
 
-// Mirrors server/src/review/core/severity.ts.
-const RANK: Record<string, number> = { critical: 3, major: 2, minor: 1, info: 0 }
-const rank = (severity: string | undefined) => (severity ? (RANK[severity] ?? 0) : 0)
-
-interface SampleFinding {
-  severity: string
-  category: string
-  bucket: "actionable" | "nitpick"
-  file: string
-  line: number
-  title: string
-}
-
-const FINDINGS: SampleFinding[] = [
-  {
-    severity: "major",
-    category: "security",
-    bucket: "actionable",
-    file: "src/api/users.ts",
-    line: 42,
-    title: "User id is interpolated into the SQL query",
-  },
-  {
-    severity: "minor",
-    category: "maintainability",
-    bucket: "nitpick",
-    file: "src/api/users.ts",
-    line: 7,
-    title: "Unused import of formatDate",
-  },
-  { severity: "info", category: "docs", bucket: "nitpick", file: "README.md", line: 18, title: "Typo in the setup steps" },
+// Stand-ins for the colours a project gives its labels.
+const LABEL_COLOURS = [
+  "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+  "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30",
 ]
 
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
-
-function Location({ finding }: { finding: SampleFinding }) {
-  return <code className="rounded bg-muted px-1 text-xs">{`${finding.file}:${finding.line}`}</code>
-}
-
-function Comment(props: { title: string; children: React.ReactNode; label: string }) {
+function Avatar(props: { name: string; bot?: boolean }) {
   return (
-    <section aria-label={props.label} className="overflow-hidden rounded-lg border bg-background">
-      <header className="flex items-center gap-2 border-b bg-muted/50 px-3 py-2 text-xs">
-        <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-          B
-        </span>
-        <span className="font-medium">bammy</span>
-        <span className="text-muted-foreground">{props.title}</span>
-      </header>
-      <div className="flex flex-col gap-3 p-3 text-sm">{props.children}</div>
-    </section>
-  )
-}
-
-function Fold({ summary, children }: { summary: string; children: React.ReactNode }) {
-  return (
-    <details className="rounded-md border px-3 py-2">
-      <summary className="cursor-pointer text-sm font-medium">{summary}</summary>
-      <div className="mt-2 flex flex-col gap-1">{children}</div>
-    </details>
-  )
-}
-
-function StatusCheck({ blocked, blockOn, blocking }: { blocked: boolean; blockOn?: string; blocking: number }) {
-  const Icon = blocked ? CircleX : CircleCheck
-  return (
-    <section aria-label="Commit status" className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm">
-      <Icon className={cn("size-4 shrink-0", blocked ? "text-destructive" : "text-green-600")} />
-      <code className="text-xs font-medium">bammy/review</code>
-      <span className="truncate text-muted-foreground">
-        {blocked ? `Blocked: ${plural(blocking, "finding")} at or above ${blockOn}` : "Pass"}
-      </span>
-    </section>
-  )
-}
-
-function InlineComment({ finding, committable }: { finding: SampleFinding; committable: boolean }) {
-  return (
-    <Comment label="Inline comment" title={`commented on ${finding.file}`}>
-      <pre className="overflow-x-auto rounded-md bg-muted p-2 text-xs">
-        <span className="text-muted-foreground">{finding.line} </span>
-        {"+ db.query(`SELECT * FROM users WHERE id = ${id}`)"}
-      </pre>
-      <p>
-        <Badge variant="secondary" className="mr-1">
-          {finding.severity}
-        </Badge>
-        <strong>{finding.title}</strong>
-      </p>
-      <p className="text-muted-foreground">The id comes from the request path, so a crafted value runs arbitrary SQL.</p>
-      {committable ? (
-        <div className="overflow-hidden rounded-md border">
-          <div className="flex items-center justify-between border-b bg-muted/50 px-2 py-1 text-xs">
-            <span className="font-medium">Suggested change</span>
-            <span className="rounded border bg-background px-1.5 py-0.5">Commit suggestion</span>
-          </div>
-          <pre className="overflow-x-auto text-xs">
-            <div className="bg-destructive/10 px-2">{"- db.query(`SELECT * FROM users WHERE id = ${id}`)"}</div>
-            <div className="bg-green-600/10 px-2">{'+ db.query("SELECT * FROM users WHERE id = $1", [id])'}</div>
-          </pre>
-        </div>
-      ) : (
-        <pre className="overflow-x-auto rounded-md bg-muted p-2 text-xs">
-          {'db.query("SELECT * FROM users WHERE id = $1", [id])'}
-        </pre>
+    <span
+      aria-hidden
+      className={cn(
+        "flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+        props.bot ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
       )}
-    </Comment>
+    >
+      {props.name[0]!.toUpperCase()}
+    </span>
   )
 }
 
-function Walkthrough() {
+// One entry in the conversation (GitHub) or activity (GitLab).
+function Note(props: {
+  provider: ForgeProvider
+  label: string
+  author: string
+  bot?: boolean
+  action: string
+  children: ReactNode
+}) {
+  const github = props.provider === "github"
+  const handle = github ? (props.bot ? `${props.author}[bot]` : props.author) : `@${props.author}`
   return (
-    <div className="flex flex-col gap-2" aria-label="Walkthrough" role="group">
-      <h5 className="font-semibold">Bammy summary</h5>
-      <p>Adds a lookup endpoint for users and documents how to run it locally.</p>
-      <p className="text-xs text-muted-foreground">
-        Labels: <code>api</code>, <code>security</code> · Review effort: 2/5 · Blast radius: {SAMPLE_BLAST_RADIUS}
-      </p>
-      <Fold summary="Changes (2 files)">
-        <p className="text-xs">
-          <code>src/api/users.ts</code>: new GET /users/:id handler
-        </p>
-        <p className="text-xs">
-          <code>README.md</code>: setup steps for the API
-        </p>
-      </Fold>
-    </div>
-  )
-}
-
-// The sample PR has no description of its own, so "dynamic" fills it.
-function PullRequest(props: { settings: PreviewSettings; inDescription: boolean }) {
-  const { settings } = props
-  const labels = settings.walkthrough
-    ? [
-        settings.blastRadiusLabel && SAMPLE_BLAST_RADIUS_LABEL,
-        settings.effortLabel && SAMPLE_EFFORT_LABEL,
-      ].filter((label): label is string => Boolean(label))
-    : []
-  return (
-    <section aria-label="Pull request" className="overflow-hidden rounded-lg border bg-background">
-      <header className="flex flex-col gap-2 border-b bg-muted/50 px-3 py-2">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="font-semibold">Add user lookup endpoint</span>
-          <span className="text-muted-foreground">#42</span>
-        </div>
-        {labels.length > 0 && (
-          <ul aria-label="Labels" className="flex flex-wrap gap-1">
-            {labels.map((label) => (
-              <li key={label}>
-                <Badge variant="outline">{label}</Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-      </header>
-      <div className="flex flex-col gap-3 p-3 text-sm">
-        {props.inDescription ? (
-          <>
-            <Walkthrough />
-            {settings.summaryLocation === "dynamic" && (
-              <p className="text-xs text-muted-foreground">
-                Dynamic: this change had no description, so the summary fills it. With one, it is posted as a comment.
-              </p>
-            )}
-          </>
-        ) : (
-          <p className="text-muted-foreground italic">No description provided.</p>
-        )}
+    <section aria-label={props.label} className="flex gap-2">
+      <Avatar name={props.author} bot={props.bot} />
+      <div className={cn("min-w-0 flex-1 overflow-hidden border bg-background", github ? "rounded-md" : "rounded-sm")}>
+        <header
+          className={cn(
+            "flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-b px-3 py-1.5 text-xs",
+            github ? "bg-muted/50" : "bg-background",
+          )}
+        >
+          <span className="font-semibold">{github ? handle : props.author}</span>
+          {!github && <span className="text-muted-foreground">{handle}</span>}
+          {props.bot && github && <span className="rounded-full border px-1.5 text-[10px] text-muted-foreground">bot</span>}
+          <span className="text-muted-foreground">{props.action}</span>
+        </header>
+        <div className="p-3">{props.children}</div>
       </div>
     </section>
   )
 }
 
-function SummaryComment(props: {
-  settings: PreviewSettings
-  reported: SampleFinding[]
-  blocking: SampleFinding[]
-}) {
-  const { settings, reported, blocking } = props
-  const actionable = reported.filter((f) => f.bucket === "actionable")
-  const nitpicks = reported.filter((f) => f.bucket === "nitpick")
-  const severities = Object.keys(RANK)
-    .map((severity) => [severity, reported.filter((f) => f.severity === severity).length] as const)
-    .filter(([, count]) => count > 0)
-    .map(([severity, count]) => `${count} ${severity}`)
-    .join(", ")
-
+function DiffHunk({ comment }: { comment: Inline }) {
   return (
-    <Comment label="Summary comment" title="commented">
-      <h4 className="text-base font-semibold">Bammy review</h4>
-      {blocking.length > 0 ? (
-        <div>
-          <p>
-            ⛔ <strong>Blocked</strong>: {plural(blocking.length, "finding")} at or above {settings.blockOn}.
-          </p>
-          <ul className="mt-1 list-disc pl-5">
-            {blocking.map((finding) => (
-              <li key={finding.title}>
-                <strong>{finding.severity}</strong> <Location finding={finding} />: {finding.title}
-              </li>
+    <div className="overflow-hidden rounded-md border text-xs">
+      <div className="border-b bg-muted/50 px-3 py-1.5 font-mono">{comment.path}</div>
+      <div className="overflow-x-auto">
+        <table className="w-full font-mono">
+          <tbody>
+            {comment.diff.map((line) => (
+              <tr key={line.newLine} className={line.type === "add" ? "bg-green-600/10" : undefined}>
+                <td className="w-8 px-1 text-right text-muted-foreground select-none">{line.oldLine ?? ""}</td>
+                <td className="w-8 px-1 text-right text-muted-foreground select-none">{line.newLine}</td>
+                <td className="px-2 whitespace-pre">
+                  {line.type === "add" ? "+" : " "}
+                  {line.text}
+                </td>
+              </tr>
             ))}
-          </ul>
-        </div>
-      ) : (
-        <p>
-          ✅ <strong>Pass</strong>: no findings at or above {settings.blockOn}.
-        </p>
-      )}
-      <p>
-        {reported.length === 0
-          ? "No findings."
-          : `${plural(reported.length, "finding")} (${severities}): ${actionable.length} actionable, ${
-              reported.length - actionable.length
-            } in the sections below.`}
-      </p>
-      {actionable.length > 0 && (
-        <Fold summary={`Actionable comments (${actionable.length})`}>
-          {actionable.map((finding) => (
-            <p key={finding.title} className="text-xs">
-              <strong>{finding.severity}</strong> <Location finding={finding} />: {finding.title}
-            </p>
-          ))}
-        </Fold>
-      )}
-      {nitpicks.length > 0 && (
-        <Fold summary={`Nitpick comments (${nitpicks.length})`}>
-          {nitpicks.map((finding) => (
-            <p key={finding.title} className="text-xs">
-              <Location finding={finding} />: {finding.title}{" "}
-              <em className="text-muted-foreground">
-                {finding.severity} · {finding.category}
-              </em>
-            </p>
-          ))}
-        </Fold>
-      )}
-      <p className="text-xs text-muted-foreground">
-        Reviewed <code>a1b2c3d</code> with {settings.model ?? "the configured model"} · 1 review pass · 2 files
-        reviewed
-      </p>
-    </Comment>
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 
-export function ReviewPreview({ settings }: { settings: PreviewSettings }) {
-  const reported = FINDINGS.filter((f) => rank(f.severity) >= rank(settings.severityFloor))
-  const blocking = reported.filter((f) => settings.blockOn !== undefined && rank(f.severity) >= rank(settings.blockOn))
-  const inline = reported.find((f) => f.bucket === "actionable")
-  // Mirrors publishes() in server/src/review/publish/publisher.ts; labels need the walkthrough.
-  const nothing = !settings.postInline && !settings.postSummary && !settings.postCheck && !settings.walkthrough
-  const inDescription = settings.walkthrough && settings.summaryLocation !== "comment"
+function InlineThread(props: { provider: ForgeProvider; comment: Inline }) {
+  const { comment, provider } = props
+  const original = comment.diff
+    .filter((line) => line.newLine >= comment.startLine && line.newLine <= comment.endLine)
+    .map((line) => line.text)
+  return (
+    <div className="flex flex-col gap-2">
+      <DiffHunk comment={comment} />
+      <div className="ml-4 border-l-2 pl-3">
+        <ForgeMarkdown provider={provider} original={original}>
+          {comment.body}
+        </ForgeMarkdown>
+      </div>
+    </div>
+  )
+}
 
+const STATUS_TEXT: Record<ForgeProvider, Record<Status["state"], string>> = {
+  github: { success: "Successful", failure: "Failing", error: "Errored", pending: "Pending" },
+  gitlab: { success: "passed", failure: "failed", error: "failed", pending: "pending" },
+}
+
+function StatusRow(props: { provider: ForgeProvider; status: Status }) {
+  const { state } = props.status
+  const Icon = state === "success" ? CircleCheck : state === "pending" ? Clock : CircleX
+  const github = props.provider === "github"
+  return (
+    <section
+      aria-label="Commit status"
+      className="flex flex-wrap items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm"
+    >
+      <Icon className={cn("size-4 shrink-0", state === "success" ? "text-green-600" : "text-destructive")} />
+      {github ? (
+        <>
+          <code className="text-xs font-semibold">bammy/review</code>
+          <span className="text-muted-foreground">
+            {STATUS_TEXT.github[state]}: {props.status.description}
+          </span>
+        </>
+      ) : (
+        <span className="text-muted-foreground">
+          External status <code className="text-xs font-semibold text-foreground">bammy/review</code>{" "}
+          {STATUS_TEXT.gitlab[state]}: {props.status.description}
+        </span>
+      )}
+    </section>
+  )
+}
+
+function PageHeader({ preview }: { preview: PreviewPublication }) {
+  const { pr, provider } = preview
+  const github = provider === "github"
+  return (
+    <header className="flex flex-col gap-2 border-b pb-3">
+      <h4 className="text-base font-semibold">
+        {pr.title} <span className="font-normal text-muted-foreground">{github ? `#${pr.number}` : `!${pr.number}`}</span>
+      </h4>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 px-2 py-0.5 font-medium text-white",
+            github ? "rounded-full bg-green-600" : "rounded-sm bg-sky-600",
+          )}
+        >
+          {github ? <GitPullRequest className="size-3.5" /> : <CircleDot className="size-3.5" />}
+          Open
+        </span>
+        <span>
+          <strong className="text-foreground">{pr.author}</strong>{" "}
+          {github ? (
+            <>
+              wants to merge into <code>{pr.targetBranch}</code> from <code>{pr.sourceBranch}</code>
+            </>
+          ) : (
+            <>
+              requested to merge <code>{pr.sourceBranch}</code> into <code>{pr.targetBranch}</code>
+            </>
+          )}
+        </span>
+      </div>
+      {pr.labels.length > 0 && (
+        <ul aria-label="Labels" className="flex flex-wrap gap-1">
+          {pr.labels.map((label, i) => (
+            <li
+              key={label}
+              className={cn(
+                "border px-2 py-0.5 text-xs font-medium",
+                github ? "rounded-full" : "rounded-sm",
+                LABEL_COLOURS[i % LABEL_COLOURS.length],
+              )}
+            >
+              {label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </header>
+  )
+}
+
+function ForgePage({ preview }: { preview: PreviewPublication }) {
+  const { pr, provider } = preview
+  const github = provider === "github"
+  const nothing =
+    !preview.summaryComment &&
+    !preview.walkthroughComment &&
+    !preview.status &&
+    preview.inline.length === 0 &&
+    pr.labels.length === 0 &&
+    !pr.description
   return (
     <div className="flex flex-col gap-3">
-      {nothing ? (
+      <PageHeader preview={preview} />
+      {/* GitLab shows the status in the merge request widget, above the activity. */}
+      {!github && preview.status && <StatusRow provider={provider} status={preview.status} />}
+      <Note
+        provider={provider}
+        label="Pull request description"
+        author={pr.author}
+        action={github ? "opened this pull request" : "created merge request"}
+      >
+        {pr.description ? (
+          <ForgeMarkdown provider={provider}>{pr.description}</ForgeMarkdown>
+        ) : (
+          <p className="text-sm text-muted-foreground italic">No description provided.</p>
+        )}
+      </Note>
+      {nothing && (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed bg-background p-6 text-center text-sm text-muted-foreground">
           <MessageSquareOff className="size-5" />
           Bammy posts nothing to the change. Reviews still show up in the dashboard.
         </div>
+      )}
+      {preview.walkthroughComment && (
+        <Note provider={provider} label="PR summary comment" author="bammy" bot action="commented">
+          <ForgeMarkdown provider={provider}>{preview.walkthroughComment}</ForgeMarkdown>
+        </Note>
+      )}
+      {preview.inline.length > 0 && (
+        <Note
+          provider={provider}
+          label="Inline comments"
+          author="bammy"
+          bot
+          action={github ? "reviewed" : `started ${preview.inline.length} threads on the diff`}
+        >
+          <div className="flex flex-col gap-4">
+            {preview.inline.map((comment) => (
+              <InlineThread key={`${comment.path}:${comment.startLine}`} provider={provider} comment={comment} />
+            ))}
+          </div>
+        </Note>
+      )}
+      {preview.summaryComment && (
+        <Note provider={provider} label="Summary comment" author="bammy" bot action="commented">
+          <ForgeMarkdown provider={provider}>{preview.summaryComment}</ForgeMarkdown>
+        </Note>
+      )}
+      {github && preview.status && <StatusRow provider={provider} status={preview.status} />}
+    </div>
+  )
+}
+
+// `request` is null while the form holds values the server would reject; the
+// last good preview then stays up.
+export function ReviewPreview({ request }: { request: Omit<PreviewRequest, "provider"> | null }) {
+  const [provider, setProvider] = useState<ForgeProvider>("github")
+  const preview = useConfigPreview(request && { provider, ...request })
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Field className="w-full sm:w-56">
+        <FieldLabel htmlFor="preview-forge">Forge</FieldLabel>
+        <SearchableSelect
+          id="preview-forge"
+          value={provider}
+          onValueChange={(value) => setProvider(value as ForgeProvider)}
+          options={FORGES}
+        />
+      </Field>
+      {!request && preview.data && (
+        <p className="text-xs text-muted-foreground">Fix the highlighted fields to update the preview.</p>
+      )}
+      {preview.isError && !preview.data ? (
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-6 text-center text-sm">
+          <p className="text-destructive">Could not render the preview.</p>
+          <Button type="button" variant="outline" size="sm" onClick={() => preview.refetch()}>
+            <RotateCcw />
+            Try again
+          </Button>
+        </div>
+      ) : preview.data ? (
+        <div className={cn("transition-opacity", preview.isPlaceholderData && "opacity-60")}>
+          <ForgePage preview={preview.data} />
+        </div>
       ) : (
-        <>
-          <PullRequest settings={settings} inDescription={inDescription} />
-          {settings.postCheck && (
-            <StatusCheck blocked={blocking.length > 0} blockOn={settings.blockOn} blocking={blocking.length} />
-          )}
-          {settings.postSummary && <SummaryComment settings={settings} reported={reported} blocking={blocking} />}
-          {settings.walkthrough && !inDescription && (
-            <Comment label="PR summary comment" title="commented">
-              <Walkthrough />
-            </Comment>
-          )}
-          {settings.postInline && inline && (
-            <InlineComment finding={inline} committable={settings.committableSuggestions} />
-          )}
-        </>
+        <div aria-label="Loading preview" className="flex flex-col gap-3">
+          <Skeleton className="h-12" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-40" />
+        </div>
       )}
     </div>
   )

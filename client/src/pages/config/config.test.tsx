@@ -103,7 +103,58 @@ async function selectOpenAiConnection() {
 }
 
 const GLOBAL_SCOPE = /The global config applies to every repository/
+// A server preview of the sample change, trimmed to what the tests look at.
+const PREVIEW = {
+  provider: "github",
+  pr: {
+    title: "Add user lookup endpoint",
+    number: 42,
+    author: "ada",
+    sourceBranch: "feature/user-lookup",
+    targetBranch: "main",
+    description:
+      "<!-- bammy:walkthrough:start -->\n## Bammy summary\n\nAdds a lookup endpoint.\n<!-- bammy:walkthrough:end -->\n",
+    labels: ["Medium blast radius"],
+  },
+  status: { state: "failure", description: "1 finding at or above critical" },
+  summaryComment:
+    "## Bammy review\n\n⛔ **Blocked**: 1 finding at or above critical.\n\n<details>\n<summary>Actionable comments (1)</summary>\n\n- SQL\n\n</details>\n\n<!-- bammy:summary -->\n",
+  walkthroughComment: null,
+  inline: [
+    {
+      path: "src/api/users.ts",
+      startLine: 9,
+      endLine: 9,
+      body: "**critical** · security\n\n**User id is interpolated**\n\n```suggestion\nconst rows = safe()\n```",
+      diff: [{ type: "add", oldLine: null, newLine: 9, text: "const rows = old()" }],
+    },
+  ],
+}
+const NOTHING = { summaryComment: null, walkthroughComment: null, status: null, inline: [] }
+
+interface PreviewBody {
+  provider: string
+  base: Record<string, unknown>
+  settings: Record<string, unknown>
+}
+
+// Records each preview request and answers like the server would for the
+// switches the tests use.
+function previewStub(bodies: PreviewBody[]) {
+  return (init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as PreviewBody
+    bodies.push(body)
+    const output = (body.settings.output ?? {}) as Record<string, boolean>
+    return jsonResponse(200, {
+      ...PREVIEW,
+      provider: body.provider,
+      inline: output.postInline === false ? [] : PREVIEW.inline,
+    })
+  }
+}
+
 const globalRoutes = (extra: Record<string, unknown> = {}) => ({
+  "POST /api/config/preview": PREVIEW,
   "GET /api/config/global": globalConfig(),
   "GET /api/config/schema": schema,
   "GET /api/repos": { repos: [] },
@@ -398,82 +449,89 @@ describe("Configuration page", () => {
     expect(screen.getByRole("button", { name: "Save global config" })).toBeEnabled()
   })
 
-  it("previews what the display settings post, unsaved edits included", async () => {
-    mockApi(globalRoutes())
+  it("renders what the server previews as the PR page, following unsaved edits", async () => {
+    const bodies: PreviewBody[] = []
+    mockApi(globalRoutes({ "POST /api/config/preview": previewStub(bodies) }))
     renderWithProviders(<App />, { route: "/configuration?tab=display" })
 
     const preview = await screen.findByRole("region", { name: "Review preview" })
     for (const name of ["Review comments", "PR summary"]) {
       expect(screen.getByRole("group", { name })).toBeInTheDocument()
     }
-    // The sample's major finding is below the default critical block level.
-    expect(await within(preview).findByRole("region", { name: "Commit status" })).toHaveTextContent("Pass")
-    expect(within(preview).getByText("Suggested change")).toBeInTheDocument()
     // The settings and the preview are separate cards.
-    expect(within(preview).queryByRole("switch")).not.toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Walkthrough" }).closest("[data-slot=card]")).not.toBe(
       preview.closest("[data-slot=card]"),
     )
 
-    // Dynamic fills the sample's empty description, and the review comment leaves it out.
-    const pr = within(preview).getByRole("region", { name: "Pull request" })
-    expect(within(pr).getByRole("group", { name: "Walkthrough" })).toHaveTextContent("Blast radius: medium")
-    expect(within(pr).getByText(/so the summary fills it/)).toBeInTheDocument()
+    expect(await within(preview).findByRole("heading", { name: /Add user lookup endpoint/ })).toHaveTextContent("#42")
+    const description = within(preview).getByRole("region", { name: "Pull request description" })
+    expect(within(description).getByRole("heading", { name: "Bammy summary" })).toBeInTheDocument()
+    expect(within(preview).getByRole("list", { name: "Labels" })).toHaveTextContent("Medium blast radius")
     const summary = within(preview).getByRole("region", { name: "Summary comment" })
-    expect(within(summary).queryByRole("group", { name: "Walkthrough" })).not.toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole("combobox", { name: "Comment location" }))
-    await userEvent.click(screen.getByRole("option", { name: "Standalone comment" }))
-    expect(within(pr).queryByRole("group", { name: "Walkthrough" })).not.toBeInTheDocument()
-    expect(within(pr).getByText("No description provided.")).toBeInTheDocument()
-    const standalone = within(preview).getByRole("region", { name: "PR summary comment" })
-    expect(within(standalone).getByRole("group", { name: "Walkthrough" })).toBeInTheDocument()
-
-    expect(within(pr).queryByRole("list", { name: "Labels" })).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole("switch", { name: "Publish blast radius label" }))
-    await userEvent.click(screen.getByRole("switch", { name: "Publish review time estimate label" }))
-    expect(within(pr).getByRole("list", { name: "Labels" })).toHaveTextContent(/Medium blast radius.*5-10 Minutes/)
-
-    // Without a summary there is nothing to place or label.
-    await userEvent.click(screen.getByRole("switch", { name: "Walkthrough" }))
-    expect(within(preview).queryByRole("group", { name: "Walkthrough" })).not.toBeInTheDocument()
-    expect(within(pr).queryByRole("list", { name: "Labels" })).not.toBeInTheDocument()
-    expect(screen.getByRole("combobox", { name: "Comment location" })).toBeDisabled()
-    expect(screen.getByRole("switch", { name: "Publish blast radius label" })).toBeDisabled()
+    expect(within(summary).getByRole("heading", { name: "Bammy review" })).toBeInTheDocument()
+    // Hidden markers stay hidden, as on the forge.
+    expect(preview).not.toHaveTextContent("bammy:summary")
+    const suggestion = within(preview).getByRole("group", { name: "Suggested change" })
+    expect(suggestion).toHaveTextContent("- const rows = old()")
+    expect(suggestion).toHaveTextContent("Commit suggestion")
+    expect(within(preview).getByRole("region", { name: "Commit status" })).toHaveTextContent(
+      "Failing: 1 finding at or above critical",
+    )
+    expect(bodies.at(-1)).toMatchObject({ provider: "github", base: { review: { blockOn: "critical" } } })
 
     await userEvent.click(screen.getByRole("switch", { name: "Post inline comments" }))
-    expect(within(preview).queryByRole("region", { name: "Inline comment" })).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole("switch", { name: "Post summary comment" }))
-    await userEvent.click(screen.getByRole("switch", { name: "Post commit status" }))
-    expect(within(preview).getByText(/Bammy posts nothing to the change/)).toBeInTheDocument()
+    await waitFor(() => expect(within(preview).queryByRole("region", { name: "Inline comments" })).not.toBeInTheDocument())
+    expect(bodies.at(-1)?.settings).toEqual({ output: { postInline: false } })
   })
 
-  it("still publishes the summary when every review comment is off", async () => {
-    mockApi(globalRoutes())
+  it("switches the page between GitHub and GitLab", async () => {
+    const bodies: PreviewBody[] = []
+    mockApi(globalRoutes({ "POST /api/config/preview": previewStub(bodies) }))
     renderWithProviders(<App />, { route: "/configuration?tab=display" })
 
     const preview = await screen.findByRole("region", { name: "Review preview" })
-    await userEvent.click(await screen.findByRole("switch", { name: "Post inline comments" }))
-    await userEvent.click(screen.getByRole("switch", { name: "Post summary comment" }))
-    await userEvent.click(screen.getByRole("switch", { name: "Post commit status" }))
-    expect(within(preview).queryByText(/Bammy posts nothing/)).not.toBeInTheDocument()
-    expect(within(preview).getByRole("group", { name: "Walkthrough" })).toBeInTheDocument()
+    await within(preview).findByText("#42")
+    const forge = within(preview).getByRole("combobox", { name: "Forge" })
+    expect(forge).toHaveTextContent("GitHub")
+    await userEvent.click(forge)
+    await userEvent.click(screen.getByRole("option", { name: "GitLab" }))
+
+    expect(await within(preview).findByText("!42")).toBeInTheDocument()
+    expect(within(preview).getByRole("group", { name: "Suggested change" })).toHaveTextContent("Apply suggestion")
+    expect(bodies.at(-1)?.provider).toBe("gitlab")
   })
 
-  it("previews a blocked review and plain suggestions from the finding settings", async () => {
-    mockApi(globalRoutes())
+  it("says when nothing is posted", async () => {
+    mockApi(globalRoutes({ "POST /api/config/preview": { ...PREVIEW, pr: { ...PREVIEW.pr, labels: [], description: "" }, ...NOTHING } }))
+    renderWithProviders(<App />, { route: "/configuration?tab=display" })
+
+    const preview = await screen.findByRole("region", { name: "Review preview" })
+    expect(await within(preview).findByText(/Bammy posts nothing to the change/)).toBeInTheDocument()
+    expect(within(preview).getByText("No description provided.")).toBeInTheDocument()
+  })
+
+  it("sends the finding settings, and holds the preview while a value is invalid", async () => {
+    const bodies: PreviewBody[] = []
+    mockApi(globalRoutes({ "POST /api/config/preview": previewStub(bodies) }))
     renderWithProviders(<App />, { route: "/configuration?tab=findings" })
 
     await userEvent.click(await screen.findByRole("combobox", { name: "Block at or above" }))
     await userEvent.click(screen.getByRole("option", { name: "major" }))
     await userEvent.click(screen.getByRole("switch", { name: "Committable suggestions" }))
     await openTab("Display")
-
     const preview = screen.getByRole("region", { name: "Review preview" })
-    expect(within(preview).getByRole("region", { name: "Commit status" })).toHaveTextContent(
-      "Blocked: 1 finding at or above major",
-    )
-    expect(within(preview).queryByText("Suggested change")).not.toBeInTheDocument()
+    await within(preview).findByText("#42")
+    expect(bodies.at(-1)?.settings).toEqual({ review: { blockOn: "major", committableSuggestions: false } })
+
+    await openTab("Finding Types")
+    await userEvent.type(screen.getByLabelText("Max findings"), "0")
+    await openTab("Display")
+    const sent = bodies.length
+    expect(
+      within(screen.getByRole("region", { name: "Review preview" })).getByText(/Fix the highlighted fields/),
+    ).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(bodies).toHaveLength(sent)
   })
 
   it("resets the global config with an empty object", async () => {
