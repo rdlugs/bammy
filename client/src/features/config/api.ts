@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import type { ForgeRepo, SavedRepo } from "@/features/forge/api"
 
@@ -198,5 +199,75 @@ export function useSetFollowGlobal() {
       queryClient.invalidateQueries({ queryKey: ["repos"] })
       queryClient.invalidateQueries({ queryKey: ["repo-config", repo.id] })
     },
+  })
+}
+
+export type ForgeProvider = "github" | "gitlab"
+
+export interface PreviewDiffLine {
+  type: "add" | "context"
+  oldLine: number | null
+  newLine: number
+  text: string
+}
+
+// What a review of the server's sample change would post with some settings;
+// mirrors server/src/review/preview/preview.ts.
+export interface PreviewPublication {
+  provider: ForgeProvider
+  pr: {
+    title: string
+    number: number
+    author: string
+    sourceBranch: string
+    targetBranch: string
+    description: string
+    labels: string[]
+  }
+  status: { state: "pending" | "success" | "failure" | "error"; description: string } | null
+  summaryComment: string | null
+  walkthroughComment: string | null
+  inline: { path: string; startLine: number; endLine: number; body: string; diff: PreviewDiffLine[] }[]
+}
+
+export interface PreviewRequest {
+  provider: ForgeProvider
+  base: ConfigOverride
+  settings: ConfigOverride
+}
+
+// The value once it has stopped changing for `delay` ms.
+function useDebounced<T>(value: T, delay: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return settled
+}
+
+// Re-rendered as the form changes, a little after typing stops; the previous
+// preview stays up while the next one loads. `body` is null while the form
+// cannot be previewed (invalid values, or nothing inherited yet).
+export function useConfigPreview(body: PreviewRequest | null) {
+  const queryClient = useQueryClient()
+  const key = body ? JSON.stringify(body) : null
+  const settled = useDebounced(key, 300)
+  return useQuery({
+    queryKey: ["config-preview", settled],
+    queryFn: () => api<PreviewPublication>("/config/preview", { method: "POST", body: settled! }),
+    enabled: settled !== null,
+    // While the next preview loads, or the form cannot be previewed, show the
+    // last one, even if the preview was unmounted in between (switching tabs).
+    placeholderData: (previous) => {
+      if (previous) return keepPreviousData(previous)
+      const latest = queryClient
+        .getQueryCache()
+        .findAll({ queryKey: ["config-preview"] })
+        .filter((query) => query.state.data !== undefined)
+        .sort((a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt)[0]
+      return latest?.state.data as PreviewPublication | undefined
+    },
+    staleTime: Infinity,
   })
 }

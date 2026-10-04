@@ -80,14 +80,7 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
   }
 
   if (walkthrough) {
-    // Dynamic fills the description only when the author left it empty (the
-    // change set's description already excludes Bammy's earlier block).
-    const location =
-      config.output.summaryLocation === "dynamic"
-        ? changeSet.description.trim()
-          ? "comment"
-          : "description"
-        : config.output.summaryLocation;
+    const location = walkthroughLocation(config, changeSet);
     try {
       if (location === "description") {
         await publisher.updateDescription(ref, (description) => withDescriptionBlock(description, walkthrough));
@@ -123,6 +116,14 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
   }
 
   return publication;
+}
+
+// Dynamic fills the description only when the author left it empty (the
+// change set's description already excludes Bammy's earlier block).
+export function walkthroughLocation(config: Config, changeSet: ChangeSet): "description" | "comment" {
+  const { summaryLocation } = config.output;
+  if (summaryLocation !== "dynamic") return summaryLocation;
+  return changeSet.description.trim() ? "comment" : "description";
 }
 
 export function publishes(config: Config): boolean {

@@ -1,8 +1,18 @@
 import { z } from "zod";
 import { dashboardOverrideSchema } from "../review/config/schema.ts";
+import { forgeProviderSchema } from "../review/core/models.ts";
 
 // Replaces the global config as a whole; an empty object resets it to the
 // profile and the defaults.
 export const updateGlobalConfigSchema = z.object({
+  settings: dashboardOverrideSchema,
+});
+
+// The display preview: `base` is what the form inherits (the profile and
+// defaults, or the global config for a repository) and `settings` what the
+// form sets on top, so the preview follows unsaved edits.
+export const configPreviewSchema = z.object({
+  provider: forgeProviderSchema,
+  base: dashboardOverrideSchema,
   settings: dashboardOverrideSchema,
 });
