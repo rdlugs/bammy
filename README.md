@@ -1,32 +1,81 @@
-# Bammy
+<p align="center">
+  <img src="client/public/bammy.svg" alt="Bammy logo" width="112" height="112">
+</p>
+
+<h1 align="center">Bammy</h1>
+
+<p align="center">
+  <b>Self-hosted AI code review for GitHub pull requests and GitLab merge requests.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/rdlugs/bammy/actions/workflows/ci.yml"><img src="https://github.com/rdlugs/bammy/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/rdlugs/bammy/releases"><img src="https://img.shields.io/github/v/release/rdlugs/bammy?include_prereleases&label=release" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#review-configuration">Configuration</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/rdlugs/bammy/discussions">Discussions</a>
+</p>
 
 Bammy is an AI code reviewer for GitHub pull requests and GitLab merge requests.
 Connect repositories, choose a model provider or Ollama, and run manual or
 automatic reviews with inline findings, walkthroughs, and commit statuses. The
 dashboard tracks reviews and findings across runs.
 
-**Status: alpha.** Features and configuration may evolve. AI findings need human
-verification and can miss problems or report false positives. The included Docker
-setup is for development, not public production hosting.
+> [!WARNING]
+> **Bammy is alpha software.** Features and configuration may evolve. AI findings
+> need human verification and can miss problems or report false positives. The
+> included Docker setup is for development, not public production hosting.
 
-Licensed under [MIT](LICENSE), with [third-party notices](THIRD_PARTY_NOTICES.md).
-See [contributing](CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md), and
-[security and data handling](SECURITY.md). Release notes are in the
-[changelog](CHANGELOG.md).
+## Contents
 
-## Stack
+- [Highlights](#highlights)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Getting started](#getting-started): [runtime environment](#docker-runtime-environment), [first review](#run-your-first-review), [troubleshooting](#troubleshooting)
+- [Forge connections](#forge-connections), [publishing](#publishing-to-the-forge), [automatic reviews](#automatic-reviews)
+- [Review configuration](#review-configuration): [LLM connections](#llm-connections-and-custom-endpoints), [Ollama](#ollama), [`.bammy.yaml`](#bammyyaml-reference)
+- [API](#api)
+- [Development](#development)
+- [Contributing and license](#contributing-and-license)
 
-| Layer    | Tech |
-| -------- | ---- |
-| Client   | Vite, React 19, TypeScript, Tailwind CSS v4, shadcn/ui, React Router, TanStack Query, react-hook-form + zod |
-| API      | Express 5, TypeScript (run with tsx), Prisma 7 (`@prisma/adapter-pg`), zod, argon2id, JWT in an httpOnly cookie |
-| Database | PostgreSQL 17 |
+## Highlights
 
-### Why PostgreSQL over MySQL
+- **Self-hosted, bring your own model:** Anthropic, OpenAI, Google, a compatible
+  proxy on a [custom host](#llm-connections-and-custom-endpoints), or a local
+  [Ollama](#ollama) model.
+- **GitHub and GitLab:** a GitHub App, plus GitLab.com or self-hosted GitLab.
+- **Reviews where you work:** inline findings with suggestions, one summary
+  comment, and a `bammy/review` commit status.
+- **Manual or automatic:** submit a PR/MR URL, review on webhooks, or comment
+  `/bammy review`.
+- **Per-repository config:** dashboard settings, overridable by a
+  [`.bammy.yaml`](#review-configuration) in the repository.
+- **Findings across runs:** a later run never posts the same finding twice.
+  Ignore findings as false positives, intentional, or fix later, and track the
+  false-positive rate on the dashboard.
 
-- Real `UUID`, `TIMESTAMPTZ` and `CITEXT` types (emails are case-insensitive at the database level).
-- `JSONB`, arrays, full-text search and row-level security for future cloud features.
-- Transactional DDL, so a failed migration rolls back cleanly.
+## Quick start
+
+```sh
+git clone https://github.com/rdlugs/bammy.git && cd bammy
+cp .env.example .env
+# set JWT_SECRET and ENCRYPTION_KEY in .env, each with: openssl rand -hex 32
+docker compose up --build
+```
+
+Open http://localhost:5173, register, then follow
+[Run your first review](#run-your-first-review). The full setup is in
+[Getting started](#getting-started).
+
+## How it works
+
+The `worker` container runs review jobs: it fetches the PR/MR, resolves the review configuration, sends the diff to the configured model in one or more passes (plus an optional walkthrough), validates the findings and stores the result on the job. Model keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`, unless the repository owner has stored their own. The worker polls the `review_jobs` table (claimed with `FOR UPDATE SKIP LOCKED`, so several workers can run side by side); tune it with `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_LOCK_TIMEOUT_MS` and `WORKER_MAX_ATTEMPTS`.
 
 ## Getting started
 
@@ -104,6 +153,9 @@ review or evidence of model accuracy.
 
 ### Troubleshooting
 
+<details>
+<summary>Common setup and review problems</summary>
+
 - **Startup validation fails:** set a JWT secret of at least 32 characters and
   an encryption key of exactly 64 hexadecimal characters. Generate each with
   `openssl rand -hex 32`. Keep the encryption key stable for existing credentials.
@@ -125,37 +177,7 @@ review or evidence of model accuracy.
   `docker compose logs --tail 100 server worker` output for provider, permissions,
   or publishing errors. Never post credentials or private code in an issue.
 
-The `worker` container runs review jobs: it fetches the PR/MR, resolves the review configuration, sends the diff to the configured model in one or more passes (plus an optional walkthrough), validates the findings and stores the result on the job. Model keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`, unless the repository owner has stored their own. The worker polls the `review_jobs` table (claimed with `FOR UPDATE SKIP LOCKED`, so several workers can run side by side); tune it with `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_LOCK_TIMEOUT_MS` and `WORKER_MAX_ATTEMPTS`.
-
-## API
-
-| Method | Path                 | Description |
-| ------ | -------------------- | ----------- |
-| POST   | `/api/auth/register` | `{ name, email, password, confirmPassword }`, sets the auth cookie |
-| POST   | `/api/auth/login`    | `{ email, password }`, sets the auth cookie |
-| POST   | `/api/auth/logout`   | Clears the auth cookie |
-| GET    | `/api/auth/me`       | Current user, or 401 |
-| GET    | `/api/connections`   | The caller's forge connections, and whether GitHub is configured |
-| POST   | `/api/connections/gitlab` | `{ host?, token }`, validates the token against GitLab and stores it encrypted |
-| GET    | `/api/connections/github/install` | Redirects to the GitHub App's install page |
-| GET    | `/api/connections/github/callback` | GitHub's return URL after installing the app |
-| DELETE | `/api/connections/:id` | Removes a connection and its repositories |
-| GET    | `/api/repos?connectionId=` | Repositories the connection can see, with their enabled flag |
-| POST   | `/api/repos`         | `{ connectionId, externalId }`, enables a repository for review |
-| PATCH  | `/api/repos/:id`     | `{ enabled?, settings?, followGlobal? }`; `settings` replaces the saved review overrides, `followGlobal` makes the repository ignore them and use only the global config |
-| GET    | `/api/repos/:id/config` | The effective review config for the default branch, where each value came from, and any repository-file warnings |
-| POST   | `/api/reviews`       | `{ url }` of a pull or merge request on an enabled repository; queues a review of its current head |
-| GET    | `/api/reviews?repoId=&status=&page=&limit=` | The caller's reviews, newest first, with a summary but not the full result; returns `{ reviews, total, page, limit }` (`limit` 1-100, default 20) |
-| GET    | `/api/reviews/:id`   | One review with its full result |
-| GET    | `/api/reviews/:id/markdown` | The review as the markdown document that is posted to the forge |
-| POST   | `/api/reviews/:id/rerun` | Queues a fresh review of the PR's latest head |
-| POST   | `/api/webhooks/github` | GitHub App webhook (signed with `GITHUB_WEBHOOK_SECRET`) |
-| POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Bammy registers per repository (token checked per repository) |
-| GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
-| GET    | `/api/config/global` | The caller's global review config, and what it resolves to with each value's source |
-| PUT    | `/api/config/global` | `{ settings }`, replaces the global review config; `{}` resets it |
-
-Register and login are rate limited (20 requests per 15 minutes per IP).
+</details>
 
 ## Forge connections
 
@@ -226,6 +248,13 @@ The worker runs in a container, where `localhost` is the container itself; `host
 
 Add Ollama under LLM Connections and enter its OpenAI-compatible base URL. For Ollama running on the Docker host, use `http://host.docker.internal:11434/v1`. The API key is optional. Select the Ollama connection in Configuration > LLM and use the `ollama/<model>` form, for example `ollama/qwen3`.
 
+### `.bammy.yaml` reference
+
+Every key is optional. Values shown are examples, not all defaults.
+
+<details open>
+<summary>Full example</summary>
+
 ```yaml
 # .bammy.yaml - every key is optional
 profile: balanced
@@ -279,7 +308,63 @@ language_instructions:
   typescript: "Strict mode; no any."
 ```
 
-## Tests
+</details>
+
+## API
+
+<details>
+<summary>Endpoint reference</summary>
+
+| Method | Path                 | Description |
+| ------ | -------------------- | ----------- |
+| POST   | `/api/auth/register` | `{ name, email, password, confirmPassword }`, sets the auth cookie |
+| POST   | `/api/auth/login`    | `{ email, password }`, sets the auth cookie |
+| POST   | `/api/auth/logout`   | Clears the auth cookie |
+| GET    | `/api/auth/me`       | Current user, or 401 |
+| GET    | `/api/connections`   | The caller's forge connections, and whether GitHub is configured |
+| POST   | `/api/connections/gitlab` | `{ host?, token }`, validates the token against GitLab and stores it encrypted |
+| GET    | `/api/connections/github/install` | Redirects to the GitHub App's install page |
+| GET    | `/api/connections/github/callback` | GitHub's return URL after installing the app |
+| DELETE | `/api/connections/:id` | Removes a connection and its repositories |
+| GET    | `/api/repos?connectionId=` | Repositories the connection can see, with their enabled flag |
+| POST   | `/api/repos`         | `{ connectionId, externalId }`, enables a repository for review |
+| PATCH  | `/api/repos/:id`     | `{ enabled?, settings?, followGlobal? }`; `settings` replaces the saved review overrides, `followGlobal` makes the repository ignore them and use only the global config |
+| GET    | `/api/repos/:id/config` | The effective review config for the default branch, where each value came from, and any repository-file warnings |
+| POST   | `/api/reviews`       | `{ url }` of a pull or merge request on an enabled repository; queues a review of its current head |
+| GET    | `/api/reviews?repoId=&status=&page=&limit=` | The caller's reviews, newest first, with a summary but not the full result; returns `{ reviews, total, page, limit }` (`limit` 1-100, default 20) |
+| GET    | `/api/reviews/:id`   | One review with its full result |
+| GET    | `/api/reviews/:id/markdown` | The review as the markdown document that is posted to the forge |
+| POST   | `/api/reviews/:id/rerun` | Queues a fresh review of the PR's latest head |
+| POST   | `/api/webhooks/github` | GitHub App webhook (signed with `GITHUB_WEBHOOK_SECRET`) |
+| POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Bammy registers per repository (token checked per repository) |
+| GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
+| GET    | `/api/config/global` | The caller's global review config, and what it resolves to with each value's source |
+| PUT    | `/api/config/global` | `{ settings }`, replaces the global review config; `{}` resets it |
+
+Register and login are rate limited (20 requests per 15 minutes per IP).
+
+</details>
+
+## Development
+
+<details>
+<summary>Stack</summary>
+
+| Layer    | Tech |
+| -------- | ---- |
+| Client   | Vite, React 19, TypeScript, Tailwind CSS v4, shadcn/ui, React Router, TanStack Query, react-hook-form + zod |
+| API      | Express 5, TypeScript (run with tsx), Prisma 7 (`@prisma/adapter-pg`), zod, argon2id, JWT in an httpOnly cookie |
+| Database | PostgreSQL 17 |
+
+**Why PostgreSQL over MySQL**
+
+- Real `UUID`, `TIMESTAMPTZ` and `CITEXT` types (emails are case-insensitive at the database level).
+- `JSONB`, arrays, full-text search and row-level security for future cloud features.
+- Transactional DDL, so a failed migration rolls back cleanly.
+
+</details>
+
+### Tests
 
 ```sh
 docker compose exec server npm test   # API tests against the bammy_test database
@@ -289,17 +374,29 @@ docker compose exec client npm test   # React component and routing tests
 GitHub Actions also runs type checks, client lint, and the client production
 build inside Docker. See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete checks.
 
-## Database changes
+### Database changes
 
 ```sh
 # edit server/prisma/schema.prisma, then:
 docker compose exec server npx prisma migrate dev --name <change>
 ```
 
-## Project layout
+### Project layout
 
 ```
 client/   React SPA (shadcn components live in src/components/ui)
 server/   Express API (src/routes, src/controllers, prisma/schema.prisma) and the review worker (src/worker)
 docker/   Postgres init script (creates the test database)
 ```
+
+## Contributing and license
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[code of conduct](CODE_OF_CONDUCT.md), and look for
+[good first issues](https://github.com/rdlugs/bammy/labels/good%20first%20issue).
+Questions and ideas go to [Discussions](https://github.com/rdlugs/bammy/discussions).
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md),
+which also covers deployment boundaries and how credentials are stored.
+Release notes are in the [changelog](CHANGELOG.md).
+
+Licensed under [MIT](LICENSE), with [third-party notices](THIRD_PARTY_NOTICES.md).
