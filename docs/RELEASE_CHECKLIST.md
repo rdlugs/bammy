@@ -44,8 +44,8 @@ The underlying advisories reported by npm are
 
 ## Maintainer actions before publication
 
-- [ ] Confirm permission to license original code and branding assets under MIT.
-- [ ] Enable GitHub private vulnerability reporting and verify the private report
+- [x] Confirm permission to license original code and branding assets under MIT.
+- [x] Enable GitHub private vulnerability reporting and verify the private report
   link in SECURITY.md and CODE_OF_CONDUCT.md works for reporters.
 - [x] Review and explicitly accept or remediate the dependency audit findings for
   the alpha release.
