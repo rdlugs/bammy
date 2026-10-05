@@ -1,7 +1,7 @@
 import { BUCKET_TITLE, SUMMARY_BUCKETS } from "../core/buckets.ts";
-import type { Finding, Omission, ReviewResult } from "../core/models.ts";
-import { SEVERITIES } from "../core/severity.ts";
-import { SUMMARY_MARKER } from "../core/markers.ts";
+import type { Bucket, Finding, IssueAssessment, IssueRef, Omission, ReviewResult, Walkthrough } from "../core/models.ts";
+import { SEVERITIES, type Severity } from "../core/severity.ts";
+import { DESCRIPTION_SUMMARY_END, DESCRIPTION_SUMMARY_START, SUMMARY_MARKER } from "../core/markers.ts";
 import { agentPromptBlock, allFindingsPrompt } from "./agentPrompt.ts";
 import { summarize } from "./json.ts";
 
@@ -19,6 +19,22 @@ const VERDICT_LINE = {
   blocked: "⛔ **Blocked**",
   error: "⚠️ **Review incomplete**",
 } as const;
+
+// Forges render only text, so icons are emoji. The severity colours follow the
+// dashboard's palette (red, orange, sky, muted) so both read the same.
+export const SEVERITY_ICON: Record<Severity, string> = {
+  critical: "🔴",
+  major: "🟠",
+  minor: "🔵",
+  info: "⚪",
+};
+
+const BUCKET_ICON: Record<Bucket, string> = {
+  actionable: "🛠️",
+  requirement_gap: "📋",
+  outside_diff: "📍",
+  nitpick: "🧹",
+};
 
 const OMISSION_TEXT: Record<Omission["reason"], string> = {
   ignored: "ignored by configuration",
@@ -48,6 +64,14 @@ function location(finding: Finding): string {
   return `\`${finding.file}:${lines}\``;
 }
 
+function indexLine(finding: Finding): string {
+  return `- ${SEVERITY_ICON[finding.severity]} **${finding.severity}** ${location(finding)}: ${inline(finding.title)}`;
+}
+
+function bucketSummary(bucket: Bucket, count: number): string {
+  return `<summary>${BUCKET_ICON[bucket]} ${BUCKET_TITLE[bucket]} (${count})</summary>`;
+}
+
 function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
@@ -75,7 +99,7 @@ function verdictSection(result: ReviewResult): string[] {
     lines.push("");
     for (const print of blocking) {
       const finding = byPrint.get(print);
-      if (finding) lines.push(`- **${finding.severity}** ${location(finding)}: ${inline(finding.title)}`);
+      if (finding) lines.push(indexLine(finding));
     }
   }
   return lines;
@@ -92,36 +116,99 @@ function countsLine(result: ReviewResult): string {
   return `${plural(summary.total, "finding")} (${severities}): ${inlineCount} actionable, ${rest} in the sections below.`;
 }
 
-function walkthroughSection(result: ReviewResult): string[] {
-  const walkthrough = result.walkthrough;
-  if (!walkthrough) return [];
-  const lines = ["### Walkthrough", "", sanitize(walkthrough.overview)];
-  const meta = [
-    walkthrough.labels.length ? `Labels: ${walkthrough.labels.map((l) => `\`${inline(l)}\``).join(", ")}` : "",
-    `Review effort: ${walkthrough.estimatedEffort}/5`,
-    walkthrough.blastRadius ? `Blast radius: ${walkthrough.blastRadius}` : "",
-  ].filter(Boolean);
-  lines.push("", meta.join(" · "));
-  if (walkthrough.fileSummaries.length) {
-    lines.push("", "<details>", `<summary>Changes (${plural(walkthrough.fileSummaries.length, "file")})</summary>`, "");
-    lines.push("| File | Summary |", "| --- | --- |");
-    for (const entry of walkthrough.fileSummaries) {
-      lines.push(`| \`${inline(entry.path)}\` | ${inline(entry.summary)} |`);
+const ASSESSMENT_TEXT: Record<IssueAssessment, string> = {
+  addressed: "✅ Addressed",
+  partial: "🟡 Partly addressed",
+  not_addressed: "❌ Not addressed",
+  unclear: "❔ Unclear",
+};
+
+function issueLink(issue: IssueRef): string {
+  const title = inline(issue.title);
+  return issue.url && /^https?:\/\//.test(issue.url) ? `[${issue.ref}](${issue.url}) ${title}` : `${issue.ref} ${title}`;
+}
+
+// The optional walkthrough parts. Each is only in the result when its setting
+// was on, so a stored review renders as it was produced.
+function walkthroughExtras(walkthrough: Walkthrough, options: WalkthroughOptions): string[] {
+  const lines: string[] = [];
+  if (walkthrough.sequenceDiagram) {
+    lines.push("", "<details>", "<summary>📊 Sequence diagram</summary>", "", fence(walkthrough.sequenceDiagram, "mermaid"), "", "</details>");
+  }
+  if (walkthrough.linkedIssues?.length) {
+    lines.push("", "<details open>", `<summary>🔗 Linked issues (${walkthrough.linkedIssues.length})</summary>`, "");
+    lines.push("| Issue | Assessment | Notes |", "| --- | --- | --- |");
+    for (const issue of walkthrough.linkedIssues) {
+      lines.push(`| ${issueLink(issue)} | ${ASSESSMENT_TEXT[issue.assessment]} | ${inline(issue.note)} |`);
+    }
+    lines.push("", "</details>");
+  }
+  if (walkthrough.relatedIssues?.length) {
+    lines.push("", "<details>", `<summary>🔍 Possibly related issues (${walkthrough.relatedIssues.length})</summary>`, "");
+    for (const issue of walkthrough.relatedIssues) {
+      lines.push(`- ${issueLink(issue)}${issue.reason ? `: ${inline(issue.reason)}` : ""}`);
     }
     lines.push("", "</details>");
   }
   return lines;
 }
 
+export interface WalkthroughOptions {
+  // output.estimateEffort; the estimate is still made, for the effort label.
+  effort?: boolean;
+  // The high-level summary goes in the walkthrough rather than the description.
+  highLevelSummary?: boolean;
+}
+
+// Display options from a config's output settings. Missing settings, as in a
+// job stored before they existed, render as those jobs were.
+export function walkthroughOptions(output: { estimateEffort?: boolean; highLevelSummaryPlacement?: string } | undefined): WalkthroughOptions {
+  return {
+    effort: output?.estimateEffort !== false,
+    highLevelSummary: output?.highLevelSummaryPlacement === "walkthrough",
+  };
+}
+
+// The heading the comment opens with, and the walkthrough under it. A
+// high-level summary placed in the walkthrough takes the overview's place, so
+// the comment does not describe the change twice; the overview is still the
+// fallback when this review has no summary.
+function walkthroughSection(
+  result: ReviewResult,
+  options: WalkthroughOptions = {},
+): { heading: string; lines: string[] } | null {
+  const walkthrough = result.walkthrough;
+  if (!walkthrough) return null;
+  const summary = options.highLevelSummary ? walkthrough.highLevelSummary : undefined;
+  const heading = summary ? "## High-level summary" : "## Summary";
+  const lines = ["", sanitize(summary ?? walkthrough.overview)];
+  const meta = [
+    walkthrough.labels.length ? `🏷️ Labels: ${walkthrough.labels.map((l) => `\`${inline(l)}\``).join(", ")}` : "",
+    options.effort !== false ? `⏱️ Review effort: ${walkthrough.estimatedEffort}/5` : "",
+    walkthrough.blastRadius ? `💥 Blast radius: ${walkthrough.blastRadius}` : "",
+  ].filter(Boolean);
+  if (meta.length) lines.push("", meta.join(" · "));
+  if (walkthrough.fileSummaries.length) {
+    lines.push("", "<details>", `<summary>📂 Changes (${plural(walkthrough.fileSummaries.length, "file")})</summary>`, "");
+    lines.push("| File | Summary |", "| --- | --- |");
+    for (const entry of walkthrough.fileSummaries) {
+      lines.push(`| \`${inline(entry.path)}\` | ${inline(entry.summary)} |`);
+    }
+    lines.push("", "</details>");
+  }
+  lines.push(...walkthroughExtras(walkthrough, options));
+  return { heading, lines };
+}
+
 function findingDetail(finding: Finding): string[] {
   const lines = [
     `#### ${location(finding)}: ${inline(finding.title)}`,
     "",
-    `*${finding.severity} · ${finding.category} · ${finding.kind.replace(/_/g, " ")}*`,
+    `${SEVERITY_ICON[finding.severity]} *${finding.severity} · ${finding.category} · ${finding.kind.replace(/_/g, " ")}*`,
     "",
     sanitize(finding.body),
   ];
-  if (finding.evidenceNote) lines.push("", `**Evidence:** ${sanitize(finding.evidenceNote)}`);
+  if (finding.evidenceNote) lines.push("", `**🔎 Evidence:** ${sanitize(finding.evidenceNote)}`);
   if (finding.suggestion) lines.push("", fence(finding.suggestion));
   return lines;
 }
@@ -131,16 +218,16 @@ function bucketSections(result: ReviewResult): string[] {
   const actionable = result.findings.filter((f) => f.bucket === "actionable");
   if (actionable.length) {
     // Each has its own inline thread; the summary only indexes them.
-    lines.push("", "<details>", `<summary>${BUCKET_TITLE.actionable} (${actionable.length})</summary>`, "");
+    lines.push("", "<details>", bucketSummary("actionable", actionable.length), "");
     for (const finding of actionable) {
-      lines.push(`- **${finding.severity}** ${location(finding)}: ${inline(finding.title)}`);
+      lines.push(indexLine(finding));
     }
     lines.push("", "</details>");
   }
   for (const bucket of SUMMARY_BUCKETS) {
     const findings = result.findings.filter((f) => f.bucket === bucket);
     if (!findings.length) continue;
-    lines.push("", "<details>", `<summary>${BUCKET_TITLE[bucket]} (${findings.length})</summary>`, "");
+    lines.push("", "<details>", bucketSummary(bucket, findings.length), "");
     findings.forEach((finding, index) => {
       if (index) lines.push("");
       lines.push(...findingDetail(finding));
@@ -154,7 +241,7 @@ function coverageSection(result: ReviewResult): string[] {
   const lines: string[] = [];
   const { omissions } = result.coverage;
   if (omissions.length) {
-    lines.push("", "<details>", `<summary>Not reviewed (${plural(omissions.length, "item")})</summary>`, "");
+    lines.push("", "<details>", `<summary>🚫 Not reviewed (${plural(omissions.length, "item")})</summary>`, "");
     for (const omission of omissions) {
       const detail = omission.detail ? `, ${inline(omission.detail)}` : "";
       lines.push(`- \`${inline(omission.path)}\`: ${OMISSION_TEXT[omission.reason]}${detail}`);
@@ -163,7 +250,7 @@ function coverageSection(result: ReviewResult): string[] {
   }
   const notes = [...result.errors, ...result.warnings];
   if (notes.length) {
-    lines.push("", "**Notes**", "", ...notes.map((note) => `- ${inline(note)}`));
+    lines.push("", "**📝 Notes**", "", ...notes.map((note) => `- ${inline(note)}`));
   }
   return lines;
 }
@@ -177,19 +264,18 @@ function footer(result: ReviewResult): string {
 // The one markdown document for a review. The forge summary comment and the
 // dashboard's "copy markdown" are this function's output, byte for byte; it
 // depends only on the result, so re-rendering a stored review reproduces it.
-// The walkthrough, when there is one, opens the document under the same
-// heading, so one comment carries what the change does and what the review
-// found. `walkthrough: false` leaves it out, and `stats: false` the line
+// The walkthrough, when there is one, opens the document under its heading
+// (walkthroughSection), so one comment carries what the change does and what
+// the review found. `walkthrough: false` leaves it out, and `stats: false` the line
 // naming the commit, models and coverage (output.reviewStats), and
 // `agentPrompt: false` the one prompt covering every finding
-// (output.agentPromptAll).
+// (output.agentPromptAll). The rest shape the walkthrough (walkthroughOptions).
 export function toMarkdown(
   result: ReviewResult,
-  options: { walkthrough?: boolean; stats?: boolean; agentPrompt?: boolean } = {},
+  options: { walkthrough?: boolean; stats?: boolean; agentPrompt?: boolean } & WalkthroughOptions = {},
 ): string {
-  const walkthrough = options.walkthrough === false ? [] : walkthroughSection(result);
-  const lines = ["## Summary"];
-  if (walkthrough.length) lines.push(...walkthrough.slice(1));
+  const walkthrough = options.walkthrough === false ? null : walkthroughSection(result, options);
+  const lines = [walkthrough?.heading ?? "## Summary", ...(walkthrough?.lines ?? [])];
   lines.push("", ...verdictSection(result), "", countsLine(result));
   lines.push(...bucketSections(result));
   if (options.agentPrompt !== false && result.findings.length) {
@@ -203,8 +289,17 @@ export function toMarkdown(
 
 // The walkthrough on its own, for a comment of its own while the review
 // comment is turned off. Empty when the review has none.
-export function walkthroughMarkdown(result: ReviewResult): string {
-  const section = walkthroughSection(result);
-  if (!section.length) return "";
-  return `${["## Summary", ...section.slice(1), "", BRAND_FOOTER].join("\n")}\n`;
+export function walkthroughMarkdown(result: ReviewResult, options: WalkthroughOptions = {}): string {
+  const section = walkthroughSection(result, options);
+  if (!section) return "";
+  return `${[section.heading, ...section.lines, "", BRAND_FOOTER].join("\n")}\n`;
+}
+
+// The high-level summary as a block for the PR/MR description, between
+// markers so a later run replaces it and a review never reads it back as the
+// author's text. Empty when the review has none.
+export function descriptionSummaryBlock(result: ReviewResult): string {
+  const summary = result.walkthrough?.highLevelSummary;
+  if (!summary) return "";
+  return [DESCRIPTION_SUMMARY_START, "## High-level summary", "", sanitize(summary), DESCRIPTION_SUMMARY_END].join("\n");
 }

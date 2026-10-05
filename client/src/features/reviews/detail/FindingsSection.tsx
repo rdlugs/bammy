@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ALL } from "@/lib/filters"
 import { cn } from "@/lib/utils"
+import { BUCKET_ICON } from "../icons"
 import { SEVERITY_CLASS } from "../severity"
 import { FindingCard } from "../FindingCard"
 import {
@@ -182,9 +183,11 @@ export function FindingsSection({ result }: { result: ReviewResult }) {
         BUCKET_ORDER.map((bucket) => {
           const findings = visible.filter((f) => f.bucket === bucket)
           if (!findings.length) return null
+          const Icon = BUCKET_ICON[bucket]
           return (
             <section key={bucket} aria-label={BUCKET_TITLE[bucket]} className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold">
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                <Icon className="size-5 text-muted-foreground" aria-hidden />
                 {BUCKET_TITLE[bucket]} <span className="font-normal text-muted-foreground">({findings.length})</span>
               </h2>
               {groupByFile(findings).map(([path, items]) => {

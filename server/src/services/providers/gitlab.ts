@@ -4,7 +4,7 @@ import { parseJson, REVIEW_COMMAND, safeEqual } from "../../lib/webhook.ts";
 import type { ForgeConnection } from "../../generated/prisma/client.ts";
 import { GitLabAdapter } from "../../review/forge/gitlab.ts";
 import { gitlabConnectSchema } from "../../schemas/connections.schema.ts";
-import { enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
+import { cancelQueuedForClosedChange, enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
 import type { ProviderDefinition } from "./types.ts";
 
 const DEVELOPER = 30;
@@ -57,6 +57,11 @@ export const gitlabProvider: ProviderDefinition = {
       const event = header("x-gitlab-event");
       const payload = parseJson<GitLabPayload>(raw);
       const attrs = payload.object_attributes ?? {};
+
+      if (event === "Merge Request Hook" && (attrs.action === "close" || attrs.action === "merge") && attrs.iid) {
+        const cancelled = await cancelQueuedForClosedChange(repo, attrs.iid);
+        return { body: { outcome: "closed", cancelled } };
+      }
 
       if (event === "Merge Request Hook") {
         // An update only matters when it brought new commits (oldrev is set) or

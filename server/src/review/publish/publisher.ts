@@ -1,8 +1,8 @@
 import type { Config } from "../config/schema.ts";
 import type { ChangeSet, ReviewResult } from "../core/models.ts";
 import type { ForgePublisher, PostedComment } from "../forge/types.ts";
-import { WALKTHROUGH_MARKER, removeDescriptionBlock } from "../core/markers.ts";
-import { toMarkdown, walkthroughMarkdown } from "../render/markdown.ts";
+import { WALKTHROUGH_MARKER, withDescriptionSummary } from "../core/markers.ts";
+import { descriptionSummaryBlock, toMarkdown, walkthroughMarkdown, walkthroughOptions } from "../render/markdown.ts";
 import { inlineComments } from "./inline.ts";
 import { labelChanges } from "./labels.ts";
 import { commitStatus } from "./status.ts";
@@ -93,10 +93,15 @@ export async function publishReview(input: PublishInput): Promise<Publication> {
     }
   }
 
-  // Housekeeping for changes an earlier version wrote the walkthrough into.
-  // Failures are ignored: a token that cannot edit the PR/MR body must not
-  // mark every review partial. Adapters skip the write when nothing changed.
-  await publisher.updateDescription(ref, removeDescriptionBlock).catch(() => undefined);
+  // The high-level summary, when it goes in the description, plus
+  // housekeeping for changes an earlier version wrote the walkthrough into.
+  // Adapters skip the write when nothing changed. Only a summary this run
+  // meant to write counts as a failure: a token that cannot edit the PR/MR
+  // body must not mark every review partial.
+  const summary = descriptionSummary(config, result);
+  await publisher.updateDescription(ref, (description) => withDescriptionSummary(description, summary)).catch((err: unknown) => {
+    if (summary) publication.errors.push(`Description summary failed: ${message(err)}`);
+  });
 
   if (result.walkthrough) {
     const { add, remove } = labelChanges(result.walkthrough, config.output);
@@ -135,15 +140,25 @@ export interface SummaryPlacement {
 
 // One comment per review. Shared with the preview so the two cannot disagree.
 export function summaryPlacement(config: Config, result: ReviewResult): SummaryPlacement {
-  const walkthrough = walkthroughMarkdown(result);
+  const options = walkthroughOptions(config.output);
+  const walkthrough = walkthroughMarkdown(result, options);
   const { postSummary, reviewStats, agentPromptAll } = config.output;
   return {
     summary: postSummary
-      ? toMarkdown(result, { walkthrough: true, stats: reviewStats, agentPrompt: agentPromptAll })
+      ? toMarkdown(result, { walkthrough: true, stats: reviewStats, agentPrompt: agentPromptAll, ...options })
       : null,
     walkthrough,
     walkthroughComment: !postSummary && walkthrough ? `${walkthrough}\n${WALKTHROUGH_MARKER}\n` : null,
   };
+}
+
+// The block for the description: the summary to write, "" to remove an old
+// one (the setting is off or the summary moved into the walkthrough), or null
+// to leave whatever is there (this run produced none).
+export function descriptionSummary(config: Config, result: ReviewResult): string | null {
+  const { walkthrough, highLevelSummary, highLevelSummaryPlacement } = config.output;
+  if (!walkthrough || !highLevelSummary || highLevelSummaryPlacement !== "description") return "";
+  return descriptionSummaryBlock(result) || null;
 }
 
 export function publishes(config: Config): boolean {

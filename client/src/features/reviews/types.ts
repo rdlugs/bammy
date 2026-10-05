@@ -3,10 +3,18 @@
 
 export type Severity = "critical" | "major" | "minor" | "info"
 export type Bucket = "actionable" | "outside_diff" | "nitpick" | "requirement_gap"
-export type JobStatus = "queued" | "running" | "completed" | "partial" | "failed" | "superseded" | "skipped"
+export type JobStatus = "queued" | "running" | "completed" | "partial" | "failed" | "superseded" | "skipped" | "cancelled"
 export type Verdict = "pass" | "blocked" | "error"
 export type Provider = "github" | "gitlab"
 export type Trigger = "manual" | "webhook" | "comment"
+export type IssueAssessment = "addressed" | "partial" | "not_addressed" | "unclear"
+
+export interface IssueRef {
+  ref: string
+  title: string
+  url?: string
+  state: "open" | "closed"
+}
 
 export const SEVERITIES: Severity[] = ["critical", "major", "minor", "info"]
 export const BUCKET_ORDER: Bucket[] = ["actionable", "requirement_gap", "outside_diff", "nitpick"]
@@ -77,6 +85,11 @@ export interface ReviewResult {
     fileSummaries: { path: string; summary: string }[]
     labels: string[]
     estimatedEffort: number
+    // Optional parts, present only when their settings were on.
+    sequenceDiagram?: string
+    highLevelSummary?: string
+    linkedIssues?: (IssueRef & { assessment: IssueAssessment; note: string })[]
+    relatedIssues?: (IssueRef & { reason: string })[]
   }
   coverage: { reviewedFiles: string[]; omissions: Omission[]; passes: number }
   validation: { dropped: Record<string, number>; demoted: number }

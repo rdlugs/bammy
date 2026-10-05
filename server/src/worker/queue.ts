@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.ts";
-import type { ReviewJob, ReviewTrigger } from "../generated/prisma/client.ts";
+import type { Repository, ReviewJob, ReviewTrigger } from "../generated/prisma/client.ts";
+import { loadDashboardConfig } from "../review/config/load.ts";
 
 export interface EnqueueInput {
   repositoryId: string;
@@ -104,7 +105,7 @@ export async function claimNext(userConcurrency = Number.MAX_SAFE_INTEGER): Prom
 }
 
 export interface CompleteInput {
-  status: "completed" | "partial" | "failed" | "skipped";
+  status: "completed" | "partial" | "failed" | "skipped" | "cancelled";
   verdict: ReviewJob["verdict"];
   result?: unknown;
   summary?: unknown;
@@ -113,9 +114,14 @@ export interface CompleteInput {
   error?: string | null;
 }
 
-export async function complete(id: string, input: CompleteInput & Partial<Pick<ReviewJob, "headSha" | "baseSha">>): Promise<void> {
-  await prisma.reviewJob.update({
-    where: { id },
+// Only a running job is finished: one cancelled while it ran keeps that
+// status, so a close that arrives mid-review is never overwritten.
+export async function complete(
+  id: string,
+  input: CompleteInput & Partial<Pick<ReviewJob, "headSha" | "baseSha">>,
+): Promise<boolean> {
+  const { count } = await prisma.reviewJob.updateMany({
+    where: { id, status: "running" },
     data: {
       headSha: input.headSha,
       baseSha: input.baseSha,
@@ -130,13 +136,46 @@ export async function complete(id: string, input: CompleteInput & Partial<Pick<R
       finishedAt: new Date(),
     },
   });
+  return count > 0;
 }
 
 export async function fail(id: string, error: string): Promise<void> {
-  await prisma.reviewJob.update({
-    where: { id },
+  await prisma.reviewJob.updateMany({
+    where: { id, status: "running" },
     data: { status: "failed", verdict: "error", error, lockedAt: null, finishedAt: new Date() },
   });
+}
+
+export const CLOSED_REASON = "The pull or merge request was closed or merged";
+
+// A closed or merged change needs no review, so its queued jobs are
+// cancelled when the forge reports the close, unless the dashboard settings
+// turned that off. A running job is left to the worker, which checks the change
+// itself with the full configuration, repository file included.
+export async function cancelQueuedForClosedChange(
+  repo: Pick<Repository, "id" | "settings" | "followGlobal" | "connectionId">,
+  number: number,
+): Promise<number> {
+  const owner = await prisma.forgeConnection.findUnique({
+    where: { id: repo.connectionId },
+    select: { user: { select: { reviewSettings: true } } },
+  });
+  const config = loadDashboardConfig({
+    globalSettings: owner?.user.reviewSettings,
+    repoSettings: repo.settings,
+    followGlobal: repo.followGlobal,
+  });
+  if (!config.triggers.abortOnClose) return 0;
+  const { count } = await prisma.reviewJob.updateMany({
+    where: { repositoryId: repo.id, number, status: "queued" },
+    data: { status: "cancelled", error: CLOSED_REASON, finishedAt: new Date() },
+  });
+  return count;
+}
+
+export async function isCancelled(id: string): Promise<boolean> {
+  const job = await prisma.reviewJob.findUnique({ where: { id }, select: { status: true } });
+  return job?.status === "cancelled";
 }
 
 // A worker that died mid-job leaves it running forever. Jobs locked longer than

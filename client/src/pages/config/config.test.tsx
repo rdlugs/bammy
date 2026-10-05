@@ -27,6 +27,7 @@ const effective = {
     requireEvidence: true,
     fullFile: false,
     committableSuggestions: true,
+    disableCache: false,
   },
   output: {
     walkthrough: true,
@@ -38,12 +39,20 @@ const effective = {
     agentPromptAll: true,
     blastRadiusLabel: false,
     effortLabel: false,
+    sequenceDiagrams: true,
+    estimateEffort: true,
+    assessLinkedIssues: true,
+    relatedIssues: true,
+    highLevelSummary: true,
+    highLevelSummaryPlacement: "description",
+    highLevelSummaryInstructions: "",
   },
   triggers: {
     review: "published",
     reviewOnPush: true,
     summary: "published",
     command: true,
+    abortOnClose: true,
     ignoreTitles: [],
     skipAuthors: [],
     skipLabels: [],
@@ -402,6 +411,57 @@ describe("Configuration page", () => {
             skipSourceBranches: ["release/"],
             skipTargetBranches: ["legacy"],
           },
+        },
+      }),
+    )
+  })
+
+  it("edits the walkthrough content, summary and run settings in the global config", async () => {
+    let body: unknown
+    mockApi(
+      globalRoutes({
+        "PUT /api/config/global": (init?: RequestInit) => {
+          body = JSON.parse(String(init?.body))
+          return jsonResponse(200, globalConfig((body as { settings: Record<string, unknown> }).settings))
+        },
+      }),
+    )
+    renderWithProviders(<App />, { route: "/configuration?tab=display" })
+
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Sequence diagrams" })).toBeChecked())
+    for (const name of ["Estimate code review effort", "Assess linked issues", "Related issues", "High-level summary"]) {
+      expect(screen.getByRole("switch", { name })).toBeChecked()
+    }
+    await userEvent.click(screen.getByRole("switch", { name: "Sequence diagrams" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Related issues" }))
+    await userEvent.click(screen.getByRole("combobox", { name: "Summary placement" }))
+    await userEvent.click(screen.getByRole("option", { name: "Walkthrough" }))
+    await userEvent.type(screen.getByLabelText("High level summary instructions"), "Bullets only")
+
+    // Without a summary there is nothing to place or instruct.
+    await userEvent.click(screen.getByRole("switch", { name: "High-level summary" }))
+    expect(screen.getByLabelText("High level summary instructions")).toBeDisabled()
+    await userEvent.click(screen.getByRole("switch", { name: "High-level summary" }))
+
+    await openTab("Triggers")
+    await userEvent.click(screen.getByRole("switch", { name: "Abort on close" }))
+    await openTab("Files")
+    await userEvent.click(screen.getByRole("switch", { name: "Disable cache" }))
+    await selectConnectionOnLlmTab()
+    await userEvent.click(screen.getByRole("button", { name: "Save global config" }))
+
+    await waitFor(() =>
+      expect(body).toEqual({
+        settings: {
+          llm: { connection: "openai" },
+          review: { disableCache: true },
+          output: {
+            sequenceDiagrams: false,
+            relatedIssues: false,
+            highLevelSummaryPlacement: "walkthrough",
+            highLevelSummaryInstructions: "Bullets only",
+          },
+          triggers: { abortOnClose: false },
         },
       }),
     )

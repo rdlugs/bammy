@@ -65,6 +65,10 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Committable suggestions",
     description: "Offer fixes as suggestions that can be applied from the forge.",
   },
+  disableCache: {
+    label: "Disable cache",
+    description: "Disable caching of code and dependencies; fetch them fresh on each run.",
+  },
   walkthrough: {
     label: "Walkthrough",
     description:
@@ -95,6 +99,26 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     description:
       'Add a native PR/MR label with the estimated review effort (e.g. "10-20 Minutes"). Needs the walkthrough. Supported on GitHub and GitLab.',
   },
+  sequenceDiagrams: {
+    label: "Sequence diagrams",
+    description: "Include sequence diagrams in the walkthrough, drawn with Mermaid.",
+  },
+  estimateEffort: {
+    label: "Estimate code review effort",
+    description: "Include an estimated code review effort in the walkthrough.",
+  },
+  assessLinkedIssues: {
+    label: "Assess linked issues",
+    description: "Include an assessment of how well the changes address linked issues in the walkthrough.",
+  },
+  relatedIssues: {
+    label: "Related issues",
+    description: "Include potentially related issues in the walkthrough.",
+  },
+  highLevelSummary: {
+    label: "High-level summary",
+    description: "Generate a high-level summary of the changes in the PR/MR description or walkthrough.",
+  },
   reviewOnPush: {
     label: "Review automatically on push",
     description: "Review the new commits on every push to the PR/MR.",
@@ -106,6 +130,10 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
         Commenting <code>/bammy review</code> requests a review.
       </>
     ),
+  },
+  abortOnClose: {
+    label: "Abort on close",
+    description: "Abort the in-progress review if the PR is closed or merged.",
   },
 }
 
@@ -137,7 +165,18 @@ const CHOICE_INFO: Record<ChoiceName, { label: string; description: string; opti
       { value: "published", label: "Published PRs" },
     ],
   },
+  highLevelSummaryPlacement: {
+    label: "Summary placement",
+    description: "Where the high-level summary is written.",
+    options: [
+      { value: "description", label: "PR/MR description" },
+      { value: "walkthrough", label: "Walkthrough" },
+    ],
+  },
 }
+
+const SUMMARY_INSTRUCTIONS_EXAMPLE =
+  "Create concise release notes as a bullet-point list, followed by a Markdown table showing lines added and removed by each contributing author."
 
 const LIST_INFO: Record<ListName, { label: string; description: string; placeholder: string }> = {
   ignoreTitles: {
@@ -748,6 +787,8 @@ export function ConfigFields(props: {
   const walkthroughOn = shownFlag("walkthrough")
   const postSummaryOn = shownFlag("postSummary")
   const postInlineOn = shownFlag("postInline")
+  const highLevelSummaryOn = walkthroughOn && shownFlag("highLevelSummary")
+  const inheritedSummaryInstructions = inherited?.output.highLevelSummaryInstructions
 
   // The preview follows the form, unsaved edits included: the server layers
   // what the form sets over what it inherits. Values the server would reject
@@ -946,6 +987,7 @@ export function ConfigFields(props: {
           disabled={disabled}
         />
         {numberField("maxChunks")}
+        <ToggleList>{toggles(["disableCache"])}</ToggleList>
       </>
     ),
     display: (
@@ -964,6 +1006,40 @@ export function ConfigFields(props: {
           {/* Labels come from the summary's estimates, so they need one. */}
           <ToggleList>{toggles(["blastRadiusLabel", "effortLabel"], !walkthroughOn)}</ToggleList>
         </Section>
+        <FieldSeparator />
+        <Section
+          title="Walkthrough content"
+          description="Optional parts of the PR summary. Each one asks the model for more."
+        >
+          <ToggleList>
+            {toggles(["estimateEffort", "sequenceDiagrams", "assessLinkedIssues", "relatedIssues"], !walkthroughOn)}
+          </ToggleList>
+        </Section>
+        <FieldSeparator />
+        <Section title="High-level summary" description="Release notes for the change, or whatever the instructions ask for.">
+          <ToggleList>{toggles(["highLevelSummary"], !walkthroughOn)}</ToggleList>
+          {choiceField("highLevelSummaryPlacement", !highLevelSummaryOn)}
+          <TextField
+            id="summary-instructions"
+            label="High level summary instructions"
+            value={form.summaryInstructions}
+            onChange={(summaryInstructions) => props.onChange({ ...form, summaryInstructions })}
+            description="By default, Bammy generates release notes in the description. Use this to customize the summary content and format."
+            emptyHint={
+              isRepo && inheritedSummaryInstructions
+                ? emptyHint("output.highLevelSummaryInstructions", inheritedSummaryInstructions)
+                : "Leave empty for release notes."
+            }
+            placeholder={inheritedSummaryInstructions || SUMMARY_INSTRUCTIONS_EXAMPLE}
+            multiline
+            effective={
+              config &&
+              effective("output.highLevelSummaryInstructions", config.output.highLevelSummaryInstructions || "release notes")
+            }
+            error={errors.summaryInstructions}
+            disabled={disabled || !highLevelSummaryOn}
+          />
+        </Section>
       </>
     ),
     triggers: (
@@ -976,7 +1052,7 @@ export function ConfigFields(props: {
             {choiceField("review")}
             {choiceField("summary")}
           </div>
-          <ToggleList>{toggles(["reviewOnPush", "command"])}</ToggleList>
+          <ToggleList>{toggles(["reviewOnPush", "command", "abortOnClose"])}</ToggleList>
         </Section>
         <FieldSeparator />
         <Section

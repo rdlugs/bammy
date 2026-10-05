@@ -174,9 +174,30 @@ describe("POST /api/webhooks/github", () => {
   it("ignores repositories that are not enabled and events it does not handle", async () => {
     await githubRepo(userId, false);
     expect((await sendGithub("pull_request", prEvent("opened"))).body.outcome).toBe("not_enabled");
-    expect((await sendGithub("pull_request", prEvent("closed"))).body.outcome).toBe("ignored");
+    expect((await sendGithub("pull_request", prEvent("labeled"))).body.outcome).toBe("ignored");
     expect((await sendGithub("push", {})).body.outcome).toBe("ignored");
     expect(await prisma.reviewJob.count()).toBe(0);
+  });
+
+  it("cancels the queued reviews of a closed PR unless abort on close is off", async () => {
+    const repo = await githubRepo();
+    await sendGithub("pull_request", prEvent("opened"));
+
+    const res = await sendGithub("pull_request", prEvent("closed"));
+    expect(res.body).toEqual({ outcome: "closed", cancelled: 1 });
+    expect(await prisma.reviewJob.findFirst({ select: { status: true, error: true } })).toEqual({
+      status: "cancelled",
+      error: "The pull or merge request was closed or merged",
+    });
+
+    await prisma.reviewJob.deleteMany();
+    await prisma.repository.update({
+      where: { id: repo.id },
+      data: { followGlobal: false, settings: { triggers: { abortOnClose: false } } },
+    });
+    await sendGithub("pull_request", prEvent("opened"));
+    expect((await sendGithub("pull_request", prEvent("closed"))).body).toEqual({ outcome: "closed", cancelled: 0 });
+    expect((await prisma.reviewJob.findFirst())!.status).toBe("queued");
   });
 
   it("reviews a shared installation's PR once, for the earliest enabled repository", async () => {
@@ -294,7 +315,7 @@ describe("POST /api/webhooks/github/:repoId", () => {
     const disabled = await githubTokenRepo(false);
     expect((await sendRepo(disabled.id, "pull_request", repoPrEvent("opened"))).body.outcome).toBe("not_enabled");
     await prisma.repository.update({ where: { id: disabled.id }, data: { enabled: true } });
-    expect((await sendRepo(disabled.id, "pull_request", repoPrEvent("closed"))).body.outcome).toBe("ignored");
+    expect((await sendRepo(disabled.id, "pull_request", repoPrEvent("labeled"))).body.outcome).toBe("ignored");
     expect(await prisma.reviewJob.count()).toBe(0);
   });
 });
@@ -316,6 +337,15 @@ describe("POST /api/webhooks/gitlab/:repoId", () => {
         .outcome,
     ).toBe("queued");
     expect(await prisma.reviewJob.count({ where: { status: { not: "superseded" } } })).toBe(1);
+  });
+
+  it("cancels queued reviews when the MR is merged or closed", async () => {
+    const repo = await gitlabRepo();
+    await sendGitlab(repo.id, "Merge Request Hook", mrEvent("open"));
+
+    expect((await sendGitlab(repo.id, "Merge Request Hook", mrEvent("merge"))).body).toEqual({ outcome: "closed", cancelled: 1 });
+    expect((await sendGitlab(repo.id, "Merge Request Hook", mrEvent("close"))).body).toEqual({ outcome: "closed", cancelled: 0 });
+    expect((await prisma.reviewJob.findFirst())!.status).toBe("cancelled");
   });
 
   it("records the event and actor, and treats leaving draft as opening", async () => {

@@ -58,11 +58,15 @@ const reviewShape = {
   // Allow findings on lines the change did not touch.
   fullFile: z.boolean(),
   committableSuggestions: z.boolean(),
+  // Fetch the change and repository file fresh instead of reusing what an
+  // earlier run in the same worker already fetched.
+  disableCache: z.boolean(),
 };
 
 export const SUMMARY_LOCATIONS = ["dynamic", "description", "comment"] as const;
 export const REVIEW_TRIGGERS = ["manual", "published", "all"] as const;
 export const SUMMARY_TRIGGERS = ["manual", "published"] as const;
+export const HIGH_LEVEL_SUMMARY_PLACEMENTS = ["description", "walkthrough"] as const;
 
 const outputShape = {
   walkthrough: z.boolean(),
@@ -82,6 +86,16 @@ const outputShape = {
   // Native labels from the walkthrough's estimates, e.g. "Large blast radius".
   blastRadiusLabel: z.boolean(),
   effortLabel: z.boolean(),
+  // Optional walkthrough parts. Each one asks the model for more, so each can
+  // be turned off on its own.
+  sequenceDiagrams: z.boolean(),
+  estimateEffort: z.boolean(),
+  assessLinkedIssues: z.boolean(),
+  relatedIssues: z.boolean(),
+  // Release notes by default; the instructions replace that guidance.
+  highLevelSummary: z.boolean(),
+  highLevelSummaryPlacement: z.enum(HIGH_LEVEL_SUMMARY_PLACEMENTS),
+  highLevelSummaryInstructions: z.string().max(2000),
 };
 
 // Phrases, logins, labels and branch names; matching rules are in filters.ts.
@@ -102,6 +116,8 @@ const triggersShape = {
   summary: z.enum(SUMMARY_TRIGGERS),
   // Allow "/bammy review" in a comment to request a review.
   command: z.boolean(),
+  // Stop a review in progress once its PR/MR is closed or merged.
+  abortOnClose: z.boolean(),
   ignoreTitles: skipList,
   skipAuthors: skipList,
   skipLabels: skipList,
@@ -168,6 +184,7 @@ export const DEFAULT_CONFIG: Config = {
     requireEvidence: true,
     fullFile: false,
     committableSuggestions: true,
+    disableCache: false,
   },
   output: {
     walkthrough: true,
@@ -180,6 +197,13 @@ export const DEFAULT_CONFIG: Config = {
     summaryLocation: "dynamic",
     blastRadiusLabel: false,
     effortLabel: false,
+    sequenceDiagrams: true,
+    estimateEffort: true,
+    assessLinkedIssues: true,
+    relatedIssues: true,
+    highLevelSummary: true,
+    highLevelSummaryPlacement: "description",
+    highLevelSummaryInstructions: "",
   },
   triggers: {
     review: "published",
@@ -188,6 +212,7 @@ export const DEFAULT_CONFIG: Config = {
     drafts: false,
     summary: "published",
     command: true,
+    abortOnClose: true,
     ignoreTitles: [],
     skipAuthors: [],
     skipLabels: [],

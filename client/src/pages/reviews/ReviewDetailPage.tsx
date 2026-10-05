@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import { AlertTriangle, ArrowLeft, Bot, Copy, ExternalLink, Loader2, RotateCw } from "lucide-react"
 import { toast } from "sonner"
@@ -14,7 +15,9 @@ import { ReviewSidebar } from "@/features/reviews/detail/ReviewSidebar"
 import { PROVIDERS } from "@/features/forge/providers"
 import { changeLabel } from "@/features/reviews/links"
 import { copyToClipboard } from "@/lib/clipboard"
-import { isActive, type ReviewResult } from "@/features/reviews/types"
+import { MermaidDiagram } from "@/components/MermaidDiagram"
+import { ForgeMarkdown } from "@/features/config/ForgeMarkdown"
+import { isActive, type IssueAssessment, type IssueRef, type ReviewResult } from "@/features/reviews/types"
 
 function BackToReviews() {
   return (
@@ -27,7 +30,44 @@ function BackToReviews() {
   )
 }
 
-function Walkthrough({ walkthrough }: { walkthrough: NonNullable<ReviewResult["walkthrough"]> }) {
+const ASSESSMENT_LABEL: Record<IssueAssessment, string> = {
+  addressed: "Addressed",
+  partial: "Partly addressed",
+  not_addressed: "Not addressed",
+  unclear: "Unclear",
+}
+
+function IssueLink({ issue }: { issue: IssueRef }) {
+  const label = (
+    <>
+      <span className="font-mono text-xs">{issue.ref}</span> {issue.title}
+    </>
+  )
+  return issue.url && /^https?:\/\//.test(issue.url) ? (
+    <a href={issue.url} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+      {label}
+    </a>
+  ) : (
+    <span>{label}</span>
+  )
+}
+
+function WalkthroughBlock({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2 border-t pt-4">
+      <h3 className="text-sm font-medium">{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function Walkthrough({
+  walkthrough,
+  provider,
+}: {
+  walkthrough: NonNullable<ReviewResult["walkthrough"]>
+  provider: ReviewResult["change"]["provider"]
+}) {
   return (
     <Card>
       <CardHeader>
@@ -53,6 +93,43 @@ function Walkthrough({ walkthrough }: { walkthrough: NonNullable<ReviewResult["w
             ))}
           </dl>
         )}
+        {walkthrough.highLevelSummary && (
+          <WalkthroughBlock title="High-level summary">
+            <ForgeMarkdown provider={provider}>{walkthrough.highLevelSummary}</ForgeMarkdown>
+          </WalkthroughBlock>
+        )}
+        {walkthrough.sequenceDiagram && (
+          <WalkthroughBlock title="Sequence diagram">
+            <MermaidDiagram source={walkthrough.sequenceDiagram} />
+          </WalkthroughBlock>
+        )}
+        {walkthrough.linkedIssues && walkthrough.linkedIssues.length > 0 && (
+          <WalkthroughBlock title="Linked issues">
+            <ul className="flex flex-col gap-2">
+              {walkthrough.linkedIssues.map((issue) => (
+                <li key={issue.ref} className="flex flex-col gap-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <IssueLink issue={issue} />
+                    <Badge variant="outline">{ASSESSMENT_LABEL[issue.assessment]}</Badge>
+                  </div>
+                  {issue.note && <p className="text-muted-foreground">{issue.note}</p>}
+                </li>
+              ))}
+            </ul>
+          </WalkthroughBlock>
+        )}
+        {walkthrough.relatedIssues && walkthrough.relatedIssues.length > 0 && (
+          <WalkthroughBlock title="Possibly related issues">
+            <ul className="flex flex-col gap-1">
+              {walkthrough.relatedIssues.map((issue) => (
+                <li key={issue.ref}>
+                  <IssueLink issue={issue} />
+                  {issue.reason && <span className="text-muted-foreground">: {issue.reason}</span>}
+                </li>
+              ))}
+            </ul>
+          </WalkthroughBlock>
+        )}
       </CardContent>
     </Card>
   )
@@ -75,7 +152,7 @@ function ResultView({ result }: { result: ReviewResult }) {
           </AlertDescription>
         </Alert>
       )}
-      {result.walkthrough && <Walkthrough walkthrough={result.walkthrough} />}
+      {result.walkthrough && <Walkthrough walkthrough={result.walkthrough} provider={result.change.provider} />}
       <FindingsSection result={result} />
     </>
   )
@@ -188,7 +265,9 @@ export function ReviewDetailPage() {
                   ? "Superseded by a newer push"
                   : review.status === "skipped"
                     ? "Skipped"
-                    : "The review did not run"}
+                    : review.status === "cancelled"
+                      ? "Cancelled because the change was closed"
+                      : "The review did not run"}
               </AlertTitle>
               {review.error && <AlertDescription>{review.error}</AlertDescription>}
             </Alert>

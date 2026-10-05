@@ -145,6 +145,22 @@ export const llmUsageSchema = z.object({
 });
 export type LlmUsage = z.infer<typeof llmUsageSchema>;
 
+// An issue as the forge reports it. `ref` is how the model and the rendered
+// comment name it, e.g. "#12".
+export const issueRefSchema = z.object({
+  ref: z.string(),
+  title: z.string(),
+  url: z.string().optional(),
+  state: z.enum(["open", "closed"]),
+});
+export type IssueRef = z.infer<typeof issueRefSchema>;
+
+// What the walkthrough reads about an issue; the body is never stored.
+export type IssueContext = IssueRef & { body: string };
+
+export const issueAssessmentSchema = z.enum(["addressed", "partial", "not_addressed", "unclear"]);
+export type IssueAssessment = z.infer<typeof issueAssessmentSchema>;
+
 export const walkthroughSchema = z.object({
   overview: z.string(),
   fileSummaries: z.array(z.object({ path: z.string(), summary: z.string() })),
@@ -152,6 +168,13 @@ export const walkthroughSchema = z.object({
   estimatedEffort: z.number().int().min(1).max(5),
   // Optional: results stored before it existed have none.
   blastRadius: z.enum(["small", "medium", "large"]).optional(),
+  // Optional parts, each present only when its setting was on.
+  sequenceDiagram: z.string().optional(),
+  highLevelSummary: z.string().optional(),
+  linkedIssues: z
+    .array(issueRefSchema.extend({ assessment: issueAssessmentSchema, note: z.string() }))
+    .optional(),
+  relatedIssues: z.array(issueRefSchema.extend({ reason: z.string() })).optional(),
 });
 export type Walkthrough = z.infer<typeof walkthroughSchema>;
 

@@ -267,6 +267,12 @@ function ForgePage({ preview, view }: { preview: PreviewPublication; view: View 
       <PageHeader preview={preview} />
       {/* GitLab shows the status in the merge request widget, above the activity. */}
       {!github && preview.status && <StatusRow provider={provider} status={preview.status} />}
+      {/* The author's text, with the high-level summary when Bammy writes it there. */}
+      {pr.description && (
+        <Note provider={provider} label="Description" author={pr.author} action={github ? "opened this pull request" : "created this merge request"}>
+          <ForgeMarkdown provider={provider}>{pr.description}</ForgeMarkdown>
+        </Note>
+      )}
       {nothing && <NothingPosted>Bammy posts no summary to the change. Reviews still show up in the dashboard.</NothingPosted>}
       {preview.summaryComment && (
         <Note provider={provider} label="Summary comment" author="bammy" bot action="commented">

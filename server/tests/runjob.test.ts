@@ -1,5 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "../src/lib/prisma.ts";
+import type { IssueContext } from "../src/review/core/models.ts";
+import { ForgeCache } from "../src/review/forge/cache.ts";
 import type { InlineComment } from "../src/review/forge/types.ts";
 import type { Forge } from "../src/services/forge.ts";
 import { claimNext, enqueue } from "../src/worker/queue.ts";
@@ -55,12 +57,34 @@ function deps(
   files: Record<string, string>,
   answers: Parameters<typeof fakeModel>[0],
   keys = { anthropic: "k" },
-  options: { failSummary?: boolean; onForge?: string[] } = {},
+  options: {
+    failSummary?: boolean;
+    onForge?: string[];
+    // What getChangeHead reports, once per call; the last entry repeats.
+    states?: ("open" | "closed" | "merged")[];
+    issues?: { linked?: IssueContext[]; found?: IssueContext[] };
+    title?: string;
+    cache?: ForgeCache;
+  } = {},
 ) {
   const reads: string[] = [];
   const published: Published = { inline: [], summaries: [], statuses: [], descriptions: [], labels: [] };
   const forge = {
-    getChange: async () => ({ ...makeChangeSet(), forgeRef: { ...makeChangeSet().forgeRef, headSha: "newhead" } }),
+    getChange: async (_p: string, _n: number, cache?: ForgeCache) => {
+      reads.push(cache ? "change:cached" : "change");
+      const change = makeChangeSet();
+      return { ...change, title: options.title ?? change.title, forgeRef: { ...change.forgeRef, headSha: "newhead" } };
+    },
+    getChangeHead: async () => {
+      const states = options.states ?? ["open"];
+      const state = states.length > 1 ? states.shift()! : states[0]!;
+      return { headSha: "newhead", title: "t", state, isDraft: false };
+    },
+    getLinkedIssues: async () => options.issues?.linked ?? [],
+    searchIssues: async (_project: string, terms: string[]) => {
+      reads.push(`search:${terms.join(" ")}`);
+      return options.issues?.found ?? [];
+    },
     getFileAtRef: async (_p: string, path: string, ref: string) => {
       reads.push(`${ref}:${path}`);
       return files[`${ref}:${path}`] ?? null;
@@ -99,6 +123,7 @@ function deps(
     adapterFor: () => forge,
     generateFor: () => model.generate,
     credentialsFor: async () => ({ keys, baseUrls: {}, connections }),
+    cache: options.cache,
   };
   return { runDeps, reads, model, published };
 }
@@ -127,7 +152,7 @@ describe("runJob", () => {
     expect(result.verdict.blockOn).toBe("major");
     expect(stored.resolvedConfig).toMatchObject({ repoFile: ".bammy.yaml", sources: { "review.blockOn": "repoSettings" } });
     // The repository file is read at the base revision, never the head.
-    expect(reads).toEqual(["base:.bammy.yaml"]);
+    expect(reads).toEqual(["change", "base:.bammy.yaml"]);
   });
 
   it("stores a failed review as failed with its errors", async () => {
@@ -290,6 +315,143 @@ describe("runJob", () => {
     expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [] });
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored.publication).toBeNull();
+  });
+});
+
+describe("runJob when the change closes", () => {
+  const answers = { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH };
+
+  it("cancels without a model call when the change is already closed", async () => {
+    const job = await claimedJob();
+    const { runDeps, model, published } = deps({}, answers, undefined, { states: ["merged"] });
+
+    await runJob(job, runDeps);
+
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(stored).toMatchObject({ status: "cancelled", verdict: null, error: "The pull or merge request was closed or merged" });
+    expect(stored.resolvedConfig).toMatchObject({ config: { triggers: { abortOnClose: true } } });
+    expect(model.requests).toHaveLength(0);
+    expect(published).toEqual({ inline: [], summaries: [], statuses: [], descriptions: [], labels: [] });
+  });
+
+  it("publishes nothing when the change closes during the review", async () => {
+    const job = await claimedJob();
+    const { runDeps, model, published } = deps({}, answers, undefined, { states: ["open", "closed"] });
+
+    await runJob(job, runDeps);
+
+    expect((await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("cancelled");
+    expect(model.requests.length).toBeGreaterThan(0);
+    // Only the progress note and the pending status went out; the status is closed off.
+    expect(published.inline).toEqual([]);
+    expect(published.summaries).toHaveLength(1);
+    expect(published.statuses).toEqual(["pending", "error"]);
+  });
+
+  it("hands model calls a signal the watch fires on close", async () => {
+    const job = await claimedJob();
+    const { runDeps, model } = deps({}, answers, undefined, { states: ["open", "closed"] });
+    runDeps.closeCheckIntervalMs = 5;
+    const signals: (AbortSignal | undefined)[] = [];
+    runDeps.generateFor = () => async (request) => {
+      signals.push(request.abortSignal);
+      // Slower than the watch, so the close lands mid-call.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return model.generate(request);
+    };
+
+    await runJob(job, runDeps);
+
+    expect((await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("cancelled");
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+  });
+
+  it("finishes the review when abort on close is off", async () => {
+    await prisma.repository.update({ where: { id: repositoryId }, data: { settings: { triggers: { abortOnClose: false } } } });
+    const job = await claimedJob();
+    const { runDeps, published } = deps({}, answers, undefined, { states: ["closed"] });
+
+    await runJob(job, runDeps);
+
+    expect((await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("completed");
+    expect(published.inline).toHaveLength(1);
+  });
+
+  it("keeps a job cancelled from elsewhere cancelled", async () => {
+    const job = await claimedJob();
+    const { runDeps } = deps({}, answers);
+    runDeps.generateFor = () => async () => {
+      await prisma.reviewJob.update({ where: { id: job.id }, data: { status: "cancelled" } });
+      throw new Error("aborted");
+    };
+
+    await runJob(job, runDeps);
+
+    expect((await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("cancelled");
+  });
+});
+
+describe("runJob issues and cache", () => {
+  const issue = (ref: string, title: string): IssueContext => ({ ref, title, state: "open", body: `${title} body`, url: `https://github.com/acme/web/issues/${ref.slice(1)}` });
+
+  it("hands linked and related issues to the walkthrough, minus duplicates", async () => {
+    const job = await claimedJob();
+    const { runDeps, model, reads } = deps(
+      {},
+      {
+        code_review: { findings: [] },
+        walkthrough: {
+          ...WALKTHROUGH,
+          linkedIssues: [{ ref: "#5", assessment: "addressed", note: "Done." }],
+          relatedIssues: [{ ref: "#9", reason: "Same parser." }, { ref: "#404", reason: "Invented." }],
+        },
+      },
+      undefined,
+      {
+        title: "Rework parser tokenizer",
+        issues: { linked: [issue("#5", "Parser crash")], found: [issue("#5", "Parser crash"), issue("#9", "Tokenizer speed")] },
+      },
+    );
+
+    await runJob(job, runDeps);
+
+    expect(reads).toContain("search:rework parser tokenizer");
+    const prompt = model.requests.find((r) => r.schemaName === "walkthrough")!.prompt;
+    expect(prompt).toContain("Linked issues:\n#5 (open)");
+    expect(prompt).toContain("Candidate issues:\n#9 (open)");
+    expect(prompt.match(/#5 \(open\)/g)).toHaveLength(1);
+    const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
+    const walkthrough = (stored.result as { walkthrough: Record<string, unknown> }).walkthrough;
+    // Bodies are prompt context only; issues the forge did not return are dropped.
+    expect(walkthrough.linkedIssues).toEqual([
+      { ref: "#5", title: "Parser crash", state: "open", url: "https://github.com/acme/web/issues/5", assessment: "addressed", note: "Done." },
+    ]);
+    expect(walkthrough.relatedIssues).toEqual([{ ref: "#9", title: "Tokenizer speed", state: "open", url: "https://github.com/acme/web/issues/9", reason: "Same parser." }]);
+  });
+
+  it("reads through the cache unless the repository disables it", async () => {
+    const cache = new ForgeCache();
+    const job = await claimedJob();
+    const cached = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, undefined, { cache });
+    await runJob(job, cached.runDeps);
+    expect(cached.reads[0]).toBe("change:cached");
+    expect(cache.size).toBe(2);
+
+    // Turned off by the repository file: the cached read is redone fresh. (A
+    // file at a sha never changes, so a new one needs an emptied cache here.)
+    cache.clear();
+    const second = await claimedJob();
+    const fresh = deps({ "base:.bammy.yaml": "review:\n  disable_cache: true\n" }, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, undefined, { cache });
+    await runJob(second, fresh.runDeps);
+    expect(fresh.reads.filter((read) => read.startsWith("change"))).toEqual(["change:cached", "change"]);
+
+    // Turned off in the dashboard: nothing goes through the cache at all.
+    await prisma.repository.update({ where: { id: repositoryId }, data: { settings: { review: { disableCache: true } } } });
+    const third = await claimedJob();
+    const none = deps({}, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, undefined, { cache });
+    await runJob(third, none.runDeps);
+    expect(none.reads.filter((read) => read.startsWith("change"))).toEqual(["change"]);
   });
 });
 

@@ -1,4 +1,5 @@
-import type { ChangeSet, ForgeProvider, ForgeRef } from "../core/models.ts";
+import type { ChangeSet, ForgeProvider, ForgeRef, IssueContext } from "../core/models.ts";
+import type { ForgeCache } from "./cache.ts";
 
 export interface ForgeRepo {
   externalId: string;
@@ -44,13 +45,19 @@ export interface ForgeAdapter {
   currentAccount(): Promise<ForgeAccount>;
   listRepos(): Promise<ForgeRepo[]>;
   getRepo(externalId: string): Promise<ForgeRepo>;
-  getChange(project: string, number: number): Promise<ChangeSet>;
+  // The diff is read through the cache when one is given; the change's own
+  // fields are always fetched fresh.
+  getChange(project: string, number: number, cache?: ForgeCache): Promise<ChangeSet>;
   // Just enough to queue a review, without fetching the diff.
   getChangeHead(project: string, number: number): Promise<ChangeHead>;
   // Open changes, most recently updated first.
   listOpenChanges(project: string): Promise<ChangeSummary[]>;
   // Raw file content at a ref, or null when the file does not exist there.
   getFileAtRef(project: string, path: string, ref: string): Promise<string | null>;
+  // Issues the change says it closes, at most MAX_LINKED_ISSUES (issues.ts).
+  getLinkedIssues(change: ChangeSet): Promise<IssueContext[]>;
+  // Issues matching any of the terms, at most MAX_CANDIDATE_ISSUES.
+  searchIssues(project: string, terms: string[]): Promise<IssueContext[]>;
 }
 
 // Webhooks Bammy registers on one repository, for forges (or connection kinds)

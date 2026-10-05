@@ -2,9 +2,13 @@ import { env } from "../config/env.ts";
 import type { ForgeConnection, ReviewJob } from "../generated/prisma/client.ts";
 import { prisma } from "../lib/prisma.ts";
 import { skipFilterReason } from "../review/config/filters.ts";
-import { loadReviewConfig } from "../review/config/load.ts";
+import { loadDashboardConfig, loadReviewConfig } from "../review/config/load.ts";
 import type { Config } from "../review/config/schema.ts";
+import type { ChangeSet } from "../review/core/models.ts";
+import { forgeCache, type ForgeCache } from "../review/forge/cache.ts";
+import { searchTerms } from "../review/forge/issues.ts";
 import {
+  abortableGenerate,
   createGenerate,
   missingKeys,
   type ApiKeys,
@@ -12,6 +16,7 @@ import {
   type Generate,
   type ProviderBaseUrls,
 } from "../review/llm/providers.ts";
+import type { WalkthroughIssues } from "../review/llm/walkthrough.ts";
 import { runReview } from "../review/pipeline.ts";
 import { publishes, publishReview } from "../review/publish/publisher.ts";
 import { pendingStatus } from "../review/publish/status.ts";
@@ -19,7 +24,8 @@ import { summarize } from "../review/render/json.ts";
 import { progressMarkdown } from "../review/render/progress.ts";
 import { adapterForConnection, type Forge } from "../services/forge.ts";
 import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts";
-import { complete } from "./queue.ts";
+import { CLOSE_CHECK_INTERVAL_MS, watchForClose } from "./closeWatch.ts";
+import { CLOSED_REASON, complete, isCancelled } from "./queue.ts";
 
 export interface RunJobDeps {
   adapterFor: (connection: ForgeConnection) => Forge;
@@ -27,12 +33,16 @@ export interface RunJobDeps {
   credentialsFor: (
     userId: string,
   ) => Promise<{ keys: ApiKeys; baseUrls: ProviderBaseUrls; connections: StoredLlmConnections }>;
+  // Absent means every read goes to the forge, as with review.disableCache.
+  cache?: ForgeCache;
+  closeCheckIntervalMs?: number;
 }
 
 const defaultDeps: RunJobDeps = {
   adapterFor: adapterForConnection,
   generateFor: createGenerate,
   credentialsFor: llmCredentialsFor,
+  cache: forgeCache,
 };
 
 // Decided here rather than in the webhook handler, because only now is the
@@ -68,6 +78,30 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+// Issues for the walkthrough, best effort: a tracker the token cannot read
+// (or one that is turned off) costs a warning, never the review.
+async function walkthroughIssues(forge: Forge, changeSet: ChangeSet, config: Config, warnings: string[]): Promise<WalkthroughIssues> {
+  const issues: WalkthroughIssues = {};
+  if (config.output.assessLinkedIssues) {
+    issues.linked = await forge.getLinkedIssues(changeSet).catch((err: unknown) => {
+      warnings.push(`Linked issues could not be read: ${message(err)}`);
+      return undefined;
+    });
+  }
+  if (config.output.relatedIssues) {
+    const terms = searchTerms(changeSet.title);
+    const linked = new Set((issues.linked ?? []).map((issue) => issue.ref));
+    const found = terms.length
+      ? await forge.searchIssues(changeSet.forgeRef.project, terms).catch((err: unknown) => {
+          warnings.push(`Related issues could not be searched: ${message(err)}`);
+          return undefined;
+        })
+      : [];
+    issues.candidates = found?.filter((issue) => !linked.has(issue.ref));
+  }
+  return issues;
+}
+
 // Loads everything a review needs, runs it, publishes it and stores the
 // result. Anything thrown before the review starts (the repository vanished,
 // the forge is down, no model key) fails the job through the worker, and
@@ -83,19 +117,31 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   }
 
   const forge = deps.adapterFor(repo.connection);
+  const saved = {
+    globalSettings: repo.connection.user.reviewSettings,
+    repoSettings: repo.settings,
+    followGlobal: repo.followGlobal,
+  };
+  // The repository file can only be read once the change is known, so the
+  // first reads go by the dashboard settings alone.
+  const cacheFor = (disabled: boolean) => (disabled ? undefined : deps.cache);
+  const savedDisablesCache = loadDashboardConfig(saved).review.disableCache;
   // The PR may have moved since the job was queued; review what is there now
   // and record which head that was.
-  const changeSet = await forge.getChange(repo.fullPath, job.number);
+  let changeSet = await forge.getChange(repo.fullPath, job.number, cacheFor(savedDisablesCache));
   const loaded = await loadReviewConfig({
     adapter: forge,
     project: repo.fullPath,
     ref: changeSet.forgeRef.baseSha,
-    globalSettings: repo.connection.user.reviewSettings,
-    repoSettings: repo.settings,
-    followGlobal: repo.followGlobal,
+    ...saved,
+    cache: cacheFor(savedDisablesCache),
   });
 
   const { config } = loaded;
+  // The repository file asked for fresh reads after a cached one was used.
+  if (config.review.disableCache && !savedDisablesCache && deps.cache) {
+    changeSet = await forge.getChange(repo.fullPath, job.number);
+  }
   const skip = skipReason(job, config, changeSet);
   if (skip) {
     await complete(job.id, {
@@ -151,6 +197,42 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
 
   const targetUrl = `${env.CLIENT_ORIGIN}/reviews/${job.id}`;
   const ref = changeSet.forgeRef;
+  const resolvedConfig = { config, sources: loaded.sources, repoFile: loaded.repoFile };
+
+  // Closing the change cancels its queued jobs from the webhook; this catches
+  // the rest: a close the webhook missed, and one that lands mid-review.
+  const watch = config.triggers.abortOnClose
+    ? watchForClose(
+        async () => {
+          if (await isCancelled(job.id)) return true;
+          const { state } = await forge.getChangeHead(repo.fullPath, job.number);
+          return state === "closed" || state === "merged";
+        },
+        deps.closeCheckIntervalMs ?? CLOSE_CHECK_INTERVAL_MS,
+      )
+    : undefined;
+  const cancel = async (posted: boolean) => {
+    watch?.stop();
+    // Best effort, and only over what this run already put on the change.
+    if (posted && config.output.postCheck) {
+      await forge
+        .setCommitStatus(ref, { state: "error", description: "Review cancelled: the change was closed", targetUrl })
+        .catch(() => undefined);
+    }
+    await complete(job.id, {
+      status: "cancelled",
+      verdict: null,
+      resolvedConfig,
+      error: CLOSED_REASON,
+      headSha: ref.headSha,
+      baseSha: ref.baseSha,
+    });
+  };
+  if (watch && (await watch.closedNow())) {
+    await cancel(false);
+    return;
+  }
+
   if (publishes(config)) {
     // Best effort: a review must not fail because its progress note did.
     if (config.output.postSummary) {
@@ -166,18 +248,31 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   }
 
   const walkthrough = walkthroughEnabled(job.trigger, config, changeSet.isDraft);
-  const result = await runReview(
-    {
-      changeSet,
-      config: {
-        ...config,
-        llm: { ...config.llm, fallbackModels },
-        output: { ...config.output, walkthrough },
+  const issues = walkthrough ? await walkthroughIssues(forge, changeSet, config, warnings) : undefined;
+  const generate = deps.generateFor(keys, endpoint, baseUrls);
+  let result;
+  try {
+    result = await runReview(
+      {
+        changeSet,
+        config: {
+          ...config,
+          llm: { ...config.llm, fallbackModels },
+          output: { ...config.output, walkthrough },
+        },
+        warnings,
+        issues,
       },
-      warnings,
-    },
-    { generate: deps.generateFor(keys, endpoint, baseUrls) },
-  );
+      { generate: watch ? abortableGenerate(generate, watch.signal) : generate },
+    );
+  } finally {
+    watch?.stop();
+  }
+  // Nothing is published for a change that is no longer open.
+  if (watch && (await watch.closedNow())) {
+    await cancel(publishes(config));
+    return;
+  }
 
   let publication = null;
   if (publishes(config)) {
@@ -216,7 +311,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     result,
     summary: summarize(result),
     publication,
-    resolvedConfig: { config, sources: loaded.sources, repoFile: loaded.repoFile },
+    resolvedConfig,
     error: errors.length ? errors.join("\n") : null,
     headSha: ref.headSha,
     baseSha: ref.baseSha,

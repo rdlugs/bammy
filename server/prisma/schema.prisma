@@ -57,6 +57,8 @@ enum ReviewStatus {
   superseded
   // The trigger did not call for a review (auto-review off, a draft).
   skipped
+  // The PR/MR was closed or merged before the review finished.
+  cancelled
 
   @@map("review_status")
 }

@@ -55,6 +55,57 @@ export const walkthroughOutputSchema = z.object({
 });
 export type WalkthroughOutput = z.infer<typeof walkthroughOutputSchema>;
 
+export const ISSUE_ASSESSMENTS = ["addressed", "partial", "not_addressed", "unclear"] as const;
+
+const sequenceDiagramField = z
+  .string()
+  .describe(
+    'Mermaid "sequenceDiagram" source (no code fence) showing the main interaction the change adds or alters, or an empty string when the change has no meaningful interaction between components',
+  );
+const highLevelSummaryField = z.string().describe("The high-level summary, in markdown, following the summary instructions");
+const linkedIssuesField = z
+  .array(
+    z.object({
+      ref: z.string().describe("The issue reference exactly as given, e.g. #12"),
+      assessment: z.enum(ISSUE_ASSESSMENTS),
+      note: z.string().describe("One sentence on what is or is not addressed"),
+    }),
+  )
+  .describe("One entry per linked issue given");
+const relatedIssuesField = z
+  .array(
+    z.object({
+      ref: z.string().describe("The candidate issue reference exactly as given, e.g. #12"),
+      reason: z.string().describe("One short sentence on how it relates"),
+    }),
+  )
+  .describe("Only candidate issues this change plausibly relates to; empty when none do");
+
+export interface WalkthroughParts {
+  sequenceDiagram: boolean;
+  highLevelSummary: boolean;
+  linkedIssues: boolean;
+  relatedIssues: boolean;
+}
+
+// Only the enabled parts are requested, so a disabled part costs no output
+// tokens and the model is never tempted to invent one.
+export function walkthroughSchemaFor(parts: WalkthroughParts) {
+  return walkthroughOutputSchema.extend({
+    ...(parts.sequenceDiagram ? { sequenceDiagram: sequenceDiagramField } : {}),
+    ...(parts.highLevelSummary ? { highLevelSummary: highLevelSummaryField } : {}),
+    ...(parts.linkedIssues ? { linkedIssues: linkedIssuesField } : {}),
+    ...(parts.relatedIssues ? { relatedIssues: relatedIssuesField } : {}),
+  });
+}
+
+export type FullWalkthroughOutput = WalkthroughOutput & {
+  sequenceDiagram?: string;
+  highLevelSummary?: string;
+  linkedIssues?: z.infer<typeof linkedIssuesField>;
+  relatedIssues?: z.infer<typeof relatedIssuesField>;
+};
+
 // Repairs for replies that were not schema-enforced (see format.ts). They fix
 // what a model predictably gets wrong; whatever still fails is dropped or
 // rejected by the schema afterwards.
@@ -131,5 +182,28 @@ export function repairWalkthroughOutput(raw: unknown): unknown {
     labels: Array.isArray(output.labels) ? output.labels.map(String) : [],
     estimatedEffort: Number.isFinite(effort) ? effort : 3,
     blastRadius: enumValue(output.blastRadius, ["small", "medium", "large"] as const, "medium"),
+    // Optional parts: a malformed entry is dropped, a missing list is empty.
+    ...(output.sequenceDiagram !== undefined ? { sequenceDiagram: String(output.sequenceDiagram ?? "") } : {}),
+    ...(output.highLevelSummary !== undefined ? { highLevelSummary: String(output.highLevelSummary ?? "") } : {}),
+    ...(output.linkedIssues !== undefined
+      ? {
+          linkedIssues: (Array.isArray(output.linkedIssues) ? output.linkedIssues : [])
+            .map((entry) => camelKeys(record(entry)))
+            .filter((entry) => typeof entry.ref === "string")
+            .map((entry) => ({
+              ref: entry.ref,
+              assessment: enumValue(entry.assessment ?? entry.status, ISSUE_ASSESSMENTS, "unclear"),
+              note: String(entry.note ?? ""),
+            })),
+        }
+      : {}),
+    ...(output.relatedIssues !== undefined
+      ? {
+          relatedIssues: (Array.isArray(output.relatedIssues) ? output.relatedIssues : [])
+            .map((entry) => camelKeys(record(entry)))
+            .filter((entry) => typeof entry.ref === "string")
+            .map((entry) => ({ ref: entry.ref, reason: String(entry.reason ?? "") })),
+        }
+      : {}),
   };
 }

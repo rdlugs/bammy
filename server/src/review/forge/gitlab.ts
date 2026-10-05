@@ -1,7 +1,9 @@
 import { markersIn, SUMMARY_MARKER, withoutDescriptionBlock } from "../core/markers.ts";
-import type { ChangeSet, ChangeType, ForgeRef } from "../core/models.ts";
+import type { ChangeSet, ChangeType, ForgeRef, IssueContext } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
 import { ForgeHttp, isNotFound, type FetchLike } from "./http.ts";
+import { cacheKey, cached, type ForgeCache } from "./cache.ts";
+import { MAX_CANDIDATE_ISSUES, MAX_LINKED_ISSUES } from "./issues.ts";
 import {
   hostOrigin,
   STATUS_CONTEXT,
@@ -91,6 +93,24 @@ function nextPage(res: Response, current: string): string | null {
   return `${url.pathname}${url.search}`;
 }
 
+interface GlIssue {
+  iid: number;
+  title: string;
+  description: string | null;
+  state: "opened" | "closed";
+  web_url: string;
+}
+
+function toIssue(issue: GlIssue): IssueContext {
+  return {
+    ref: `#${issue.iid}`,
+    title: issue.title,
+    url: issue.web_url,
+    state: issue.state === "closed" ? "closed" : "open",
+    body: issue.description ?? "",
+  };
+}
+
 interface GlNote {
   id: number;
   body: string;
@@ -164,13 +184,19 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     }
   }
 
-  async getChange(project: string, number: number): Promise<ChangeSet> {
+  async getChange(project: string, number: number, cache?: ForgeCache): Promise<ChangeSet> {
     const base = `${this.project(project)}/merge_requests/${number}`;
     const mr = await this.http.json<GlMergeRequest>(base);
     if (!mr.diff_refs) {
       throw new Error(`Merge request !${number} has no diff yet`);
     }
-    const diffs = await this.mergeRequestDiffs(base);
+    const refs = mr.diff_refs;
+    // The diffs of an MR are fixed by its diff refs.
+    const diffs = await cached(
+      cache,
+      cacheKey("gitlab-diffs", this.host, project, number, refs.base_sha, refs.start_sha, refs.head_sha),
+      () => this.mergeRequestDiffs(base),
+    );
 
     return {
       forgeRef: {
@@ -243,6 +269,30 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       }
       throw err;
     }
+  }
+
+  // GitLab already knows which issues an MR closes, from the same keywords.
+  async getLinkedIssues(change: ChangeSet): Promise<IssueContext[]> {
+    const issues = await this.http.json<GlIssue[]>(
+      `${this.mergeRequest(change.forgeRef)}/closes_issues?per_page=${MAX_LINKED_ISSUES}`,
+    );
+    return issues.slice(0, MAX_LINKED_ISSUES).map(toIssue);
+  }
+
+  // GitLab's search matches every word it is given, so each term is searched
+  // on its own and the results merged.
+  async searchIssues(project: string, terms: string[]): Promise<IssueContext[]> {
+    const found = new Map<number, GlIssue>();
+    for (const term of terms) {
+      const issues = await this.http.json<GlIssue[]>(
+        `${this.project(project)}/issues?search=${encodeURIComponent(term)}&in=title,description&order_by=updated_at&per_page=${MAX_CANDIDATE_ISSUES}`,
+      );
+      for (const issue of issues) {
+        if (found.size < MAX_CANDIDATE_ISSUES) found.set(issue.iid, issue);
+      }
+      if (found.size >= MAX_CANDIDATE_ISSUES) break;
+    }
+    return [...found.values()].map(toIssue);
   }
 
   private mergeRequest(ref: ForgeRef): string {
