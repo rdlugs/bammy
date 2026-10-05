@@ -22,7 +22,7 @@ import { paginate, usePagination } from "@/hooks/use-pagination"
 import { useSort } from "@/hooks/use-sort"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -367,6 +367,10 @@ function ConnectedAccounts({ connections, onAdd }: { connections: Connection[]; 
     <>
       <FilterToolbar>
         <ActiveFilterChips filters={activeFilters} />
+        <Button size="sm" onClick={onAdd}>
+          <Plus />
+          Add connection
+        </Button>
         <FilterPopover active={filtering} onClear={clearFilters}>
           <FilterSelect
             id="connection-forge"
@@ -390,12 +394,6 @@ function ConnectedAccounts({ connections, onAdd }: { connections: Connection[]; 
       <Card>
         <CardHeader>
           <CardTitle>Connected accounts</CardTitle>
-          <CardAction>
-            <Button size="sm" onClick={onAdd}>
-              <Plus />
-              Add connection
-            </Button>
-          </CardAction>
         </CardHeader>
         <CardContent>
           <ConnectionsTable connections={filtered} statuses={statuses} />

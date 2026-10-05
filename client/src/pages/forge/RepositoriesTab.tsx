@@ -18,7 +18,7 @@ import { paginate, usePagination } from "@/hooks/use-pagination"
 import { useSort } from "@/hooks/use-sort"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogClose,
@@ -295,6 +295,10 @@ function RepoList({
     <>
       <FilterToolbar>
         <ActiveFilterChips filters={activeFilters} />
+        <Button size="sm" onClick={onAdd}>
+          <Plus />
+          Add repository
+        </Button>
         <FilterPopover active={filtering} onClear={clearFilters}>
           <FilterSelect
             id="repo-forge"
@@ -337,12 +341,6 @@ function RepoList({
       <Card>
         <CardHeader>
           <CardTitle>Repositories</CardTitle>
-          <CardAction>
-            <Button size="sm" onClick={onAdd}>
-              <Plus />
-              Add repository
-            </Button>
-          </CardAction>
         </CardHeader>
         <CardContent>
           <RepoTable repos={filtered} statuses={statuses} connections={connectionsById} />
