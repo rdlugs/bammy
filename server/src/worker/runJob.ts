@@ -26,6 +26,7 @@ import { adapterForConnection, type Forge } from "../services/forge.ts";
 import { llmCredentialsFor, type StoredLlmConnections } from "../services/llm.ts";
 import { CLOSE_CHECK_INTERVAL_MS, watchForClose } from "./closeWatch.ts";
 import { CLOSED_REASON, complete, isCancelled } from "./queue.ts";
+import { syncFindings } from "./syncFindings.ts";
 
 export interface RunJobDeps {
   adapterFor: (connection: ForgeConnection) => Forge;
@@ -305,7 +306,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
   // stands, and the job says what did not reach the forge.
   const errors = [...result.errors, ...(publication?.errors ?? [])];
   const status = result.status === "completed" && publication?.errors.length ? "partial" : result.status;
-  await complete(job.id, {
+  const stored = await complete(job.id, {
     status,
     verdict: result.verdict.verdict,
     result,
@@ -316,4 +317,11 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     headSha: ref.headSha,
     baseSha: ref.baseSha,
   });
+  // A run superseded or cancelled meanwhile no longer speaks for the change.
+  // The review itself is stored by now, so a failed sync must not fail the job.
+  if (stored) {
+    await syncFindings({ repositoryId: repo.id, number: job.number, jobId: job.id, author: changeSet.author, result }).catch(
+      (err: unknown) => console.error(`[worker] could not sync findings for job ${job.id}`, err),
+    );
+  }
 }

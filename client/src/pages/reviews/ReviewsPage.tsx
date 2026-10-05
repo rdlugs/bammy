@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useDebounced } from "@/hooks/use-debounced"
 import { usePagination } from "@/hooks/use-pagination"
 import { ALL, selectedLabel } from "@/lib/filters"
 import { useRepos } from "@/features/forge/api"
@@ -26,16 +27,6 @@ import { ManualReviewSheet } from "@/features/reviews/ManualReviewSheet"
 import { ReviewsTable } from "@/features/reviews/ReviewsTable"
 
 type View = "changes" | "runs"
-
-// Every keystroke would otherwise be a request.
-function useDebounced<T>(value: T, ms = 300) {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), ms)
-    return () => clearTimeout(timer)
-  }, [value, ms])
-  return debounced
-}
 
 const only = <T extends string>(value: string) => (value === ALL ? undefined : (value as T))
 

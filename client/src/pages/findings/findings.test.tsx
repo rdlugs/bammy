@@ -1,0 +1,372 @@
+import { describe, expect, it } from "vitest"
+import { screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { App } from "@/App"
+import { jsonResponse, renderWithProviders } from "@/test/renderWithProviders"
+import { mockApi } from "@/test/apiRoutes"
+import type { FindingDetail, FindingRow, FindingStats } from "@/features/findings/types"
+import { detail as reviewDetail } from "@/test/fixtures"
+
+const finding: FindingRow = {
+  id: "f-1",
+  number: 42,
+  state: "open",
+  title: "SQL built from input",
+  file: "src/app.ts",
+  startLine: 3,
+  severity: "critical",
+  category: "security",
+  kind: "potential_issue",
+  changeTitle: "Add b and c",
+  author: "alice",
+  lastJobId: "review-1",
+  firstSeenAt: "2026-10-04T12:00:00Z",
+  lastSeenAt: "2026-10-04T12:00:00Z",
+  resolvedAt: null,
+  ignoredAt: null,
+  ignoreReason: null,
+  ignoreNote: null,
+  repository: { id: "repo-1", provider: "github", host: "github.com", fullPath: "acme/web" },
+}
+
+const stats: FindingStats = {
+  days: 30,
+  open: 5,
+  openBySeverity: { critical: 1, major: 2, minor: 1, info: 1 },
+  resolved: 3,
+  total: 8,
+  resolutionRate: 38,
+}
+
+const page = (findings: FindingRow[]) => ({ findings, total: findings.length, page: 1, limit: 10 })
+
+describe("Findings page", () => {
+  it("shows the stat cards and open findings with every column", async () => {
+    mockApi({
+      "GET /api/findings/stats": stats,
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    const cards = await screen.findByRole("region", { name: "Finding stats" })
+    expect(within(cards).getByText("Open findings").nextSibling).toHaveTextContent("5")
+    expect(within(cards).getByText("38%")).toBeInTheDocument()
+    expect(within(cards).getByText("3 of 8")).toBeInTheDocument()
+
+    const row = (await screen.findByRole("button", { name: "SQL built from input" })).closest("tr")!
+    expect(within(row).getByText("src/app.ts:3")).toBeInTheDocument()
+    expect(within(row).getByText("#42")).toBeInTheDocument()
+    // The repository name only, without its owner.
+    expect(within(row).getByText("web")).toBeInTheDocument()
+    expect(within(row).getByText("Open")).toBeInTheDocument()
+    expect(within(row).getByText("critical")).toBeInTheDocument()
+    expect(within(row).getByText("Security")).toBeInTheDocument()
+    expect(within(row).getByText("Potential issue")).toBeInTheDocument()
+    expect(within(row).getByText("alice")).toBeInTheDocument()
+  })
+
+  it("lists every state once the state filter is removed", async () => {
+    const resolved = { ...finding, id: "f-2", state: "resolved" as const, title: "Old bug", author: null }
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?page=1&limit=10": page([finding, resolved]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await screen.findByRole("button", { name: "SQL built from input" })
+    await userEvent.click(screen.getByRole("button", { name: /Remove State filter/i }))
+
+    const row = (await screen.findByRole("button", { name: "Old bug" })).closest("tr")!
+    expect(within(row).getByText("Resolved")).toBeInTheDocument()
+    // A finding from before authors were stored.
+    expect(within(row).getByText("-")).toBeInTheDocument()
+  })
+
+  it("asks why before ignoring a finding from its row menu", async () => {
+    let sent: unknown
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "PATCH /api/findings/f-1": (init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body))
+        return jsonResponse(200, { finding: { ...finding, state: "ignored" } })
+      },
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for SQL built from input" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Ignore" }))
+    const dialog = await screen.findByRole("dialog", { name: "Ignore this finding?" })
+
+    // A reason is required.
+    await userEvent.click(within(dialog).getByRole("button", { name: "Ignore finding" }))
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Choose a reason")
+    expect(sent).toBeUndefined()
+
+    await userEvent.click(within(dialog).getByRole("combobox", { name: "Why are you dismissing this?" }))
+    const option = await screen.findByRole("option", { name: /^False positive/ })
+    expect(option).toHaveTextContent("The finding is wrong")
+    await userEvent.click(option)
+    // The trigger shows the label alone, not the description.
+    expect(within(dialog).getByRole("combobox", { name: "Why are you dismissing this?" })).toHaveTextContent(
+      /^False positive$/,
+    )
+    await userEvent.type(within(dialog).getByLabelText(/Explain your reasoning/), "Validated upstream.")
+    await userEvent.click(within(dialog).getByRole("button", { name: "Ignore finding" }))
+
+    await waitFor(() => expect(sent).toEqual({ state: "ignored", reason: "false_positive", note: "Validated upstream." }))
+    expect(await screen.findByText("Finding ignored")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Ignore this finding?" })).not.toBeInTheDocument())
+  })
+
+  it("leaves the finding alone when the ignore dialog is cancelled", async () => {
+    let patched = false
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "PATCH /api/findings/f-1": () => {
+        patched = true
+        return jsonResponse(200, { finding })
+      },
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for SQL built from input" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Ignore" }))
+    const dialog = await screen.findByRole("dialog", { name: "Ignore this finding?" })
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Ignore this finding?" })).not.toBeInTheDocument())
+    expect(patched).toBe(false)
+  })
+
+  it("confirms before reopening an ignored finding from its row menu", async () => {
+    let sent: unknown
+    const ignored: FindingRow = {
+      ...finding,
+      state: "ignored",
+      ignoreReason: "intentional",
+      ignoreNote: "Kept for the legacy importer.",
+    }
+    mockApi({
+      // The stub answers the default (open) query; the row's own state drives its menu.
+      "GET /api/findings?state=open&page=1&limit=10": page([ignored]),
+      "PATCH /api/findings/f-1": (init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body))
+        return jsonResponse(200, { finding })
+      },
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for SQL built from input" }))
+    expect(screen.queryByRole("menuitem", { name: "Ignore" })).not.toBeInTheDocument()
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Reopen" }))
+
+    const dialog = await screen.findByRole("dialog", { name: "Reopen this finding?" })
+    expect(sent).toBeUndefined()
+    // What reopening throws away is on screen before confirming.
+    expect(within(dialog).getByText("Intentional")).toBeInTheDocument()
+    expect(within(dialog).getByText("Kept for the legacy importer.")).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reopen finding" }))
+
+    await waitFor(() => expect(sent).toEqual({ state: "open" }))
+    expect(await screen.findByText("Finding reopened")).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Reopen this finding?" })).not.toBeInTheDocument())
+  })
+
+  it("leaves the finding ignored when the reopen dialog is cancelled", async () => {
+    let patched = false
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([{ ...finding, state: "ignored" }]),
+      "PATCH /api/findings/f-1": () => {
+        patched = true
+        return jsonResponse(200, { finding })
+      },
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for SQL built from input" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Reopen" }))
+    const dialog = await screen.findByRole("dialog", { name: "Reopen this finding?" })
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Reopen this finding?" })).not.toBeInTheDocument())
+    expect(patched).toBe(false)
+  })
+
+  it("keeps the table and says nothing is open when the default view is empty", async () => {
+    mockApi({ "GET /api/findings?state=open&page=1&limit=10": page([]) })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    const cell = await screen.findByRole("cell", { name: "No open findings." })
+    expect(cell.closest("table")).toBe(screen.getByRole("table"))
+    expect(screen.getByRole("columnheader", { name: "Severity" })).toBeInTheDocument()
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
+  })
+
+  it("says there are no findings yet once every filter is off", async () => {
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([]),
+      "GET /api/findings?page=1&limit=10": page([]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await screen.findByRole("cell", { name: "No open findings." })
+    await userEvent.click(screen.getByRole("button", { name: "Remove State filter" }))
+
+    expect(await screen.findByRole("cell", { name: /^No findings yet/ })).toBeInTheDocument()
+  })
+
+  it("says the filters missed when a search finds nothing", async () => {
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings?state=open&q=nothing&page=1&limit=10": page([]),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await screen.findByRole("button", { name: "SQL built from input" })
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search findings" }), "nothing")
+
+    expect(await screen.findByRole("cell", { name: "No findings match your filters." })).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "PR/MR Author" })).toBeInTheDocument()
+    expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument()
+  })
+})
+
+const full = reviewDetail.result!.findings[0]!
+const findingDetail: FindingDetail = {
+  finding,
+  detail: { ...full, title: finding.title, body: "The query concatenates user input.", suggestion: "db.query(sql, [b]);" },
+  change: reviewDetail.result!.change,
+}
+
+describe("Findings sorting", () => {
+  it("asks the server to sort by a column, then the other way, then not at all", async () => {
+    const requested: string[] = []
+    const answer = (url: string) => () => {
+      requested.push(url)
+      return jsonResponse(200, page([finding]))
+    }
+    const base = "GET /api/findings?state=open"
+    mockApi({
+      [`${base}&page=1&limit=10`]: answer("default"),
+      [`${base}&sort=severity&dir=asc&page=1&limit=10`]: answer("asc"),
+      [`${base}&sort=severity&dir=desc&page=1&limit=10`]: answer("desc"),
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await screen.findByRole("button", { name: "SQL built from input" })
+    const header = () => screen.getByRole("button", { name: "Severity" })
+    await userEvent.click(header())
+    await waitFor(() => expect(requested).toContain("asc"))
+    expect(screen.getByRole("columnheader", { name: "Severity" })).toHaveAttribute("aria-sort", "ascending")
+    await userEvent.click(header())
+    await waitFor(() => expect(requested).toContain("desc"))
+    expect(screen.getByRole("columnheader", { name: "Severity" })).toHaveAttribute("aria-sort", "descending")
+    await userEvent.click(header())
+    await waitFor(() => expect(screen.getByRole("columnheader", { name: "Severity" })).not.toHaveAttribute("aria-sort"))
+  })
+})
+
+describe("Finding details sheet", () => {
+  it("opens the finding in a sheet instead of leaving the page", async () => {
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings/f-1": findingDetail,
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "SQL built from input" }))
+
+    const sheet = await screen.findByRole("dialog", { name: "SQL built from input" })
+    expect(await within(sheet).findByText("The query concatenates user input.")).toBeInTheDocument()
+    expect(within(sheet).getByText("db.query(sql, [b]);")).toBeInTheDocument()
+    expect(within(sheet).getByText("acme/web")).toBeInTheDocument()
+    expect(within(sheet).getByText("alice")).toBeInTheDocument()
+    expect(within(sheet).getByRole("link", { name: "Open review" })).toHaveAttribute("href", "/reviews/review-1")
+    // Still on the findings page underneath.
+    expect(screen.getByRole("table", { hidden: true })).toBeInTheDocument()
+  })
+
+  it("explains when the full text is gone", async () => {
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings/f-1": { finding: { ...finding, lastJobId: null }, detail: null, change: null },
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "SQL built from input" }))
+
+    const sheet = await screen.findByRole("dialog", { name: "SQL built from input" })
+    expect(await within(sheet).findByText("Full details are no longer available for this finding.")).toBeInTheDocument()
+    expect(within(sheet).queryByRole("link", { name: "Open review" })).not.toBeInTheDocument()
+  })
+
+  it("ignores the finding from the sheet", async () => {
+    let sent: unknown
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([finding]),
+      "GET /api/findings/f-1": findingDetail,
+      "PATCH /api/findings/f-1": (init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body))
+        return jsonResponse(200, { finding: { ...finding, state: "ignored" } })
+      },
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "SQL built from input" }))
+    const sheet = await screen.findByRole("dialog", { name: "SQL built from input" })
+    await userEvent.click(within(sheet).getByRole("button", { name: "Ignore" }))
+    const dialog = await screen.findByRole("dialog", { name: "Ignore this finding?" })
+    await userEvent.click(within(dialog).getByRole("combobox", { name: "Why are you dismissing this?" }))
+    await userEvent.click(await screen.findByRole("option", { name: /^Fix later/ }))
+    await userEvent.click(within(dialog).getByRole("button", { name: "Ignore finding" }))
+
+    // No note typed, so none is sent.
+    await waitFor(() => expect(sent).toEqual({ state: "ignored", reason: "fix_later" }))
+  })
+
+  it("shows why an ignored finding was dismissed", async () => {
+    const ignored: FindingRow = {
+      ...finding,
+      state: "ignored",
+      ignoredAt: "2026-10-04T12:00:00Z",
+      ignoreReason: "false_positive",
+      ignoreNote: "Validated upstream.",
+    }
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([ignored]),
+      "GET /api/findings/f-1": { ...findingDetail, finding: ignored },
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "SQL built from input" }))
+    const sheet = await screen.findByRole("dialog", { name: "SQL built from input" })
+
+    expect(await within(sheet).findByText("False positive")).toBeInTheDocument()
+    expect(within(sheet).getByText("Validated upstream.")).toBeInTheDocument()
+    expect(within(sheet).getByRole("button", { name: "Reopen" })).toBeInTheDocument()
+    expect(within(sheet).queryByRole("button", { name: "Ignore" })).not.toBeInTheDocument()
+  })
+
+  it("confirms before reopening from the sheet", async () => {
+    let sent: unknown
+    const ignored: FindingRow = { ...finding, state: "ignored", ignoreReason: "fix_later" }
+    mockApi({
+      "GET /api/findings?state=open&page=1&limit=10": page([ignored]),
+      "GET /api/findings/f-1": { ...findingDetail, finding: ignored },
+      "PATCH /api/findings/f-1": (init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body))
+        return jsonResponse(200, { finding })
+      },
+    })
+    renderWithProviders(<App />, { route: "/findings" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "SQL built from input" }))
+    const sheet = await screen.findByRole("dialog", { name: "SQL built from input" })
+    await userEvent.click(await within(sheet).findByRole("button", { name: "Reopen" }))
+    const dialog = await screen.findByRole("dialog", { name: "Reopen this finding?" })
+    expect(sent).toBeUndefined()
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reopen finding" }))
+
+    await waitFor(() => expect(sent).toEqual({ state: "open" }))
+  })
+})

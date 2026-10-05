@@ -5,7 +5,7 @@ import { useReviewStats } from "./api"
 import { SeverityBadge } from "./badges"
 import { SEVERITIES } from "./types"
 
-function Stat({ label, children }: { label: string; children: ReactNode }) {
+export function Stat({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Card className="py-4">
       <CardContent className="flex flex-col gap-1 px-4">

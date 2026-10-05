@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router"
 import {
+  Bug,
   ChevronsUpDown,
   FolderGit2,
   GitPullRequest,
@@ -39,6 +40,7 @@ import { useAuth } from "@/features/auth/useAuth"
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/reviews", label: "Reviews", icon: GitPullRequest },
+  { to: "/findings", label: "Findings", icon: Bug },
   { to: "/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/configuration", label: "Configuration", icon: SlidersHorizontal },
   { to: "/llm-connections", label: "LLM Connections", icon: KeyRound },

@@ -4,6 +4,7 @@ import { PublicOnlyRoute } from "@/features/auth/PublicOnlyRoute"
 import { DashboardLayout } from "@/layouts/DashboardLayout"
 import { ConfigurationPage } from "@/pages/config/ConfigurationPage"
 import { DashboardPage } from "@/pages/dashboard/DashboardPage"
+import { FindingsPage } from "@/pages/findings/FindingsPage"
 import { LlmConnectionsPage } from "@/pages/llm-connections/LlmConnectionsPage"
 import { LoginPage } from "@/pages/auth/LoginPage"
 import { RegisterPage } from "@/pages/auth/RegisterPage"
@@ -32,6 +33,7 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/reviews/:id" element={<ReviewDetailPage />} />
+          <Route path="/findings" element={<FindingsPage />} />
           <Route path="/repositories" element={<RepositoriesPage />} />
           <Route path="/connections" element={<ConnectionsRedirect />} />
           <Route path="/configuration" element={<ConfigurationPage />} />
