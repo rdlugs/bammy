@@ -69,8 +69,15 @@ const outputShape = {
   postInline: z.boolean(),
   postSummary: z.boolean(),
   postCheck: z.boolean(),
-  // Where the walkthrough goes: the PR/MR description, a comment of its own,
-  // or the description only when the author left it empty.
+  // The line under the summary naming the commit, models, passes and files
+  // reviewed.
+  reviewStats: z.boolean(),
+  // Ready-to-paste instructions for a coding agent: one per actionable inline
+  // comment, and one in the summary covering every finding.
+  agentPrompts: z.boolean(),
+  agentPromptAll: z.boolean(),
+  // Legacy and ignored: the walkthrough always opens the review comment now.
+  // Still accepted so older files and saved settings keep validating.
   summaryLocation: z.enum(SUMMARY_LOCATIONS),
   // Native labels from the walkthrough's estimates, e.g. "Large blast radius".
   blastRadiusLabel: z.boolean(),
@@ -167,6 +174,9 @@ export const DEFAULT_CONFIG: Config = {
     postInline: true,
     postSummary: true,
     postCheck: true,
+    reviewStats: true,
+    agentPrompts: true,
+    agentPromptAll: true,
     summaryLocation: "dynamic",
     blastRadiusLabel: false,
     effortLabel: false,

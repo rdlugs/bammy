@@ -241,7 +241,16 @@ export async function getReviewMarkdown(req: Request, res: Response) {
   if (!result) {
     throw new HttpError(409, review.result === null ? "This review has no result yet" : "This result can no longer be rendered");
   }
-  res.type("text/markdown; charset=utf-8").send(toMarkdown(result));
+  // Rendered as the summary comment was, so the copy matches the forge. Jobs
+  // stored before output.reviewStats existed showed the stats line; jobs
+  // stored before output.agentPromptAll existed had no prompt.
+  const stored = review.resolvedConfig as {
+    config?: { output?: { reviewStats?: boolean; agentPromptAll?: boolean } };
+  } | null;
+  const output = stored?.config?.output;
+  const stats = output?.reviewStats !== false;
+  const agentPrompt = output?.agentPromptAll === true;
+  res.type("text/markdown; charset=utf-8").send(toMarkdown(result, { stats, agentPrompt }));
 }
 
 export async function rerunReview(req: Request, res: Response) {

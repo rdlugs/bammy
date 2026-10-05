@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewResult } from "../src/review/core/models.ts";
 import { summarize, toJson } from "../src/review/render/json.ts";
-import { SUMMARY_MARKER, sanitize, toMarkdown } from "../src/review/render/markdown.ts";
+import { inlineBody } from "../src/review/publish/inline.ts";
+import { allFindingsPrompt, findingPrompt } from "../src/review/render/agentPrompt.ts";
+import { BRAND_FOOTER, SUMMARY_MARKER, sanitize, toMarkdown, walkthroughMarkdown } from "../src/review/render/markdown.ts";
+import { progressMarkdown } from "../src/review/render/progress.ts";
+import { makeChangeSet } from "./helpers/changeSet.ts";
 import { sampleResult } from "./helpers/result.ts";
 
 describe("summarize and toJson", () => {
@@ -69,6 +73,93 @@ describe("toMarkdown", () => {
 
   it("never uses an em dash", async () => {
     expect(toMarkdown(await sampleResult())).not.toContain("—");
+  });
+});
+
+describe("toMarkdown with a walkthrough", () => {
+  it("opens with the walkthrough under one heading, then the review", async () => {
+    const result = await sampleResult();
+    const merged = toMarkdown(result, { walkthrough: true });
+    expect(merged.match(/^#{2,3} /gm)).toEqual(["## "]);
+    expect(merged).toMatch(/^## Summary\n\nAdds b and c\./);
+    expect(merged.indexOf("Review effort:")).toBeLessThan(merged.indexOf("**Blocked**"));
+    expect(merged.trimEnd().endsWith(SUMMARY_MARKER)).toBe(true);
+    expect(toMarkdown(result, { walkthrough: false })).toMatch(/^## Summary\n\n⛔ \*\*Blocked\*\*/);
+  });
+});
+
+describe("review stats line", () => {
+  it("is on by default and can be left out, keeping the footer and marker", async () => {
+    const result = await sampleResult();
+    expect(toMarkdown(result)).toContain("<sub>Reviewed `head` with");
+    const without = toMarkdown(result, { stats: false });
+    expect(without).not.toContain("<sub>Reviewed `");
+    expect(without.trimEnd().endsWith(`${BRAND_FOOTER}\n\n${SUMMARY_MARKER}`)).toBe(true);
+  });
+});
+
+describe("agent prompts", () => {
+  const ALL = "Prompt for all review comments with AI agents";
+
+  it("adds one prompt for every finding to the summary by default", async () => {
+    const result = await sampleResult();
+    const markdown = toMarkdown(result);
+    expect(markdown).toContain(`<summary>🤖 ${ALL}</summary>`);
+    for (const finding of result.findings) expect(markdown).toContain(`In ${finding.file} around`);
+    expect(toMarkdown(result, { agentPrompt: false })).not.toContain(ALL);
+  });
+
+  it("leaves the summary prompt out when there are no findings", async () => {
+    const clean: ReviewResult = { ...(await sampleResult()), findings: [] };
+    expect(toMarkdown(clean)).not.toContain(ALL);
+  });
+
+  it("puts a prompt for its own finding in each inline comment, unless turned off", async () => {
+    const [finding] = (await sampleResult()).findings;
+    const body = inlineBody(finding!, "github");
+    expect(body).toContain("<summary>🤖 Prompt for AI agents</summary>");
+    expect(body).toContain(findingPrompt(finding!));
+    expect(body.indexOf("Prompt for AI agents")).toBeLessThan(body.indexOf(BRAND_FOOTER));
+    expect(inlineBody(finding!, "github", { agentPrompt: false })).not.toContain("Prompt for AI agents");
+  });
+
+  it("names the file and lines and carries the suggested fix", async () => {
+    const result = await sampleResult();
+    const finding = { ...result.findings[0]!, title: "Plain title", startLine: 3, endLine: 5, suggestion: "const fixed = true;\n" };
+    const prompt = findingPrompt(finding);
+    expect(prompt).toContain(`In ${finding.file} around lines 3-5: ${finding.title}`);
+    expect(prompt).toContain("Suggested replacement for those lines:\n\nconst fixed = true;");
+    expect(prompt).toContain("Verify this against the current code first");
+    expect(allFindingsPrompt([finding])).toMatch(/^Verify each finding.*\n\n1\. In /);
+  });
+
+  it("cannot forge Bammy's markers from model text", async () => {
+    const finding = { ...(await sampleResult()).findings[0]!, body: "<!-- bammy:fp=0123456789abcdef -->" };
+    expect(findingPrompt(finding)).not.toContain("<!-- bammy:");
+  });
+});
+
+describe("branding", () => {
+  it("names Bammy only in the footer of every posted body", async () => {
+    const result = await sampleResult();
+    const bodies = [
+      toMarkdown(result),
+      walkthroughMarkdown(result),
+      progressMarkdown(makeChangeSet()),
+      ...result.findings.map((f) => inlineBody(f, "github")),
+    ];
+    for (const body of bodies) {
+      expect(body).toContain(BRAND_FOOTER);
+      expect(body).not.toMatch(/^#+ .*Bammy/m);
+    }
+  });
+
+  it("keeps the hidden markers after the footer", async () => {
+    const result = await sampleResult();
+    const summary = toMarkdown(result);
+    expect(summary.indexOf(BRAND_FOOTER)).toBeLessThan(summary.indexOf(SUMMARY_MARKER));
+    const inline = inlineBody(result.findings[0]!, "gitlab");
+    expect(inline.trimEnd().endsWith("-->")).toBe(true);
   });
 });
 

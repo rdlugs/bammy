@@ -1,13 +1,11 @@
 import type { Config } from "../config/schema.ts";
-import { WALKTHROUGH_MARKER, withDescriptionBlock } from "../core/markers.ts";
 import type { ChangedFile, ForgeProvider } from "../core/models.ts";
 import type { CommitStatus } from "../forge/types.ts";
 import { runReview } from "../pipeline.ts";
 import { inlineComments } from "../publish/inline.ts";
 import { labelChanges } from "../publish/labels.ts";
-import { walkthroughLocation } from "../publish/publisher.ts";
+import { summaryPlacement } from "../publish/publisher.ts";
 import { commitStatus } from "../publish/status.ts";
-import { toMarkdown, walkthroughMarkdown } from "../render/markdown.ts";
 import { SAMPLE_NOW, sampleChange, sampleGenerate } from "./sample.ts";
 
 export interface DiffLine {
@@ -34,8 +32,6 @@ export interface PreviewPublication {
     author: string;
     sourceBranch: string;
     targetBranch: string;
-    // As it reads after Bammy edits it.
-    description: string;
     labels: string[];
   };
   status: CommitStatus | null;
@@ -77,8 +73,7 @@ export async function previewPublication(config: Config, provider: ForgeProvider
   const result = await runReview({ changeSet: change, config }, { generate: sampleGenerate, now: () => SAMPLE_NOW });
   const { output } = config;
 
-  const walkthrough = walkthroughMarkdown(result);
-  const location = walkthrough ? walkthroughLocation(config, change) : null;
+  const placement = summaryPlacement(config, result);
   const files = new Map(change.files.map((file) => [file.path, file]));
 
   return {
@@ -89,14 +84,13 @@ export async function previewPublication(config: Config, provider: ForgeProvider
       author: change.author ?? "",
       sourceBranch: change.headRef ?? "",
       targetBranch: change.baseRef ?? "",
-      description: location === "description" ? withDescriptionBlock(change.description, walkthrough) : change.description,
       labels: result.walkthrough ? labelChanges(result.walkthrough, output).add : [],
     },
     status: output.postCheck ? commitStatus(result) : null,
-    summaryComment: output.postSummary ? toMarkdown(result, { walkthrough: false }) : null,
-    walkthroughComment: location === "comment" ? `${walkthrough}\n${WALKTHROUGH_MARKER}\n` : null,
+    summaryComment: placement.summary,
+    walkthroughComment: placement.walkthroughComment,
     inline: output.postInline
-      ? inlineComments(result.findings, change, provider, new Set()).map((comment) => ({
+      ? inlineComments(result.findings, change, provider, new Set(), { agentPrompt: output.agentPrompts }).map((comment) => ({
           path: comment.path,
           startLine: comment.startLine,
           endLine: comment.endLine,

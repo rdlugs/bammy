@@ -80,7 +80,9 @@ function deps(
       return "note-2";
     },
     updateDescription: async (_ref: unknown, transform: (description: string) => string) => {
-      published.descriptions.push(transform(""));
+      // Like the adapters: only an actual change is written.
+      const next = transform("");
+      if (next !== "") published.descriptions.push(next);
     },
     setLabels: async (_ref: unknown, add: string[]) => {
       published.labels.push(add);
@@ -204,13 +206,13 @@ describe("runJob", () => {
 
     expect(published.summaries).toHaveLength(2);
     expect(published.summaries[0]).toContain("Reviewing `newhead`");
-    expect(published.summaries[1]).toContain("## Bammy review");
+    expect(published.summaries[1]).toMatch(/^## Summary\n/);
     expect(published.statuses).toEqual(["pending", "failure"]);
     expect(published.inline).toHaveLength(1);
-    // The description was empty, so the walkthrough went there.
-    expect(published.descriptions).toHaveLength(1);
-    expect(published.descriptions[0]).toContain("## Bammy summary");
+    // The walkthrough opens the review comment; the description is left alone.
+    expect(published.descriptions).toEqual([]);
     expect(published.summaries[1]).not.toContain("### Walkthrough");
+    expect(published.summaries[1]).toContain("Review effort:");
 
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored.publication).toMatchObject({ summaryCommentId: "note-1", statusState: "failure", errors: [] });
@@ -272,7 +274,7 @@ describe("runJob", () => {
 
     expect(published.labels).toEqual([["Small blast radius", "1-5 Minutes"]]);
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
-    expect(stored.publication).toMatchObject({ labels: ["Small blast radius", "1-5 Minutes"], walkthroughLocation: "description" });
+    expect(stored.publication).toMatchObject({ labels: ["Small blast radius", "1-5 Minutes"], walkthroughLocation: "comment" });
   });
 
   it("publishes nothing when every output is turned off", async () => {

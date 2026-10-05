@@ -2,7 +2,8 @@ import type { ChangeSet, Finding, ForgeProvider } from "../core/models.ts";
 import { fingerprintMarker } from "../core/markers.ts";
 import { FORGE_INFO } from "../forge/providers.ts";
 import type { InlineComment } from "../forge/types.ts";
-import { sanitize } from "../render/markdown.ts";
+import { agentPromptBlock, findingPrompt } from "../render/agentPrompt.ts";
+import { BRAND_FOOTER, sanitize } from "../render/markdown.ts";
 
 function fence(code: string, info: string): string {
   const longest = Math.max(2, ...[...code.matchAll(/`+/g)].map((m) => m[0].length));
@@ -10,7 +11,12 @@ function fence(code: string, info: string): string {
   return `${ticks}${info}\n${code.replace(/\n$/, "")}\n${ticks}`;
 }
 
-export function inlineBody(finding: Finding, provider: ForgeProvider): string {
+export interface InlineOptions {
+  // output.agentPrompts; on unless turned off.
+  agentPrompt?: boolean;
+}
+
+export function inlineBody(finding: Finding, provider: ForgeProvider, options: InlineOptions = {}): string {
   const lines = [
     `**${finding.severity}** · ${finding.category}${finding.kind === "potential_issue" ? "" : ` · ${finding.kind.replace(/_/g, " ")}`}`,
     "",
@@ -20,7 +26,8 @@ export function inlineBody(finding: Finding, provider: ForgeProvider): string {
   ];
   if (finding.evidenceNote) lines.push("", `<sub>Evidence: ${sanitize(finding.evidenceNote)}</sub>`);
   if (finding.suggestion) lines.push("", fence(finding.suggestion, FORGE_INFO[provider].suggestionInfo(finding.startLine, finding.endLine)));
-  lines.push("", fingerprintMarker(finding.fingerprint));
+  if (options.agentPrompt !== false) lines.push("", ...agentPromptBlock("Prompt for AI agents", findingPrompt(finding)));
+  lines.push("", BRAND_FOOTER, "", fingerprintMarker(finding.fingerprint));
   return lines.join("\n");
 }
 
@@ -31,6 +38,7 @@ export function inlineComments(
   changeSet: ChangeSet,
   provider: ForgeProvider,
   alreadyPosted: Set<string>,
+  options: InlineOptions = {},
 ): InlineComment[] {
   const files = new Map(changeSet.files.map((file) => [file.path, file]));
   const comments: InlineComment[] = [];
@@ -48,7 +56,7 @@ export function inlineComments(
       startLine: finding.startLine,
       endLine: finding.endLine,
       ...(oldLine !== undefined ? { oldLine } : {}),
-      body: inlineBody(finding, provider),
+      body: inlineBody(finding, provider, options),
     });
   }
   return comments;

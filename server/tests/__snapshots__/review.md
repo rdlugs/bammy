@@ -1,12 +1,4 @@
-## Bammy review
-
-⛔ **Blocked**: 1 finding at or above critical.
-
-- **critical** `src/app.ts:11`: SQL built from @​input
-
-4 findings (1 critical, 1 major, 2 minor): 2 actionable, 2 in the sections below.
-
-### Walkthrough
+## Summary
 
 Adds b and c.
 
@@ -20,6 +12,12 @@ Labels: `feature` · Review effort: 1/5 · Blast radius: small
 | `src/app.ts` | Two new constants. |
 
 </details>
+
+⛔ **Blocked**: 1 finding at or above critical.
+
+- **critical** `src/app.ts:11`: SQL built from @​input
+
+4 findings (1 critical, 1 major, 2 minor): 2 actionable, 2 in the sections below.
 
 <details>
 <summary>Actionable comments (2)</summary>
@@ -56,6 +54,35 @@ Adding one can exceed the safe integer range.
 </details>
 
 <details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if it still applies.
+
+1. In src/app.ts around line 11: SQL built from @​input
+
+   Adding one can exceed the safe integer range.
+
+   Suggested replacement for those lines:
+
+   db.query(sql, [b]);
+
+2. In src/app.ts around line 12: c is never negative
+
+   Adding one can exceed the safe integer range.
+
+3. In src/app.ts around line 12: Name c more clearly
+
+   Adding one can exceed the safe integer range.
+
+4. In src/app.ts around line 40: Caller ignores <result>
+
+   Adding one can exceed the safe integer range.
+```
+
+</details>
+
+<details>
 <summary>Not reviewed (1 item)</summary>
 
 - `package-lock.json`: ignored by configuration
@@ -67,5 +94,7 @@ Adding one can exceed the safe integer range.
 - .bammy.yaml was ignored: review: unknown setting nope
 
 <sub>Reviewed `head` with anthropic/claude-sonnet-5-5 · 1 review pass · 1 file reviewed</sub>
+
+<sub><img src="https://raw.githubusercontent.com/rdlugs/bammy/main/client/public/bammy-32.png" alt="" width="14" height="14" align="absmiddle"> Bammy</sub>
 
 <!-- bammy:summary -->

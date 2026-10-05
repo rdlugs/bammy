@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../src/review/config/resolve.ts";
 import type { ConfigOverride } from "../src/review/config/schema.ts";
-import { WALKTHROUGH_MARKER, markersIn, withDescriptionBlock } from "../src/review/core/markers.ts";
+import { DESCRIPTION_END, DESCRIPTION_START, WALKTHROUGH_MARKER, markersIn } from "../src/review/core/markers.ts";
 import type { Finding, ReviewResult } from "../src/review/core/models.ts";
 import type { CommitStatus, ForgePublisher, InlineComment } from "../src/review/forge/types.ts";
 import { inlineBody, inlineComments } from "../src/review/publish/inline.ts";
@@ -70,7 +70,9 @@ describe("commitStatus", () => {
   });
 });
 
-function recordingPublisher(options: { onForge?: string[]; failInline?: boolean; description?: string } = {}) {
+function recordingPublisher(
+  options: { onForge?: string[]; failInline?: boolean; description?: string; failDescription?: boolean } = {},
+) {
   const calls = {
     inline: [] as InlineComment[],
     summaries: [] as string[],
@@ -78,24 +80,33 @@ function recordingPublisher(options: { onForge?: string[]; failInline?: boolean;
     comments: [] as { marker: string; body: string }[],
     descriptions: [] as string[],
     labels: [] as { add: string[]; remove: string[] }[],
+    // Which kind of comment went up when, across the kinds.
+    order: [] as string[],
   };
   const publisher: ForgePublisher = {
     listPostedFingerprints: async () => new Set(options.onForge ?? []),
     postInlineComments: async (_ref, comments) => {
       if (options.failInline) throw new Error("boom");
       calls.inline.push(...comments);
+      calls.order.push("inline");
       return { posted: comments.map((c) => ({ fingerprint: c.fingerprint, forgeCommentId: "1" })), failed: [] };
     },
     upsertSummaryComment: async (_ref, body) => {
       calls.summaries.push(body);
+      calls.order.push("summary");
       return "s1";
     },
     upsertComment: async (_ref, marker, body) => {
       calls.comments.push({ marker, body });
+      calls.order.push("comment");
       return "w1";
     },
+    // Like the adapters: only an actual change is written.
     updateDescription: async (_ref, transform) => {
-      calls.descriptions.push(transform(options.description ?? ""));
+      if (options.failDescription) throw new Error("403 Forbidden");
+      const before = options.description ?? "";
+      const next = transform(before);
+      if (next !== before) calls.descriptions.push(next);
     },
     setLabels: async (_ref, add, remove) => {
       calls.labels.push({ add, remove });
@@ -120,10 +131,32 @@ describe("publishReview", () => {
       postedFingerprints: new Set(),
     });
 
-    expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: false })]);
+    expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: true })]);
     expect(calls.inline).toHaveLength(2);
     expect(calls.statuses.map((s) => s.state)).toEqual(["failure"]);
     expect(publication).toMatchObject({ summaryCommentId: "s1", statusState: "failure", errors: [], inlineSkipped: 0 });
+  });
+
+  it("posts the summary before the inline comments", async () => {
+    const { publisher, calls } = recordingPublisher();
+    await publishReview({
+      publisher,
+      changeSet: makeChangeSet(),
+      result: await sampleResult(),
+      config: config(),
+      postedFingerprints: new Set(),
+    });
+    expect(calls.order).toEqual(["summary", "inline"]);
+
+    const alone = recordingPublisher();
+    await publishReview({
+      publisher: alone.publisher,
+      changeSet: makeChangeSet(),
+      result: await sampleResult(),
+      config: config({ output: { postSummary: false } }),
+      postedFingerprints: new Set(),
+    });
+    expect(alone.calls.order).toEqual(["comment", "inline"]);
   });
 
   it("skips findings already on the forge or in the database", async () => {
@@ -177,12 +210,12 @@ describe("publishReview", () => {
 });
 
 describe("walkthrough placement and labels", () => {
-  async function publish(output: ConfigOverride["output"], description = "", forgeDescription = description) {
+  async function publish(output: ConfigOverride["output"], options: { description?: string; failDescription?: boolean } = {}) {
     const result = await sampleResult();
-    const { publisher, calls } = recordingPublisher({ description: forgeDescription });
+    const { publisher, calls } = recordingPublisher(options);
     const publication = await publishReview({
       publisher,
-      changeSet: { ...makeChangeSet(), description },
+      changeSet: makeChangeSet(),
       result,
       config: config({ output }),
       postedFingerprints: new Set(),
@@ -190,33 +223,63 @@ describe("walkthrough placement and labels", () => {
     return { result, calls, publication };
   }
 
-  it("fills an empty description and comments when the author wrote one (dynamic)", async () => {
-    const empty = await publish({});
-    expect(empty.calls.descriptions).toHaveLength(1);
-    expect(empty.calls.descriptions[0]).toBe(withDescriptionBlock("", walkthroughMarkdown(empty.result)));
-    expect(empty.calls.comments).toEqual([]);
-    expect(empty.publication.walkthroughLocation).toBe("description");
-
-    const written = await publish({}, "Fixes the login bug.");
-    expect(written.calls.descriptions).toEqual([]);
-    expect(written.calls.comments).toEqual([
-      { marker: WALKTHROUGH_MARKER, body: `${walkthroughMarkdown(written.result)}\n${WALKTHROUGH_MARKER}\n` },
-    ]);
-    expect(written.publication.walkthroughLocation).toBe("comment");
-  });
-
-  it("keeps the author's text and replaces only Bammy's earlier block", async () => {
-    const earlier = withDescriptionBlock("Fixes the login bug.", "## Bammy summary\n\nOld.");
-    const { calls } = await publish({ summaryLocation: "description" }, "Fixes the login bug.", earlier);
-    expect(calls.descriptions[0]).toMatch(/^Fixes the login bug\.\n\n<!-- bammy:walkthrough:start -->/);
-    expect(calls.descriptions[0]).not.toContain("Old.");
-    expect(calls.descriptions[0]!.match(/bammy:walkthrough:start/g)).toHaveLength(1);
-  });
-
-  it("posts a standalone comment when asked to", async () => {
-    const { calls } = await publish({ summaryLocation: "comment" });
+  it("opens the review comment with the walkthrough, under one heading", async () => {
+    const { calls, result, publication } = await publish({});
+    expect(calls.comments).toEqual([]);
     expect(calls.descriptions).toEqual([]);
-    expect(calls.comments).toHaveLength(1);
+    expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: true })]);
+    expect(calls.summaries[0]).toMatch(/^## Summary\n\nAdds b and c\./);
+    expect(calls.summaries[0]).not.toContain("### Code review");
+    expect(publication.walkthroughLocation).toBe("comment");
+  });
+
+  it("leaves the stats line out when reviewStats is off", async () => {
+    const { calls, result } = await publish({ reviewStats: false });
+    expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: true, stats: false })]);
+    expect(calls.summaries[0]).not.toContain("<sub>Reviewed `");
+  });
+
+  it("adds the agent prompts by default and leaves each out when turned off", async () => {
+    const on = await publish({});
+    expect(on.calls.summaries[0]).toContain("Prompt for all review comments with AI agents");
+    expect(on.calls.inline.length).toBeGreaterThan(0);
+    for (const comment of on.calls.inline) expect(comment.body).toContain("Prompt for AI agents");
+
+    const off = await publish({ agentPrompts: false, agentPromptAll: false });
+    expect(off.calls.summaries).toEqual([toMarkdown(off.result, { walkthrough: true, agentPrompt: false })]);
+    for (const comment of off.calls.inline) expect(comment.body).not.toContain("Prompt for AI agents");
+  });
+
+  it("ignores a legacy summary location", async () => {
+    const { calls, result } = await publish({ summaryLocation: "description" });
+    expect(calls.descriptions).toEqual([]);
+    expect(calls.summaries).toEqual([toMarkdown(result, { walkthrough: true })]);
+  });
+
+  it("posts the walkthrough as a comment of its own when the review comment is off", async () => {
+    const { calls, result, publication } = await publish({ postSummary: false });
+    expect(calls.summaries).toEqual([]);
+    expect(calls.comments).toEqual([
+      { marker: WALKTHROUGH_MARKER, body: `${walkthroughMarkdown(result)}\n${WALKTHROUGH_MARKER}\n` },
+    ]);
+    expect(publication.walkthroughLocation).toBe("comment");
+  });
+
+  it("takes an earlier version's block out of the description and keeps the author's text", async () => {
+    const earlier = `Fixes the login bug.\n\n${DESCRIPTION_START}\n## Bammy summary\n\nOld.\n${DESCRIPTION_END}\n`;
+    const { calls } = await publish({}, { description: earlier });
+    expect(calls.descriptions).toEqual(["Fixes the login bug."]);
+  });
+
+  it("leaves a description without a block untouched", async () => {
+    const { calls } = await publish({}, { description: "Fixes the login bug.\n\n" });
+    expect(calls.descriptions).toEqual([]);
+  });
+
+  it("does not fail the publication when the description cannot be cleaned", async () => {
+    const { calls, publication } = await publish({}, { failDescription: true });
+    expect(publication.errors).toEqual([]);
+    expect(calls.summaries).toHaveLength(1);
   });
 
   it("sets the estimate labels and takes off the family's other values", async () => {
