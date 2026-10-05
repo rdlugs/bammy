@@ -151,7 +151,8 @@ export interface ReviewStats {
   blocked: number
   passed: number
   failed: number
-  findings: Record<Severity, number>
+  // Milliseconds from start to finish of completed runs; null when none finished.
+  duration: { median: number | null; max: number | null }
 }
 
 export function isActive(status: JobStatus) {

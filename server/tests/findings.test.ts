@@ -247,6 +247,40 @@ describe("GET /api/findings/stats", () => {
     expect(res.body.resolutionRate).toBe(Math.round((1 / total) * 100));
     const bySeverity = Object.values(res.body.openBySeverity as Record<string, number>).reduce((a, b) => a + b, 0);
     expect(bySeverity).toBe(total - 1);
+    expect(res.body).toMatchObject({ staleOpen: 0, falsePositives: 0, found: total, falsePositiveRate: 0 });
+  });
+
+  it("counts stale open findings, the median time to resolve and false positives", async () => {
+    await sync(base);
+    const [stale, fast, slow, dismissed] = await rows();
+    expect(dismissed).toBeDefined();
+    const hours = (n: number) => n * 3_600_000;
+    const now = Date.now();
+    await prisma.finding.update({ where: { id: stale!.id }, data: { firstSeenAt: new Date(now - hours(40 * 24)) } });
+    for (const [row, took] of [
+      [fast!, hours(2)],
+      [slow!, hours(6)],
+    ] as const) {
+      await prisma.finding.update({
+        where: { id: row.id },
+        data: { state: "resolved", firstSeenAt: new Date(now - hours(10)), resolvedAt: new Date(now - hours(10) + took) },
+      });
+    }
+    await request(app)
+      .patch(`/api/findings/${dismissed!.id}`)
+      .set("Cookie", cookie)
+      .send({ state: "ignored", reason: "false_positive" });
+
+    const total = (await rows()).length;
+    const res = await request(app).get("/api/findings/stats").set("Cookie", cookie);
+    // The stale finding was first seen before the period, so it is not "found" in it.
+    expect(res.body).toMatchObject({
+      staleOpen: 1,
+      medianTimeToResolve: hours(4),
+      falsePositives: 1,
+      found: total - 1,
+      falsePositiveRate: Math.round((1 / (total - 1)) * 100),
+    });
   });
 
   it("leaves ignored findings out of the rate", async () => {

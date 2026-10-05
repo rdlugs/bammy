@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
+import { median } from "../lib/stats.ts";
 import type { Prisma, Repository } from "../generated/prisma/client.ts";
 import { reviewResultSchema } from "../review/core/models.ts";
 import { parseChangeUrl } from "../review/forge/url.ts";
@@ -179,12 +180,10 @@ async function listChanges(where: Prisma.ReviewJobWhereInput, page: number, limi
   return { reviews, total: all.length };
 }
 
-const SEVERITIES = ["critical", "major", "minor", "info"] as const;
-
 export async function getReviewStats(req: Request, res: Response) {
   const { repoId, days } = reviewStatsQuerySchema.parse(req.query);
   const since = new Date(Date.now() - days * 86_400_000);
-  // Only the small summary digest is read, never full results.
+  // Only small columns are read, never full results.
   const jobs = await prisma.reviewJob.findMany({
     where: {
       ...ownedBy(req.userId!),
@@ -192,20 +191,20 @@ export async function getReviewStats(req: Request, res: Response) {
       createdAt: { gte: since },
       status: { notIn: ["superseded", "skipped", "cancelled"] },
     },
-    select: { status: true, verdict: true, summary: true },
+    select: { status: true, verdict: true, startedAt: true, finishedAt: true },
   });
-  const findings = Object.fromEntries(SEVERITIES.map((s) => [s, 0])) as Record<(typeof SEVERITIES)[number], number>;
-  for (const job of jobs) {
-    const bySeverity = (job.summary as { bySeverity?: Partial<Record<string, number>> } | null)?.bySeverity ?? {};
-    for (const s of SEVERITIES) findings[s] += bySeverity[s] ?? 0;
-  }
+  // Failed runs are left out: an error can end a run early and would make
+  // reviews look faster than they are.
+  const durations = jobs
+    .filter((j) => (j.status === "completed" || j.status === "partial") && j.startedAt && j.finishedAt)
+    .map((j) => j.finishedAt!.getTime() - j.startedAt!.getTime());
   res.json({
     days,
     runs: jobs.length,
     blocked: jobs.filter((j) => j.verdict === "blocked").length,
     passed: jobs.filter((j) => j.verdict === "pass").length,
     failed: jobs.filter((j) => j.status === "failed").length,
-    findings,
+    duration: { median: median(durations), max: durations.length ? Math.max(...durations) : null },
   });
 }
 

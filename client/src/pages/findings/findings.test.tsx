@@ -36,6 +36,11 @@ const stats: FindingStats = {
   resolved: 3,
   total: 8,
   resolutionRate: 38,
+  staleOpen: 2,
+  medianTimeToResolve: 52 * 3_600_000,
+  falsePositives: 1,
+  found: 9,
+  falsePositiveRate: 11,
 }
 
 const page = (findings: FindingRow[]) => ({ findings, total: findings.length, page: 1, limit: 10 })
@@ -49,9 +54,13 @@ describe("Findings page", () => {
     renderWithProviders(<App />, { route: "/findings" })
 
     const cards = await screen.findByRole("region", { name: "Finding stats" })
-    expect(within(cards).getByText("Open findings").nextSibling).toHaveTextContent("5")
+    expect(within(cards).getByText("Open findings").parentElement!.nextSibling).toHaveTextContent("5")
     expect(within(cards).getByText("38%")).toBeInTheDocument()
     expect(within(cards).getByText("3 of 8")).toBeInTheDocument()
+    expect(within(cards).getByText("2 older than 30 days")).toBeInTheDocument()
+    expect(within(cards).getByText("Median time to resolve").parentElement!.nextSibling).toHaveTextContent("2d 04h")
+    expect(within(cards).getByText("11%")).toBeInTheDocument()
+    expect(within(cards).getByText("1 of 9")).toBeInTheDocument()
 
     const row = (await screen.findByRole("button", { name: "SQL built from input" })).closest("tr")!
     expect(within(row).getByText("src/app.ts:3")).toBeInTheDocument()

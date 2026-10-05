@@ -240,12 +240,16 @@ describe("GET /api/reviews filters", () => {
 });
 
 describe("GET /api/reviews/stats", () => {
-  it("counts recent runs, verdicts and findings for the owner only", async () => {
+  it("counts recent runs, verdicts and review time for the owner only", async () => {
+    const start = Date.now() - 3_600_000;
+    const at = (seconds: number) => new Date(start + seconds * 1000);
     await completedJob(1);
     await prisma.reviewJob.createMany({
       data: [
-        { repositoryId: repoId, number: 2, headSha: "h", trigger: "manual", status: "failed", verdict: "error" },
-        { repositoryId: repoId, number: 3, headSha: "h", trigger: "manual", status: "completed", verdict: "pass" },
+        // A failed run's duration is left out of the median.
+        { repositoryId: repoId, number: 2, headSha: "h", trigger: "manual", status: "failed", verdict: "error", startedAt: at(0), finishedAt: at(1) },
+        { repositoryId: repoId, number: 3, headSha: "h", trigger: "manual", status: "completed", verdict: "pass", startedAt: at(0), finishedAt: at(60) },
+        { repositoryId: repoId, number: 6, headSha: "h", trigger: "manual", status: "partial", verdict: "pass", startedAt: at(0), finishedAt: at(120) },
         { repositoryId: repoId, number: 4, headSha: "h", trigger: "manual", status: "superseded" },
         {
           repositoryId: repoId,
@@ -263,14 +267,14 @@ describe("GET /api/reviews/stats", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       days: 7,
-      runs: 3,
+      runs: 4,
       blocked: 1,
-      passed: 1,
+      passed: 2,
       failed: 1,
-      findings: { critical: 1, major: 1, minor: 2, info: 0 },
+      duration: { median: 90_000, max: 120_000 },
     });
 
-    expect((await request(app).get("/api/reviews/stats?days=30").set("Cookie", cookie)).body.runs).toBe(4);
+    expect((await request(app).get("/api/reviews/stats?days=30").set("Cookie", cookie)).body.runs).toBe(5);
 
     const other = await createUser("other@example.com");
     expect((await request(app).get("/api/reviews/stats").set("Cookie", other.cookie)).body.runs).toBe(0);
