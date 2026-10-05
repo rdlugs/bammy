@@ -485,7 +485,7 @@ function AddConnectionSheet({
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-md">
+      <SheetContent className="overflow-y-auto data-[side=right]:sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>Add connection</SheetTitle>
           <SheetDescription>Connect a code host to choose repositories to review.</SheetDescription>

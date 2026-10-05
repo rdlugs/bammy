@@ -1,23 +1,20 @@
-import type { ReactNode } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import { AlertTriangle, ArrowLeft, Bot, Copy, ExternalLink, Loader2, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { allFindingsPrompt } from "@/features/reviews/agentPrompt"
 import { fetchReviewMarkdown, useRerunReview, useReview } from "@/features/reviews/api"
 import { StatusBadge, VerdictBadge } from "@/features/reviews/badges"
 import { FindingsSection } from "@/features/reviews/detail/FindingsSection"
 import { ReviewSidebar } from "@/features/reviews/detail/ReviewSidebar"
+import { WalkthroughCard } from "@/features/reviews/detail/WalkthroughCard"
 import { PROVIDERS } from "@/features/forge/providers"
 import { changeLabel } from "@/features/reviews/links"
 import { copyToClipboard } from "@/lib/clipboard"
-import { MermaidDiagram } from "@/components/MermaidDiagram"
-import { ForgeMarkdown } from "@/features/config/ForgeMarkdown"
-import { isActive, type IssueAssessment, type IssueRef, type ReviewResult } from "@/features/reviews/types"
+import { isActive, type ReviewResult } from "@/features/reviews/types"
 
 function BackToReviews() {
   return (
@@ -27,111 +24,6 @@ function BackToReviews() {
         Back to reviews
       </Link>
     </Button>
-  )
-}
-
-const ASSESSMENT_LABEL: Record<IssueAssessment, string> = {
-  addressed: "Addressed",
-  partial: "Partly addressed",
-  not_addressed: "Not addressed",
-  unclear: "Unclear",
-}
-
-function IssueLink({ issue }: { issue: IssueRef }) {
-  const label = (
-    <>
-      <span className="font-mono text-xs">{issue.ref}</span> {issue.title}
-    </>
-  )
-  return issue.url && /^https?:\/\//.test(issue.url) ? (
-    <a href={issue.url} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
-      {label}
-    </a>
-  ) : (
-    <span>{label}</span>
-  )
-}
-
-function WalkthroughBlock({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="flex flex-col gap-2 border-t pt-4">
-      <h3 className="text-sm font-medium">{title}</h3>
-      {children}
-    </section>
-  )
-}
-
-function Walkthrough({
-  walkthrough,
-  provider,
-}: {
-  walkthrough: NonNullable<ReviewResult["walkthrough"]>
-  provider: ReviewResult["change"]["provider"]
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Walkthrough</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4 text-sm">
-        <p className="whitespace-pre-wrap">{walkthrough.overview}</p>
-        <div className="flex flex-wrap items-center gap-2">
-          {walkthrough.labels.map((label) => (
-            <Badge key={label} variant="secondary">
-              {label}
-            </Badge>
-          ))}
-          <span className="text-muted-foreground">Review effort {walkthrough.estimatedEffort}/5</span>
-        </div>
-        {walkthrough.fileSummaries.length > 0 && (
-          <dl className="grid gap-x-4 gap-y-2 border-t pt-4 sm:grid-cols-[minmax(0,16rem)_1fr]">
-            {walkthrough.fileSummaries.map((entry) => (
-              <div key={entry.path} className="contents">
-                <dt className="font-mono text-xs break-all text-muted-foreground sm:pt-0.5">{entry.path}</dt>
-                <dd className="mb-2 sm:mb-0">{entry.summary}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        {walkthrough.highLevelSummary && (
-          <WalkthroughBlock title="High-level summary">
-            <ForgeMarkdown provider={provider}>{walkthrough.highLevelSummary}</ForgeMarkdown>
-          </WalkthroughBlock>
-        )}
-        {walkthrough.sequenceDiagram && (
-          <WalkthroughBlock title="Sequence diagram">
-            <MermaidDiagram source={walkthrough.sequenceDiagram} />
-          </WalkthroughBlock>
-        )}
-        {walkthrough.linkedIssues && walkthrough.linkedIssues.length > 0 && (
-          <WalkthroughBlock title="Linked issues">
-            <ul className="flex flex-col gap-2">
-              {walkthrough.linkedIssues.map((issue) => (
-                <li key={issue.ref} className="flex flex-col gap-0.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <IssueLink issue={issue} />
-                    <Badge variant="outline">{ASSESSMENT_LABEL[issue.assessment]}</Badge>
-                  </div>
-                  {issue.note && <p className="text-muted-foreground">{issue.note}</p>}
-                </li>
-              ))}
-            </ul>
-          </WalkthroughBlock>
-        )}
-        {walkthrough.relatedIssues && walkthrough.relatedIssues.length > 0 && (
-          <WalkthroughBlock title="Possibly related issues">
-            <ul className="flex flex-col gap-1">
-              {walkthrough.relatedIssues.map((issue) => (
-                <li key={issue.ref}>
-                  <IssueLink issue={issue} />
-                  {issue.reason && <span className="text-muted-foreground">: {issue.reason}</span>}
-                </li>
-              ))}
-            </ul>
-          </WalkthroughBlock>
-        )}
-      </CardContent>
-    </Card>
   )
 }
 
@@ -152,7 +44,9 @@ function ResultView({ result }: { result: ReviewResult }) {
           </AlertDescription>
         </Alert>
       )}
-      {result.walkthrough && <Walkthrough walkthrough={result.walkthrough} provider={result.change.provider} />}
+      {result.walkthrough && (
+        <WalkthroughCard walkthrough={result.walkthrough} provider={result.change.provider} files={result.files} />
+      )}
       <FindingsSection result={result} />
     </>
   )

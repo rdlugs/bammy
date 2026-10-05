@@ -187,7 +187,7 @@ export function ConnectionDetailsSheet({
 
   return (
     <Sheet open={connection !== null} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-lg">
+      <SheetContent className="overflow-y-auto data-[side=right]:sm:max-w-lg">
         {connection && provider && (
           <>
             <SheetHeader>

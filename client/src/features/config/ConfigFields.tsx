@@ -24,8 +24,8 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { useApiKeys, useLlmModels } from "@/features/settings/api"
-import { LLM_PROVIDERS } from "@/features/settings/providers"
+import { useApiKeys, useLlmModels } from "@/features/llm-connections/api"
+import { LLM_PROVIDERS } from "@/features/llm-connections/providers"
 import { useConfigSchema, type ConfigOverride, type EffectiveConfig, type LlmProviderName } from "./api"
 import { ModelCombobox, type ModelSuggestions } from "./ModelCombobox"
 import { ReviewPreview } from "./ReviewPreview"
@@ -852,7 +852,7 @@ export function ConfigFields(props: {
                 description={
                   <>
                     Uses the latest key and API host configured in{" "}
-                    <Link className="underline underline-offset-4" to="/settings?tab=api-keys">Settings &gt; API keys</Link>.
+                    <Link className="underline underline-offset-4" to="/llm-connections">LLM Connections</Link>.
                   </>
                 }
                 effective={config && effective("llm.connection", configuredConnectionLabel(config.llm))}
@@ -862,8 +862,8 @@ export function ConfigFields(props: {
               {apiKeys.isSuccess && storedConnections.length === 0 && (
                 <p className="text-sm text-muted-foreground">
                   No saved connections. Add one in{" "}
-                  <Link className="underline underline-offset-4" to="/settings?tab=api-keys">
-                    Settings &gt; API keys
+                  <Link className="underline underline-offset-4" to="/llm-connections">
+                    LLM Connections
                   </Link>
                   .
                 </p>

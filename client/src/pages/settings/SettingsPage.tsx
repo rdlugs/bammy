@@ -1,10 +1,9 @@
 import type { ReactNode } from "react"
-import { useSearchParams } from "react-router"
-import { KeyRound, LockKeyhole, TriangleAlert, UserRound } from "lucide-react"
+import { Navigate, useSearchParams } from "react-router"
+import { LockKeyhole, TriangleAlert, UserRound } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/features/auth/useAuth"
-import { ApiKeysCard } from "@/features/settings/ApiKeysCard"
 import { DeleteAccount } from "@/features/settings/DeleteAccount"
 import { PasswordForm } from "@/features/settings/PasswordForm"
 import { ProfileForm } from "@/features/settings/ProfileForm"
@@ -12,7 +11,6 @@ import { ProfileForm } from "@/features/settings/ProfileForm"
 const TAB_ITEMS = [
   { value: "profile", label: "Profile", icon: UserRound },
   { value: "password", label: "Password", icon: LockKeyhole },
-  { value: "api-keys", label: "API keys", icon: KeyRound },
   { value: "account", label: "Account", icon: TriangleAlert },
 ] as const
 type Tab = (typeof TAB_ITEMS)[number]["value"]
@@ -32,20 +30,18 @@ function Section({ title, description, children }: { title: string; description:
 
 export function SettingsPage() {
   const { user } = useAuth()
-  // ?tab= keeps the open tab linkable, e.g. /settings?tab=api-keys.
+  // ?tab= keeps the open tab linkable, e.g. /settings?tab=password.
   const [params, setParams] = useSearchParams()
   const requested = params.get("tab")
   const tab = requested && TABS.includes(requested) ? (requested as Tab) : "profile"
 
+  // LLM connections moved to their own page; keep old bookmarks working.
+  if (requested === "api-keys") return <Navigate to="/llm-connections" replace />
   if (!user) return null
 
   return (
-    <main className="@container flex min-w-0 flex-1 flex-col p-4 sm:p-6">
-      <Tabs
-        orientation="vertical"
-        value={tab}
-        onValueChange={(value) => setParams({ tab: value }, { replace: true })}
-      >
+    <main className="flex min-w-0 flex-1 flex-col p-4 sm:p-6">
+      <Tabs value={tab} onValueChange={(value) => setParams({ tab: value }, { replace: true })}>
         <TabsList>
           {TAB_ITEMS.map((item) => (
             <TabsTrigger key={item.value} value={item.value}>
@@ -63,9 +59,6 @@ export function SettingsPage() {
           <Section title="Password" description="Choose a new password of at least 8 characters.">
             <PasswordForm />
           </Section>
-        </TabsContent>
-        <TabsContent value="api-keys">
-          <ApiKeysCard />
         </TabsContent>
         <TabsContent value="account">
           <Section title="Delete account" description="Remove your account and everything it owns.">

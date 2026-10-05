@@ -293,6 +293,19 @@ describe("Review detail page", () => {
     )
   })
 
+  it("collapses a long walkthrough file list until expanded", async () => {
+    const fileSummaries = Array.from({ length: 6 }, (_, i) => ({ path: `src/f${i}.ts`, summary: `Changes f${i}` }))
+    const walkthrough = { ...detail.result!.walkthrough!, fileSummaries }
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: { ...detail, result: { ...detail.result!, walkthrough } } } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const trigger = await screen.findByRole("button", { name: /Changed files\s*\(6\)/ })
+    expect(screen.getByRole("img", { name: "Review effort 2 of 5" })).toBeInTheDocument()
+    expect(screen.queryByText("Changes f0")).not.toBeInTheDocument()
+    await userEvent.click(trigger)
+    expect(screen.getByText("Changes f0")).toBeInTheDocument()
+  })
+
   it("says what was posted to the forge", async () => {
     const publication = {
       inlinePosted: [{ fingerprint: "a", forgeCommentId: "1" }, { fingerprint: "b", forgeCommentId: "2" }],

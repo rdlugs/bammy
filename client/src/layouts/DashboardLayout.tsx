@@ -3,6 +3,7 @@ import {
   ChevronsUpDown,
   FolderGit2,
   GitPullRequest,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Settings,
@@ -40,6 +41,7 @@ const NAV = [
   { to: "/reviews", label: "Reviews", icon: GitPullRequest },
   { to: "/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/configuration", label: "Configuration", icon: SlidersHorizontal },
+  { to: "/llm-connections", label: "LLM Connections", icon: KeyRound },
 ]
 
 function pageTitle(pathname: string) {

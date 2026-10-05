@@ -467,7 +467,7 @@ describe("Configuration page", () => {
     )
   })
 
-  it("requires a saved LLM connection and links to API key settings", async () => {
+  it("requires a saved LLM connection and links to the LLM Connections page", async () => {
     mockApi(
       globalRoutes({
         "GET /api/settings/api-keys": {
@@ -483,11 +483,13 @@ describe("Configuration page", () => {
     renderWithProviders(<App />, { route: "/configuration" })
 
     expect(await screen.findByText("Select an LLM connection")).toBeInTheDocument()
-    await waitFor(() => expect(screen.getAllByRole("link", { name: "Settings > API keys" })).toHaveLength(2))
-    const links = screen.getAllByRole("link", { name: "Settings > API keys" })
+    // Scoped to the page (the innermost main): the sidebar has its own LLM Connections link.
+    const page = screen.getAllByRole("main").at(-1)!
+    await waitFor(() => expect(within(page).getAllByRole("link", { name: "LLM Connections" })).toHaveLength(2))
+    const links = within(page).getAllByRole("link", { name: "LLM Connections" })
     expect(links[1]!.closest("p")).toHaveTextContent("No saved connections")
     for (const link of links) {
-      expect(link).toHaveAttribute("href", "/settings?tab=api-keys")
+      expect(link).toHaveAttribute("href", "/llm-connections")
     }
     expect(screen.getByRole("button", { name: "Save global config" })).toBeDisabled()
   })
