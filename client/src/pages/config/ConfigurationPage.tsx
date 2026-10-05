@@ -1,7 +1,10 @@
 import { useMemo } from "react"
 import { Link, useSearchParams } from "react-router"
-import { Globe, Plus } from "lucide-react"
+import { AlertTriangle, Globe, Plus } from "lucide-react"
+import { PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageShell"
 import { SearchableSelect, type SelectOptionGroup } from "@/components/SearchableSelect"
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -65,12 +68,19 @@ export function ConfigurationPage() {
   if (params.has("repo") && repos.isPending) body = <Skeleton className="h-96 w-full" />
   else if (selected) body = <RepoConfigForm key={selected.id} repo={selected} tab={tab} onTabChange={onTabChange} />
   else if (global.isPending) body = <Skeleton className="h-96 w-full" />
-  else if (global.isError) body = <p className="text-sm text-destructive">{global.error.message}</p>
+  else if (global.isError)
+    body = (
+      <Alert variant="destructive">
+        <AlertTriangle />
+        <AlertTitle>{global.error.message}</AlertTitle>
+      </Alert>
+    )
   else body = <GlobalConfigForm global={global.data} tab={tab} onTabChange={onTabChange} />
 
   return (
-    <main className="@container flex min-w-0 flex-1 flex-col gap-4 p-4 sm:p-6">
-      <div className="flex max-w-5xl flex-col gap-1.5">
+    <PageShell className="@container">
+      <PageHeader title="Configuration" description="Choose what reviews look for, how they are published and when they block." />
+      <div className="flex max-w-5xl flex-col gap-3 rounded-xl border bg-muted/30 p-4 compact:p-3 spacious:p-6">
         <div className="flex flex-wrap items-center gap-3">
           <Label htmlFor="config-scope">Scope</Label>
           <SearchableSelect
@@ -116,6 +126,6 @@ export function ConfigurationPage() {
       </div>
       {/* The Display tab splits the full width between its settings and the preview. */}
       <div className={cn("flex flex-col", tab !== "display" && "max-w-5xl")}>{body}</div>
-    </main>
+    </PageShell>
   )
 }

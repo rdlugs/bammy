@@ -2,6 +2,12 @@ import { BUCKET_ORDER } from "../core/buckets.ts";
 import type { Bucket, ReviewResult } from "../core/models.ts";
 import { SEVERITIES, type Severity } from "../core/severity.ts";
 
+export interface UsageTotals {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface ResultSummary {
   title: string;
   webUrl?: string;
@@ -9,6 +15,20 @@ export interface ResultSummary {
   bySeverity: Partial<Record<Severity, number>>;
   byBucket: Partial<Record<Bucket, number>>;
   hasBlocking: boolean;
+  // Token totals kept in the digest so stats can sum them without loading results.
+  usageTotals: UsageTotals;
+}
+
+// Sum the per-call token usage into one total.
+function usageTotals(result: ReviewResult): UsageTotals {
+  const tokens = result.usage.reduce(
+    (total, call) => ({
+      inputTokens: total.inputTokens + call.inputTokens,
+      outputTokens: total.outputTokens + call.outputTokens,
+    }),
+    { inputTokens: 0, outputTokens: 0 },
+  );
+  return { calls: result.usage.length, ...tokens };
 }
 
 // The digest stored beside the result, for lists that must not load results.
@@ -26,22 +46,16 @@ export function summarize(result: ReviewResult): ResultSummary {
     bySeverity: Object.fromEntries(SEVERITIES.filter((s) => bySeverity[s]).map((s) => [s, bySeverity[s]])),
     byBucket: Object.fromEntries(BUCKET_ORDER.filter((b) => byBucket[b]).map((b) => [b, byBucket[b]])),
     hasBlocking: result.verdict.blocking.length > 0,
+    usageTotals: usageTotals(result),
   };
 }
 
 // The result as the API serves it: everything stored, plus the summary and
 // token totals a client would otherwise recompute.
 export function toJson(result: ReviewResult) {
-  const tokens = result.usage.reduce(
-    (total, call) => ({
-      inputTokens: total.inputTokens + call.inputTokens,
-      outputTokens: total.outputTokens + call.outputTokens,
-    }),
-    { inputTokens: 0, outputTokens: 0 },
-  );
   return {
     ...result,
     summary: summarize(result),
-    usageTotals: { calls: result.usage.length, ...tokens },
+    usageTotals: usageTotals(result),
   };
 }

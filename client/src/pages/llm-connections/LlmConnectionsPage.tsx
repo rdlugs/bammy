@@ -1,9 +1,15 @@
+import { PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageShell"
 import { LlmConnectionsCard } from "@/features/llm-connections/LlmConnectionsCard"
 
 export function LlmConnectionsPage() {
   return (
-    <main className="flex flex-1 flex-col p-4 sm:p-6">
+    <PageShell>
+      <PageHeader
+        title="LLM Connections"
+        description="Provider credentials and custom API hosts that reviews run with."
+      />
       <LlmConnectionsCard />
-    </main>
+    </PageShell>
   )
 }

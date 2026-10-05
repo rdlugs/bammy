@@ -272,6 +272,8 @@ describe("GET /api/reviews/stats", () => {
       passed: 2,
       failed: 1,
       duration: { median: 90_000, max: 120_000 },
+      // Only the completed job carries a summary digest; the bare rows add nothing.
+      tokens: { calls: 2, inputTokens: 200, outputTokens: 40 },
     });
 
     expect((await request(app).get("/api/reviews/stats?days=30").set("Cookie", cookie)).body.runs).toBe(5);

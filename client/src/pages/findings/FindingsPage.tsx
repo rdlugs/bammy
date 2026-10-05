@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { AlertTriangle } from "lucide-react"
 import {
   ActiveFilterChips,
   FilterPopover,
@@ -7,7 +8,10 @@ import {
   SearchInput,
   type ActiveFilter,
 } from "@/components/TableFilters"
+import { PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageShell"
 import { TablePagination } from "@/components/TablePagination"
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useDebounced } from "@/hooks/use-debounced"
@@ -105,10 +109,13 @@ export function FindingsPage() {
   ].filter((filter): filter is ActiveFilter => filter.value !== null)
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-6">
+    <PageShell>
+      <PageHeader
+        title="Findings"
+        description="Issues raised across your reviews, tracked until they are resolved or ignored."
+      />
       <FindingStatsStrip />
       <FilterToolbar>
-        <div className="mr-auto" />
         <ActiveFilterChips filters={activeFilters} />
         <FilterPopover active={filtering} onClear={clearFilters}>
           <FilterSelect
@@ -159,7 +166,10 @@ export function FindingsPage() {
       {isPending ? (
         <Skeleton className="h-40 w-full" />
       ) : isError ? (
-        <p className="text-sm text-destructive">Could not load findings.</p>
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle>Could not load findings.</AlertTitle>
+        </Alert>
       ) : (
         <Card>
           <CardContent>
@@ -183,6 +193,6 @@ export function FindingsPage() {
         </Card>
       )}
       <FindingDetailsSheet row={opened} onOpenChange={(open) => !open && setOpened(null)} />
-    </main>
+    </PageShell>
   )
 }

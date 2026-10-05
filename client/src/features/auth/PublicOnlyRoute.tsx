@@ -9,7 +9,7 @@ export function PublicOnlyRoute() {
     return <FullPageSpinner />
   }
   if (user) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/home" replace />
   }
   return <Outlet />
 }

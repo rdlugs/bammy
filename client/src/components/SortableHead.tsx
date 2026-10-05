@@ -19,7 +19,14 @@ export function SortableHead<K extends string>({
   const next = dir === "asc" ? "Sort descending" : dir === "desc" ? "Remove sorting" : "Sort ascending"
   return (
     <TableHead aria-sort={dir ? (dir === "asc" ? "ascending" : "descending") : undefined}>
-      <Button variant="ghost" size="sm" className="-ml-2.5" title={next} onClick={() => onSort(sortKey)}>
+      <Button
+        variant="ghost"
+        size="sm"
+        // Matches plain TableHead text; compact:text-xs beats the sm size's compact override.
+        className="-ml-2.5 text-xs tracking-wide uppercase compact:text-xs"
+        title={next}
+        onClick={() => onSort(sortKey)}
+      >
         {label}
         <Icon className={dir ? undefined : "text-muted-foreground"} />
       </Button>

@@ -504,8 +504,8 @@ function ConnectedKeys({
       </FilterToolbar>
       <Card>
         <CardHeader>
-          <CardTitle>LLM connections</CardTitle>
-          <CardDescription>Reviews use these verified provider credentials and custom API hosts.</CardDescription>
+          <CardTitle>Connections</CardTitle>
+          <CardDescription>Only verified connections are used for reviews.</CardDescription>
           <CardAction>{addButton}</CardAction>
         </CardHeader>
         <CardContent>

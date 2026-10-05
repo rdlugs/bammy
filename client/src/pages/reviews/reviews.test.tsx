@@ -258,6 +258,7 @@ describe("Reviews page rows, filters and stats", () => {
         passed: 6,
         failed: 1,
         duration: { median: 102_000, max: 245_000 },
+        tokens: { calls: 18, inputTokens: 52_000, outputTokens: 9_400 },
       },
     })
     renderWithProviders(<App />, { route: "/reviews" })
@@ -270,6 +271,8 @@ describe("Reviews page rows, filters and stats", () => {
     expect(within(stats).getByText("Median review time")).toBeInTheDocument()
     expect(within(stats).getByText("1m 42s")).toBeInTheDocument()
     expect(within(stats).getByText("slowest 4m 05s")).toBeInTheDocument()
+    expect(within(stats).getByText("61.4K")).toBeInTheDocument()
+    expect(within(stats).getByText("52K in · 9.4K out")).toBeInTheDocument()
   })
 })
 

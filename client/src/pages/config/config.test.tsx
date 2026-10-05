@@ -186,7 +186,7 @@ const globalRoutes = (extra: Record<string, unknown> = {}) => ({
 describe("Configuration page", () => {
   it("is linked from the sidebar", async () => {
     mockApi(globalRoutes())
-    renderWithProviders(<App />, { route: "/dashboard" })
+    renderWithProviders(<App />, { route: "/home" })
 
     await userEvent.click(await screen.findByRole("link", { name: "Configuration" }))
 

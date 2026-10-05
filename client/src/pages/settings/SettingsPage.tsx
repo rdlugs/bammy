@@ -1,6 +1,8 @@
 import type { ReactNode } from "react"
 import { Navigate, useSearchParams } from "react-router"
 import { LockKeyhole, TriangleAlert, UserRound } from "lucide-react"
+import { PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageShell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/features/auth/useAuth"
@@ -18,7 +20,7 @@ const TABS: readonly string[] = TAB_ITEMS.map((item) => item.value)
 
 function Section({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <Card className="max-w-2xl">
+    <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
@@ -40,8 +42,9 @@ export function SettingsPage() {
   if (!user) return null
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col p-4 sm:p-6">
-      <Tabs value={tab} onValueChange={(value) => setParams({ tab: value }, { replace: true })}>
+    <PageShell>
+      <PageHeader title="Settings" description="Manage your profile, password and account." />
+      <Tabs className="max-w-3xl" value={tab} onValueChange={(value) => setParams({ tab: value }, { replace: true })}>
         <TabsList>
           {TAB_ITEMS.map((item) => (
             <TabsTrigger key={item.value} value={item.value}>
@@ -66,6 +69,6 @@ export function SettingsPage() {
           </Section>
         </TabsContent>
       </Tabs>
-    </main>
+    </PageShell>
   )
 }
