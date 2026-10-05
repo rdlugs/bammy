@@ -18,6 +18,7 @@ describe("summarize and toJson", () => {
       bySeverity: { critical: 1, major: 1, minor: 2 },
       byBucket: { actionable: 2, outside_diff: 1, nitpick: 1 },
       hasBlocking: true,
+      usageTotals: { calls: 2, inputTokens: 200, outputTokens: 40 },
     });
   });
 

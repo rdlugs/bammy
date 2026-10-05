@@ -1,9 +1,12 @@
 import type { ReactNode } from "react"
-import { CircleX, GitPullRequest, ShieldX, Timer, type LucideIcon } from "lucide-react"
+import { CircleX, Coins, GitPullRequest, ShieldX, Timer, type LucideIcon } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatDuration } from "@/lib/time"
 import { useReviewStats } from "./api"
+
+// Keep big token counts short, e.g. "1.2M", "48K".
+const compactTokens = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
 export function Stat({ label, icon: Icon, children }: { label: string; icon?: LucideIcon; children: ReactNode }) {
   return (
@@ -29,9 +32,10 @@ export function ReviewStatsStrip() {
   const blockedRate = finished ? Math.round((data.blocked / finished) * 100) : 0
   const period = `last ${data.days} days`
   const { median, max } = data.duration
+  const totalTokens = data.tokens.inputTokens + data.tokens.outputTokens
 
   return (
-    <section aria-label="Review stats" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <section aria-label="Review stats" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
       <Stat label={`Reviews, ${period}`} icon={GitPullRequest}>
         {data.runs}
       </Stat>
@@ -49,6 +53,12 @@ export function ReviewStatsStrip() {
         {max !== null && (
           <span className="ml-2 text-xs font-normal text-muted-foreground">slowest {formatDuration(max)}</span>
         )}
+      </Stat>
+      <Stat label={`Tokens, ${period}`} icon={Coins}>
+        {compactTokens.format(totalTokens)}
+        <span className="ml-2 text-xs font-normal text-muted-foreground">
+          {compactTokens.format(data.tokens.inputTokens)} in · {compactTokens.format(data.tokens.outputTokens)} out
+        </span>
       </Stat>
     </section>
   )

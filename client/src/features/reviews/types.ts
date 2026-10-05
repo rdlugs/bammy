@@ -51,6 +51,12 @@ export interface Omission {
   detail?: string
 }
 
+export interface UsageTotals {
+  calls: number
+  inputTokens: number
+  outputTokens: number
+}
+
 export interface ReviewSummary {
   title: string
   webUrl?: string
@@ -58,6 +64,8 @@ export interface ReviewSummary {
   bySeverity: Partial<Record<Severity, number>>
   byBucket: Partial<Record<Bucket, number>>
   hasBlocking: boolean
+  // Absent on runs stored before the digest carried token totals.
+  usageTotals?: UsageTotals
 }
 
 export interface ReviewResult {
@@ -153,6 +161,8 @@ export interface ReviewStats {
   failed: number
   // Milliseconds from start to finish of completed runs; null when none finished.
   duration: { median: number | null; max: number | null }
+  // Summed over the period; runs stored before token digests count as zero.
+  tokens: UsageTotals
 }
 
 export function isActive(status: JobStatus) {

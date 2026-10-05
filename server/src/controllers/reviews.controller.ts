@@ -191,13 +191,28 @@ export async function getReviewStats(req: Request, res: Response) {
       createdAt: { gte: since },
       status: { notIn: ["superseded", "skipped", "cancelled"] },
     },
-    select: { status: true, verdict: true, startedAt: true, finishedAt: true },
+    // summary is a small digest column; result (large) is never loaded here.
+    select: { status: true, verdict: true, startedAt: true, finishedAt: true, summary: true },
   });
   // Failed runs are left out: an error can end a run early and would make
   // reviews look faster than they are.
   const durations = jobs
     .filter((j) => (j.status === "completed" || j.status === "partial") && j.startedAt && j.finishedAt)
     .map((j) => j.finishedAt!.getTime() - j.startedAt!.getTime());
+  // Token totals come from each job's summary digest. Jobs reviewed before the
+  // digest carried usageTotals contribute nothing until they are re-run.
+  const tokens = jobs.reduce(
+    (total, job) => {
+      const usage = (job.summary as { usageTotals?: { calls?: number; inputTokens?: number; outputTokens?: number } } | null)
+        ?.usageTotals;
+      return {
+        calls: total.calls + (usage?.calls ?? 0),
+        inputTokens: total.inputTokens + (usage?.inputTokens ?? 0),
+        outputTokens: total.outputTokens + (usage?.outputTokens ?? 0),
+      };
+    },
+    { calls: 0, inputTokens: 0, outputTokens: 0 },
+  );
   res.json({
     days,
     runs: jobs.length,
@@ -205,6 +220,7 @@ export async function getReviewStats(req: Request, res: Response) {
     passed: jobs.filter((j) => j.verdict === "pass").length,
     failed: jobs.filter((j) => j.status === "failed").length,
     duration: { median: median(durations), max: durations.length ? Math.max(...durations) : null },
+    tokens,
   });
 }
 
