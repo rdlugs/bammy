@@ -123,6 +123,16 @@ describe("agent prompts", () => {
     expect(inlineBody(finding!, "github", { agentPrompt: false })).not.toContain("Prompt for AI agents");
   });
 
+  it("collapses the evidence between the suggestion and the agent prompt", async () => {
+    const [finding] = (await sampleResult()).findings;
+    const body = inlineBody({ ...finding!, evidenceNote: "Called with user input.", suggestion: "const fixed = true;\n" }, "github");
+    expect(body).not.toContain("<sub>Evidence");
+    const evidence = body.indexOf("<summary>Evidence</summary>");
+    expect(evidence).toBeGreaterThan(body.indexOf("```suggestion"));
+    expect(evidence).toBeLessThan(body.indexOf("Prompt for AI agents"));
+    expect(body).toContain("Called with user input.");
+  });
+
   it("names the file and lines and carries the suggested fix", async () => {
     const result = await sampleResult();
     const finding = { ...result.findings[0]!, title: "Plain title", startLine: 3, endLine: 5, suggestion: "const fixed = true;\n" };

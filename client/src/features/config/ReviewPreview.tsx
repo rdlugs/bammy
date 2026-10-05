@@ -1,5 +1,15 @@
 import { useState, type ReactNode } from "react"
-import { CircleCheck, CircleDot, CircleX, Clock, GitPullRequest, MessageSquareOff, RotateCcw } from "lucide-react"
+import {
+  CircleCheck,
+  CircleDot,
+  CircleX,
+  Clock,
+  FileCode,
+  GitPullRequest,
+  MessageSquare,
+  MessageSquareOff,
+  RotateCcw,
+} from "lucide-react"
 import { SearchableSelect } from "@/components/SearchableSelect"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -23,6 +33,15 @@ type Inline = PreviewPublication["inline"][number]
 type Status = NonNullable<PreviewPublication["status"]>
 
 const FORGES = PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDERS[id].label, icon: PROVIDERS[id].icon }))
+
+// The summary and the inline threads are previewed one at a time so neither
+// is pushed below the fold by the other.
+type View = "summary" | "inline"
+
+const VIEWS = [
+  { value: "summary", label: "Summary", icon: MessageSquare },
+  { value: "inline", label: "In-line", icon: FileCode },
+]
 
 // Stand-ins for the colours a project gives its labels.
 const LABEL_COLOURS = [
@@ -200,27 +219,55 @@ function PageHeader({ preview }: { preview: PreviewPublication }) {
   )
 }
 
-function ForgePage({ preview }: { preview: PreviewPublication }) {
+function NothingPosted({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed bg-background p-6 text-center text-sm text-muted-foreground">
+      <MessageSquareOff className="size-5" />
+      {children}
+    </div>
+  )
+}
+
+function ForgePage({ preview, view }: { preview: PreviewPublication; view: View }) {
   const { pr, provider } = preview
   const github = provider === "github"
-  const nothing =
-    !preview.summaryComment &&
-    !preview.walkthroughComment &&
-    !preview.status &&
-    preview.inline.length === 0 &&
-    pr.labels.length === 0
+
+  if (view === "inline") {
+    // One thread shows the format; the sample change has several findings,
+    // and repeating them only makes the preview longer.
+    const [example] = preview.inline
+    return (
+      <div className="flex flex-col gap-3">
+        <PageHeader preview={preview} />
+        {!example ? (
+          <NothingPosted>Bammy posts no inline comments on the diff.</NothingPosted>
+        ) : (
+          <>
+            <Note
+              provider={provider}
+              label="Inline comments"
+              author="bammy"
+              bot
+              action={github ? "reviewed" : "started a thread on the diff"}
+            >
+              <InlineThread provider={provider} comment={example} />
+            </Note>
+            <p className="text-xs text-muted-foreground">
+              One example. Bammy posts a thread like this for each finding on the diff.
+            </p>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  const nothing = !preview.summaryComment && !preview.walkthroughComment && !preview.status && pr.labels.length === 0
   return (
     <div className="flex flex-col gap-3">
       <PageHeader preview={preview} />
       {/* GitLab shows the status in the merge request widget, above the activity. */}
       {!github && preview.status && <StatusRow provider={provider} status={preview.status} />}
-      {nothing && (
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed bg-background p-6 text-center text-sm text-muted-foreground">
-          <MessageSquareOff className="size-5" />
-          Bammy posts nothing to the change. Reviews still show up in the dashboard.
-        </div>
-      )}
-      {/* The summary is posted before the inline comments, so it sits at the top. */}
+      {nothing && <NothingPosted>Bammy posts no summary to the change. Reviews still show up in the dashboard.</NothingPosted>}
       {preview.summaryComment && (
         <Note provider={provider} label="Summary comment" author="bammy" bot action="commented">
           <ForgeMarkdown provider={provider}>{preview.summaryComment}</ForgeMarkdown>
@@ -229,21 +276,6 @@ function ForgePage({ preview }: { preview: PreviewPublication }) {
       {preview.walkthroughComment && (
         <Note provider={provider} label="PR summary comment" author="bammy" bot action="commented">
           <ForgeMarkdown provider={provider}>{preview.walkthroughComment}</ForgeMarkdown>
-        </Note>
-      )}
-      {preview.inline.length > 0 && (
-        <Note
-          provider={provider}
-          label="Inline comments"
-          author="bammy"
-          bot
-          action={github ? "reviewed" : `started ${preview.inline.length} threads on the diff`}
-        >
-          <div className="flex flex-col gap-4">
-            {preview.inline.map((comment) => (
-              <InlineThread key={`${comment.path}:${comment.startLine}`} provider={provider} comment={comment} />
-            ))}
-          </div>
         </Note>
       )}
       {github && preview.status && <StatusRow provider={provider} status={preview.status} />}
@@ -255,19 +287,32 @@ function ForgePage({ preview }: { preview: PreviewPublication }) {
 // last good preview then stays up.
 export function ReviewPreview({ request }: { request: Omit<PreviewRequest, "provider"> | null }) {
   const [provider, setProvider] = useState<ForgeProvider>("github")
+  // Only filters the loaded preview, so switching never refetches.
+  const [view, setView] = useState<View>("summary")
   const preview = useConfigPreview(request && { provider, ...request })
 
   return (
     <div className="flex flex-col gap-3">
-      <Field className="w-full sm:w-56">
-        <FieldLabel htmlFor="preview-forge">Forge</FieldLabel>
-        <SearchableSelect
-          id="preview-forge"
-          value={provider}
-          onValueChange={(value) => setProvider(value as ForgeProvider)}
-          options={FORGES}
-        />
-      </Field>
+      <div className="flex flex-wrap gap-3">
+        <Field className="w-full sm:w-56">
+          <FieldLabel htmlFor="preview-forge">Forge</FieldLabel>
+          <SearchableSelect
+            id="preview-forge"
+            value={provider}
+            onValueChange={(value) => setProvider(value as ForgeProvider)}
+            options={FORGES}
+          />
+        </Field>
+        <Field className="w-full sm:w-56">
+          <FieldLabel htmlFor="preview-view">View</FieldLabel>
+          <SearchableSelect
+            id="preview-view"
+            value={view}
+            onValueChange={(value) => setView(value as View)}
+            options={VIEWS}
+          />
+        </Field>
+      </div>
       {!request && preview.data && (
         <p className="text-xs text-muted-foreground">Fix the highlighted fields to update the preview.</p>
       )}
@@ -281,7 +326,7 @@ export function ReviewPreview({ request }: { request: Omit<PreviewRequest, "prov
         </div>
       ) : preview.data ? (
         <div className={cn("transition-opacity", preview.isPlaceholderData && "opacity-60")}>
-          <ForgePage preview={preview.data} />
+          <ForgePage preview={preview.data} view={view} />
         </div>
       ) : (
         <div aria-label="Loading preview" className="flex flex-col gap-3">
