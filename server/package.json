@@ -1,6 +1,6 @@
 {
   "name": "bammy-server",
-  "version": "1.0.0",
+  "version": "0.1.0-alpha.1",
   "description": "Bammy API",
   "directories": {
     "test": "tests"
@@ -15,7 +15,7 @@
     "db:deploy": "prisma migrate deploy",
     "test": "DATABASE_URL=$TEST_DATABASE_URL NODE_ENV=test sh -c \"prisma migrate deploy && vitest run\""
   },
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.71",
@@ -56,5 +56,9 @@
     "argon2@0.45.1": true,
     "esbuild@0.28.2": true,
     "prisma@7.10.0": true
+  },
+  "overrides": {
+    "mysql2": "^3.24.5",
+    "deepmerge-ts": "^8.0.2"
   }
 }

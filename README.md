@@ -1,6 +1,18 @@
 # Bammy
 
-React + shadcn/ui single-page app with user registration, login and a protected (empty) dashboard, backed by an Express + Prisma API on PostgreSQL.
+Bammy is an AI code reviewer for GitHub pull requests and GitLab merge requests.
+Connect repositories, choose a model provider or Ollama, and run manual or
+automatic reviews with inline findings, walkthroughs, and commit statuses. The
+dashboard tracks reviews and findings across runs.
+
+**Status: alpha.** Features and configuration may evolve. AI findings need human
+verification and can miss problems or report false positives. The included Docker
+setup is for development, not public production hosting.
+
+Licensed under [MIT](LICENSE), with [third-party notices](THIRD_PARTY_NOTICES.md).
+See [contributing](CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md), and
+[security and data handling](SECURITY.md). Release notes are in the
+[changelog](CHANGELOG.md).
 
 ## Stack
 
@@ -23,6 +35,7 @@ Requires Docker with Compose.
 ```sh
 cp .env.example .env
 # set JWT_SECRET and ENCRYPTION_KEY, each with: openssl rand -hex 32
+# keep NODE_ENV=development for the local HTTP setup
 docker compose up --build
 ```
 
@@ -38,6 +51,79 @@ when either `package.json` or `package-lock.json` changes.
 If you change `CLIENT_HOST_PORT`, update `CLIENT_ORIGIN` to match.
 
 Migrations are applied automatically when the `server` container starts.
+
+Check startup without opening a browser:
+
+```sh
+curl --fail http://localhost:4000/api/health
+```
+
+Use your configured `API_HOST_PORT` if it differs. A ready API returns
+`{"status":"ok"}`. The database lives in a persistent Docker volume; rebuilding
+images does not delete it.
+
+### Docker runtime environment
+
+Set `NODE_ENV` in `.env`; the API and worker both use it, defaulting to
+`development` when omitted or empty. Recreate affected services after changing it:
+
+```sh
+docker compose up -d server worker
+```
+
+| Value | API and worker behavior |
+| ----- | ----------------------- |
+| `development` | Local HTTP authentication cookies; local/private forge hosts are allowed. |
+| `production` | Secure authentication cookies, and existing HTTPS/public-address checks for self-hosted forge hosts. Use an HTTPS client origin. |
+
+`test` is reserved for automated tests; the server test script sets it explicitly.
+Other values fail startup validation. `production` does not switch Docker
+commands, disable watchers, build/serve the frontend, or provide HTTPS. The client
+still runs Vite's development server. Production deployment infrastructure is
+deferred; do not expose this Compose setup publicly.
+
+### Run your first review
+
+1. Open the client URL and register an account.
+2. In **LLM Connections**, add and verify a model provider key, or configure
+   [Ollama](#ollama). External providers may charge for model usage.
+3. In **Configuration**, select that connection and a model available to it.
+4. In **Repositories**, connect GitLab or install your configured GitHub App using
+   the [forge setup](#forge-connections), then add a repository for review.
+5. In **Reviews**, submit the URL of an open PR/MR on that repository. The worker
+   processes it and the detail page shows results or the reason it failed.
+
+Default publishing can post comments and statuses and update the description.
+For an initial evaluation, use a test repository or disable publishing in
+Configuration before running the review. Manual reviews do not require an
+internet-reachable webhook URL; automatic reviews do.
+
+See the [synthetic review output fixture](server/tests/__snapshots__/review.md)
+for a rendered markdown example. It exercises presentation and is not a real
+review or evidence of model accuracy.
+
+### Troubleshooting
+
+- **Startup validation fails:** set a JWT secret of at least 32 characters and
+  an encryption key of exactly 64 hexadecimal characters. Generate each with
+  `openssl rand -hex 32`. Keep the encryption key stable for existing credentials.
+- **A port is occupied:** change the corresponding host port in `.env`; changing
+  the client port also requires updating `CLIENT_ORIGIN`.
+- **Login fails after switching to production:** production cookies require
+  HTTPS. Use `development` for the supplied local HTTP setup.
+- **GitHub connection is unavailable:** configure the complete GitHub App setup,
+  including OAuth installation confirmation.
+- **Manual reviews work but automatic ones do not:** check webhook reachability,
+  forge permissions, and trigger settings. GitLab hook creation needs Maintainer.
+- **A model endpoint is unreachable:** inside Docker, `localhost` refers to the
+  container. Use `host.docker.internal` for a service on the host and check its
+  listen address and firewall.
+- **Database tests cannot find `bammy_test`:** the Postgres init script runs only
+  when the database volume is first initialized. An older volume may need an
+  operator-created test database. Do not delete a volume containing needed data.
+- **A review is failed or partial:** inspect its detail page and redacted
+  `docker compose logs --tail 100 server worker` output for provider, permissions,
+  or publishing errors. Never post credentials or private code in an issue.
 
 The `worker` container runs review jobs: it fetches the PR/MR, resolves the review configuration, sends the diff to the configured model in one or more passes (plus an optional walkthrough), validates the findings and stores the result on the job. Model keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`, unless the repository owner has stored their own. The worker polls the `review_jobs` table (claimed with `FOR UPDATE SKIP LOCKED`, so several workers can run side by side); tune it with `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_LOCK_TIMEOUT_MS` and `WORKER_MAX_ATTEMPTS`.
 
@@ -128,17 +214,17 @@ A field set explicitly in any layer beats the profile. An invalid repository fil
 
 ### LLM connections and custom endpoints
 
-Add and verify provider credentials in Settings > API keys, then select one in Configuration > LLM. Global configuration requires a connection; a repository can inherit it or select another saved connection. The selection is a live reference, so replacing its key or changing its custom host in Settings updates every configuration that uses it.
+Add and verify provider credentials in LLM Connections, then select one in Configuration > LLM. Global configuration requires a connection; a repository can inherit it or select another saved connection. The selection is a live reference, so replacing its key or changing its custom host updates every configuration that uses it.
 
 A connection with a custom host sends every model call to that compatible proxy. The model's provider prefix still picks the request format (`openai/` uses chat completions), and the rest of the id is passed through as is, slashes and parentheses included. Without a custom host, every configured model must use the selected connection's provider.
 
-For 9router, save its key and host under OpenAI in Settings > API keys, select the OpenAI connection in Configuration > LLM, and use a model such as `openai/cx/gpt-5.6-sol(medium)`.
+For 9router, save its key and host under OpenAI in LLM Connections, select the OpenAI connection in Configuration > LLM, and use a model such as `openai/cx/gpt-5.6-sol(medium)`.
 
 The worker runs in a container, where `localhost` is the container itself; `host.docker.internal` reaches a proxy running on the host.
 
 ### Ollama
 
-Add Ollama under Settings > API keys and enter its OpenAI-compatible base URL. For Ollama running on the Docker host, use `http://host.docker.internal:11434/v1`. The API key is optional. Select the Ollama connection in Configuration > LLM and use the `ollama/<model>` form, for example `ollama/qwen3`.
+Add Ollama under LLM Connections and enter its OpenAI-compatible base URL. For Ollama running on the Docker host, use `http://host.docker.internal:11434/v1`. The API key is optional. Select the Ollama connection in Configuration > LLM and use the `ollama/<model>` form, for example `ollama/qwen3`.
 
 ```yaml
 # .bammy.yaml - every key is optional
@@ -199,6 +285,9 @@ language_instructions:
 docker compose exec server npm test   # API tests against the bammy_test database
 docker compose exec client npm test   # React component and routing tests
 ```
+
+GitHub Actions also runs type checks, client lint, and the client production
+build inside Docker. See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete checks.
 
 ## Database changes
 
