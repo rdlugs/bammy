@@ -254,7 +254,7 @@ describe("budget and prompt", () => {
 });
 
 describe("generateWithFallback", () => {
-  it("tries models in order and reports the last error", async () => {
+  it("tries models in order and reports every model's error", async () => {
     const tried: string[] = [];
     const generate = (async (request: { model: string }) => {
       tried.push(request.model);
@@ -264,7 +264,9 @@ describe("generateWithFallback", () => {
 
     const ok = await generateWithFallback(generate, ["anthropic/a", "openai/b"], {} as never);
     expect(ok.model).toBe("openai/b");
-    await expect(generateWithFallback(generate, ["anthropic/a", "google/c"], {} as never)).rejects.toThrow("google/c down");
+    await expect(generateWithFallback(generate, ["anthropic/a", "google/c"], {} as never)).rejects.toThrow(
+      "anthropic/a: anthropic/a down | google/c: google/c down",
+    );
     expect(tried).toEqual(["anthropic/a", "openai/b", "anthropic/a", "google/c"]);
   });
 });

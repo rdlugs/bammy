@@ -1,8 +1,9 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, Output, type LanguageModel } from "ai";
+import { generateText, NoObjectGeneratedError, Output, type LanguageModel } from "ai";
 import type { z } from "zod";
+import { excerpt, formatInstruction, parseLenient } from "./format.ts";
 
 export const PROVIDERS = ["anthropic", "openai", "google", "ollama"] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
@@ -39,12 +40,20 @@ export function missingKeys(
   return [...new Set(models.map(providerOf))].filter((provider) => !keys[provider] && !baseUrls[provider]);
 }
 
+interface ResolvedModel {
+  model: LanguageModel;
+  // Whether the provider itself enforces the output schema. Proxies may drop
+  // `response_format` silently (9router does), so anything behind a base URL
+  // is asked for JSON in the prompt and parsed leniently instead.
+  native: boolean;
+}
+
 function languageModel(
   model: string,
   keys: ApiKeys,
   endpoint?: Endpoint,
   baseUrls: ProviderBaseUrls = {},
-): LanguageModel {
+): ResolvedModel {
   const provider = providerOf(model);
   const modelId = model.slice(provider.length + 1);
   const baseURL = endpoint?.baseUrl ?? baseUrls[provider];
@@ -52,20 +61,21 @@ function languageModel(
     ? (endpoint.apiKey ?? keys[provider] ?? NO_KEY)
     : (keys[provider] ?? (baseURL ? NO_KEY : undefined));
   if (!apiKey) throw new Error(`No API key for ${provider}`);
+  const native = !baseURL;
   switch (provider) {
     case "anthropic":
-      return createAnthropic({ apiKey, baseURL })(modelId);
+      return { model: createAnthropic({ apiKey, baseURL })(modelId), native };
     case "openai": {
       const openai = createOpenAI({ apiKey, baseURL });
       // OpenAI-compatible proxies speak chat completions, not the Responses API
       // the SDK defaults to.
-      return baseURL ? openai.chat(modelId) : openai(modelId);
+      return { model: baseURL ? openai.chat(modelId) : openai(modelId), native };
     }
     case "google":
-      return createGoogleGenerativeAI({ apiKey, baseURL })(modelId);
+      return { model: createGoogleGenerativeAI({ apiKey, baseURL })(modelId), native };
     case "ollama": {
       const ollama = createOpenAI({ apiKey, baseURL });
-      return ollama.chat(modelId);
+      return { model: ollama.chat(modelId), native: false };
     }
   }
 }
@@ -78,6 +88,9 @@ export interface GenerateRequest<T> {
   schemaName: string;
   temperature: number;
   maxOutputTokens: number;
+  // Fixes predictable model mistakes in a reply the provider did not enforce
+  // the schema on, before it is validated.
+  repair?: (raw: unknown) => unknown;
 }
 
 export interface GenerateResponse<T> {
@@ -91,41 +104,75 @@ export interface GenerateResponse<T> {
 // The one seam between the engine and a model provider. Tests pass their own.
 export type Generate = <T>(request: GenerateRequest<T>) => Promise<GenerateResponse<T>>;
 
+function failure(reason: string, text: string | undefined): Error {
+  return new Error(`No object generated: ${reason}. Reply: ${excerpt(text)}`);
+}
+
 export function createGenerate(keys: ApiKeys, endpoint?: Endpoint, baseUrls: ProviderBaseUrls = {}): Generate {
   return async <T>(request: GenerateRequest<T>): Promise<GenerateResponse<T>> => {
     const started = Date.now();
-    const result = await generateText({
-      model: languageModel(request.model, keys, endpoint, baseUrls),
-      system: request.system,
+    const { model, native } = languageModel(request.model, keys, endpoint, baseUrls);
+    const call = {
+      model,
+      // The format goes in the prompt even when the provider enforces it, so a
+      // reply that slips past enforcement is still likely to parse.
+      system: `${request.system}\n\n${formatInstruction(request.schema, request.schemaName)}`,
       prompt: request.prompt,
       temperature: request.temperature,
       maxOutputTokens: request.maxOutputTokens,
-      output: Output.object({ schema: request.schema, name: request.schemaName }),
-    });
-    return {
-      object: result.output as T,
-      model: request.model,
-      inputTokens: result.usage.inputTokens ?? 0,
-      outputTokens: result.usage.outputTokens ?? 0,
-      latencyMs: Date.now() - started,
     };
+    const respond = (object: T, usage: { inputTokens?: number; outputTokens?: number } | undefined) => ({
+      object,
+      model: request.model,
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+      latencyMs: Date.now() - started,
+    });
+    const lenient = (text: string | undefined) => {
+      try {
+        return parseLenient(text ?? "", request.schema, request.repair);
+      } catch (err) {
+        throw failure(err instanceof Error ? err.message : String(err), text);
+      }
+    };
+
+    if (!native) {
+      const result = await generateText(call);
+      return respond(lenient(result.text), result.usage);
+    }
+    try {
+      const result = await generateText({
+        ...call,
+        output: Output.object({ schema: request.schema, name: request.schemaName }),
+      });
+      return respond(result.output as T, result.usage);
+    } catch (err) {
+      // A near-miss the provider let through is repaired rather than lost.
+      if (NoObjectGeneratedError.isInstance(err)) return respond(lenient(err.text), err.usage);
+      throw err;
+    }
   };
 }
 
-// Tries the primary model, then each fallback in order. The last error wins so
-// the message names the final thing that was tried.
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// Tries the primary model, then each fallback in order. Every model's error is
+// kept so the primary's failure is not hidden behind the last fallback's.
 export async function generateWithFallback<T>(
   generate: Generate,
   models: string[],
   request: Omit<GenerateRequest<T>, "model">,
 ): Promise<GenerateResponse<T>> {
-  let lastError: unknown;
+  const errors: unknown[] = [];
   for (const model of models) {
     try {
       return await generate({ ...request, model });
     } catch (err) {
-      lastError = err;
+      errors.push(err);
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  if (errors.length === 1) throw errors[0] instanceof Error ? errors[0] : new Error(message(errors[0]));
+  throw new Error(errors.map((err, i) => `${models[i]}: ${message(err)}`).join(" | "));
 }

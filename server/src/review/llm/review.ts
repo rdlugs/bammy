@@ -3,7 +3,7 @@ import type { ChangeSet, LlmUsage } from "../core/models.ts";
 import type { Chunk } from "../context/chunk.ts";
 import { reviewSystemPrompt, reviewUserPrompt } from "./prompt.ts";
 import { generateWithFallback, type Generate } from "./providers.ts";
-import { reviewOutputSchema, type ModelFinding } from "./schemas.ts";
+import { repairReviewOutput, reviewOutputSchema, type ModelFinding } from "./schemas.ts";
 
 export interface ChunkReview {
   findings: ModelFinding[];
@@ -22,6 +22,7 @@ export async function reviewChunk(
     prompt: reviewUserPrompt(changeSet, chunk, totalChunks, config),
     schema: reviewOutputSchema,
     schemaName: "code_review",
+    repair: repairReviewOutput,
     temperature: config.llm.temperature,
     maxOutputTokens: config.llm.maxTokens,
   });

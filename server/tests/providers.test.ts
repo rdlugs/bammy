@@ -71,6 +71,93 @@ describe("createGenerate with an endpoint", () => {
   });
 });
 
+// The reply 9router gave to a strict json_schema request: it dropped the schema.
+const PROSE_REPLY =
+  "Added a null check in `UserService.php` before accessing `$user->email`, preventing null-reference errors when no user is found.";
+
+describe("createGenerate behind a proxy", () => {
+  const router = () => createGenerate({}, { baseUrl: "http://router.test/v1", apiKey: "router-key" });
+  const stubReply = (content: string) => {
+    const stub = fetchStub([
+      { method: "POST", url: /^http:\/\/router\.test\/v1\/chat\/completions$/, body: chatCompletion(content) },
+    ]);
+    vi.stubGlobal("fetch", stub.fetch);
+    return stub;
+  };
+
+  it("describes the schema in the prompt instead of relying on response_format", async () => {
+    const { calls } = stubReply('{"ok":true}');
+
+    await router()(request("openai/cx/gpt-5.6-sol"));
+
+    const body = JSON.parse(calls[0]!.body!);
+    expect(body.response_format).toBeUndefined();
+    expect(body.messages[0].role).toBe("system");
+    expect(body.messages[0].content).toContain("Respond with a single JSON object only");
+    expect(body.messages[0].content).toContain('"ok":{"type":"boolean"}');
+  });
+
+  it("parses JSON wrapped in prose and a code fence", async () => {
+    stubReply('Here is the result:\n```json\n{"ok": true}\n```\nDone.');
+
+    const response = await router()(request("openai/cx/gpt-5.6-sol"));
+
+    expect(response.object).toEqual({ ok: true });
+    expect(response.inputTokens).toBe(12);
+  });
+
+  it("applies the request's repair before validating", async () => {
+    stubReply('{"OK": "yes"}');
+
+    const response = await router()({
+      ...request("openai/cx/gpt-5.6-sol"),
+      repair: (raw) => ({ ok: (raw as { OK: string }).OK === "yes" }),
+    });
+
+    expect(response.object).toEqual({ ok: true });
+  });
+
+  it("fails a prose reply with an excerpt of what came back", async () => {
+    stubReply(PROSE_REPLY);
+
+    await expect(router()(request("openai/cx/gpt-5.6-sol"))).rejects.toThrow(
+      /No object generated: reply contained no JSON object\. Reply: Added a null check/,
+    );
+  });
+});
+
+describe("createGenerate against an official API", () => {
+  it("keeps the provider's structured output", async () => {
+    const { fetch, calls } = fetchStub([
+      {
+        method: "POST",
+        url: /^https:\/\/api\.openai\.com\/v1\/responses$/,
+        body: {
+          id: "resp_1",
+          created_at: 0,
+          model: "gpt-5.5",
+          output: [
+            {
+              type: "message",
+              id: "msg_1",
+              role: "assistant",
+              status: "completed",
+              content: [{ type: "output_text", text: '{"ok":true}', annotations: [] }],
+            },
+          ],
+          usage: { input_tokens: 10, output_tokens: 2 },
+        },
+      },
+    ]);
+    vi.stubGlobal("fetch", fetch);
+
+    const response = await createGenerate({ openai: "sk-real" })(request("openai/gpt-5.5"));
+
+    expect(response.object).toEqual({ ok: true });
+    expect(JSON.parse(calls[0]!.body!).text.format).toMatchObject({ type: "json_schema", name: "result" });
+  });
+});
+
 describe("missingKeys", () => {
   it("asks for no key behind an endpoint", () => {
     const models = ["openai/gpt-5", "anthropic/claude-sonnet-5-5"];
