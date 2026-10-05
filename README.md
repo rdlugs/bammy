@@ -91,12 +91,11 @@ In production, self-hosted forge hosts must use https and resolve to public addr
 When a review starts, Bammy posts a "reviewing" summary comment and sets a pending `bammy/review` commit status. When it finishes it publishes, each step independently:
 
 - **Inline comments** for actionable findings only (GitHub: one review posted as `COMMENT`, never approve or request changes; GitLab: one discussion per finding). Suggestions use each forge's suggestion syntax. Each comment carries a hidden fingerprint, so a later run never posts the same finding twice, even if Bammy's own records are lost.
-- **The summary comment**, edited in place: the markdown served by `GET /api/reviews/:id/markdown`, minus the walkthrough, which is published on its own.
-- **The PR summary** (the walkthrough), placed by `output.summary_location`: `description` keeps a marked block at the end of the PR/MR description (the author's text is left alone and a later run replaces only that block), `comment` posts and then edits a comment of its own, and `dynamic` (the default) uses the description only when the author left it empty.
-- **Labels**, when `output.blast_radius_label` or `output.effort_label` is on: the walkthrough's estimates as native labels such as `Large blast radius` or `10-20 Minutes`. A later run swaps a changed estimate's label. GitHub and GitLab only; on GitHub both labels and description edits use the Pull requests (write) permission.
+- **The summary comment**, edited in place: the markdown served by `GET /api/reviews/:id/markdown`. One comment carries both what the change does (the walkthrough, when `output.walkthrough` is on) and what the review found. It ends with a line naming the commit, models and coverage, which `output.review_stats` turns off. With `output.post_summary` off, the walkthrough is posted as a comment of its own. Bammy no longer writes into the PR/MR description; a block an earlier version left there is removed on the next review, and `output.summary_location` is accepted but ignored.
+- **Labels**, when `output.blast_radius_label` or `output.effort_label` is on: the walkthrough's estimates as native labels such as `Large blast radius` or `10-20 Minutes`. A later run swaps a changed estimate's label. GitHub and GitLab only; on GitHub both labels and the cleanup of old description blocks use the Pull requests (write) permission.
 - **The commit status**: `success` (pass), `failure` (blocked) or `error` (incomplete; GitLab shows it as `failed`), linking to the review in the dashboard. Branch protection can require it.
 
-Turn the first three off with `output.post_inline`, `output.post_summary` and `output.post_check`, and the PR summary with `output.walkthrough`. If publishing fails, the review is kept and the job is marked partial with the reason.
+Turn the first three off with `output.post_inline`, `output.post_summary` and `output.post_check`, and the walkthrough with `output.walkthrough`. If publishing fails, the review is kept and the job is marked partial with the reason.
 
 ## Automatic reviews
 
@@ -159,7 +158,9 @@ output:
   post_inline: true
   post_summary: true
   post_check: true
-  summary_location: dynamic # dynamic | description | comment
+  review_stats: true        # the commit/models/coverage line under the summary
+  agent_prompts: true       # a prompt for AI agents in each actionable inline comment
+  agent_prompt_all: true    # one prompt for every finding in the summary comment
   blast_radius_label: false # e.g. "Large blast radius"
   effort_label: false       # e.g. "10-20 Minutes"
 triggers:

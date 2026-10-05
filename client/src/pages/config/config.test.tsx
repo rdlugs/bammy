@@ -33,7 +33,9 @@ const effective = {
     postInline: true,
     postSummary: true,
     postCheck: true,
-    summaryLocation: "dynamic",
+    reviewStats: true,
+    agentPrompts: true,
+    agentPromptAll: true,
     blastRadiusLabel: false,
     effortLabel: false,
   },
@@ -112,13 +114,11 @@ const PREVIEW = {
     author: "ada",
     sourceBranch: "feature/user-lookup",
     targetBranch: "main",
-    description:
-      "<!-- bammy:walkthrough:start -->\n## Bammy summary\n\nAdds a lookup endpoint.\n<!-- bammy:walkthrough:end -->\n",
     labels: ["Medium blast radius"],
   },
   status: { state: "failure", description: "1 finding at or above critical" },
   summaryComment:
-    "## Bammy review\n\n⛔ **Blocked**: 1 finding at or above critical.\n\n<details>\n<summary>Actionable comments (1)</summary>\n\n- SQL\n\n</details>\n\n<!-- bammy:summary -->\n",
+    "## Summary\n\nAdds a lookup endpoint.\n\n⛔ **Blocked**: 1 finding at or above critical.\n\n<details>\n<summary>Actionable comments (1)</summary>\n\n- SQL\n\n</details>\n\n<!-- bammy:summary -->\n",
   walkthroughComment: null,
   inline: [
     {
@@ -375,8 +375,8 @@ describe("Configuration page", () => {
     expect(screen.getByRole("button", { name: "Remove Draft" })).toBeInTheDocument()
 
     await openTab("Display")
-    await userEvent.click(screen.getByRole("combobox", { name: "Comment location" }))
-    await userEvent.click(screen.getByRole("option", { name: "Standalone comment" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Show review details" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Prompt for AI agents per comment" }))
     await userEvent.click(screen.getByRole("switch", { name: "Publish blast radius label" }))
     await userEvent.click(screen.getByRole("switch", { name: "Publish review time estimate label" }))
     await selectConnectionOnLlmTab()
@@ -386,7 +386,7 @@ describe("Configuration page", () => {
       expect(body).toEqual({
         settings: {
           llm: { connection: "openai" },
-          output: { summaryLocation: "comment", blastRadiusLabel: true, effortLabel: true },
+          output: { reviewStats: false, agentPrompts: false, blastRadiusLabel: true, effortLabel: true },
           triggers: {
             review: "all",
             reviewOnPush: false,
@@ -464,11 +464,17 @@ describe("Configuration page", () => {
     )
 
     expect(await within(preview).findByRole("heading", { name: /Add user lookup endpoint/ })).toHaveTextContent("#42")
-    const description = within(preview).getByRole("region", { name: "Pull request description" })
-    expect(within(description).getByRole("heading", { name: "Bammy summary" })).toBeInTheDocument()
+    // Bammy never writes to the description, so the preview leaves it out.
+    expect(within(preview).queryByRole("region", { name: "Pull request description" })).not.toBeInTheDocument()
     expect(within(preview).getByRole("list", { name: "Labels" })).toHaveTextContent("Medium blast radius")
     const summary = within(preview).getByRole("region", { name: "Summary comment" })
-    expect(within(summary).getByRole("heading", { name: "Bammy review" })).toBeInTheDocument()
+    // Posted before the inline comments, so drawn above them.
+    const inlineThreads = within(preview).getByRole("region", { name: "Inline comments" })
+    expect(summary.compareDocumentPosition(inlineThreads) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(summary).getByRole("heading", { name: "Summary" })).toBeInTheDocument()
+    expect(summary).toHaveTextContent("Adds a lookup endpoint.")
+    // Bammy no longer offers to write into the PR/MR description.
+    expect(screen.queryByRole("combobox", { name: "Comment location" })).not.toBeInTheDocument()
     // Hidden markers stay hidden, as on the forge.
     expect(preview).not.toHaveTextContent("bammy:summary")
     const suggestion = within(preview).getByRole("group", { name: "Suggested change" })
@@ -501,13 +507,30 @@ describe("Configuration page", () => {
     expect(bodies.at(-1)?.provider).toBe("gitlab")
   })
 
+  it("offers the agent prompts only while the comment that holds them is posted", async () => {
+    mockApi(globalRoutes())
+    renderWithProviders(<App />, { route: "/configuration?tab=display" })
+
+    // Everything is disabled until the config has loaded.
+    const perComment = await screen.findByRole("switch", { name: "Prompt for AI agents per comment" })
+    await waitFor(() => expect(perComment).toBeEnabled())
+    const all = screen.getByRole("switch", { name: "Prompt for all review comments" })
+    expect(all).toBeEnabled()
+
+    await userEvent.click(screen.getByRole("switch", { name: "Post inline comments" }))
+    expect(perComment).toBeDisabled()
+    expect(all).toBeEnabled()
+    await userEvent.click(screen.getByRole("switch", { name: "Post summary comment" }))
+    expect(all).toBeDisabled()
+  })
+
   it("says when nothing is posted", async () => {
-    mockApi(globalRoutes({ "POST /api/config/preview": { ...PREVIEW, pr: { ...PREVIEW.pr, labels: [], description: "" }, ...NOTHING } }))
+    mockApi(globalRoutes({ "POST /api/config/preview": { ...PREVIEW, pr: { ...PREVIEW.pr, labels: [] }, ...NOTHING } }))
     renderWithProviders(<App />, { route: "/configuration?tab=display" })
 
     const preview = await screen.findByRole("region", { name: "Review preview" })
     expect(await within(preview).findByText(/Bammy posts nothing to the change/)).toBeInTheDocument()
-    expect(within(preview).getByText("No description provided.")).toBeInTheDocument()
+    expect(within(preview).queryByText("No description provided.")).not.toBeInTheDocument()
   })
 
   it("sends the finding settings, and holds the preview while a value is invalid", async () => {

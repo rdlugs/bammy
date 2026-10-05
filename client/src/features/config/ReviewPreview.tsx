@@ -208,30 +208,23 @@ function ForgePage({ preview }: { preview: PreviewPublication }) {
     !preview.walkthroughComment &&
     !preview.status &&
     preview.inline.length === 0 &&
-    pr.labels.length === 0 &&
-    !pr.description
+    pr.labels.length === 0
   return (
     <div className="flex flex-col gap-3">
       <PageHeader preview={preview} />
       {/* GitLab shows the status in the merge request widget, above the activity. */}
       {!github && preview.status && <StatusRow provider={provider} status={preview.status} />}
-      <Note
-        provider={provider}
-        label="Pull request description"
-        author={pr.author}
-        action={github ? "opened this pull request" : "created merge request"}
-      >
-        {pr.description ? (
-          <ForgeMarkdown provider={provider}>{pr.description}</ForgeMarkdown>
-        ) : (
-          <p className="text-sm text-muted-foreground italic">No description provided.</p>
-        )}
-      </Note>
       {nothing && (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed bg-background p-6 text-center text-sm text-muted-foreground">
           <MessageSquareOff className="size-5" />
           Bammy posts nothing to the change. Reviews still show up in the dashboard.
         </div>
+      )}
+      {/* The summary is posted before the inline comments, so it sits at the top. */}
+      {preview.summaryComment && (
+        <Note provider={provider} label="Summary comment" author="bammy" bot action="commented">
+          <ForgeMarkdown provider={provider}>{preview.summaryComment}</ForgeMarkdown>
+        </Note>
       )}
       {preview.walkthroughComment && (
         <Note provider={provider} label="PR summary comment" author="bammy" bot action="commented">
@@ -251,11 +244,6 @@ function ForgePage({ preview }: { preview: PreviewPublication }) {
               <InlineThread key={`${comment.path}:${comment.startLine}`} provider={provider} comment={comment} />
             ))}
           </div>
-        </Note>
-      )}
-      {preview.summaryComment && (
-        <Note provider={provider} label="Summary comment" author="bammy" bot action="commented">
-          <ForgeMarkdown provider={provider}>{preview.summaryComment}</ForgeMarkdown>
         </Note>
       )}
       {github && preview.status && <StatusRow provider={provider} status={preview.status} />}

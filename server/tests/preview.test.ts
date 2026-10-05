@@ -7,7 +7,6 @@ import type { ConfigOverride } from "../src/review/config/schema.ts";
 import { runReview } from "../src/review/pipeline.ts";
 import { previewPublication } from "../src/review/preview/preview.ts";
 import { SAMPLE_NOW, sampleChange, sampleGenerate } from "../src/review/preview/sample.ts";
-import { walkthroughLocation } from "../src/review/publish/publisher.ts";
 import { toMarkdown } from "../src/review/render/markdown.ts";
 import { createUser } from "./helpers/users.ts";
 
@@ -21,7 +20,7 @@ describe("previewPublication", () => {
       { generate: sampleGenerate, now: () => SAMPLE_NOW },
     );
 
-    expect(preview.summaryComment).toBe(toMarkdown(result, { walkthrough: false }));
+    expect(preview.summaryComment).toBe(toMarkdown(result, { walkthrough: true }));
     // The SQL injection is critical, the default block level.
     expect(preview.status).toEqual({ state: "failure", description: "1 finding at or above critical" });
     // The unproven rate-limit finding is demoted, not dropped, so it still gets a thread.
@@ -29,19 +28,21 @@ describe("previewPublication", () => {
     expect(preview.inline[0]!.diff.at(-1)).toMatchObject({ type: "add", newLine: 9 });
   });
 
-  it("puts the summary in the sample's empty description, or in a comment", async () => {
-    const dynamic = await previewPublication(config(), "github");
-    expect(dynamic.pr.description).toContain("<!-- bammy:walkthrough:start -->");
-    expect(dynamic.pr.description).toContain("Blast radius: medium");
-    expect(dynamic.walkthroughComment).toBeNull();
+  it("opens the review comment with the summary and leaves the description alone", async () => {
+    const preview = await previewPublication(config(), "github");
+    expect(preview.walkthroughComment).toBeNull();
+    expect(preview.summaryComment).toMatch(/^## Summary\n/);
+    expect(preview.summaryComment).toContain("Blast radius: medium");
+    expect(preview.summaryComment).not.toContain("### Code review");
 
-    const comment = await previewPublication(config({ output: { summaryLocation: "comment" } }), "github");
-    expect(comment.pr.description).toBe("");
-    expect(comment.walkthroughComment).toContain("## Bammy summary");
+    // With the review comment off, the summary still gets a comment of its own.
+    const alone = await previewPublication(config({ output: { postSummary: false } }), "github");
+    expect(alone.summaryComment).toBeNull();
+    expect(alone.walkthroughComment).toContain("## Summary");
 
     const none = await previewPublication(config({ output: { walkthrough: false, effortLabel: true } }), "github");
-    expect(none.pr.description).toBe("");
     expect(none.walkthroughComment).toBeNull();
+    expect(none.summaryComment).not.toContain("Blast radius");
     expect(none.pr.labels).toEqual([]);
   });
 
@@ -65,17 +66,6 @@ describe("previewPublication", () => {
     const [gitlab] = (await previewPublication(config(), "gitlab")).inline;
     expect(github!.body).toContain("```suggestion\n");
     expect(gitlab!.body).toContain("```suggestion:-0+0\n");
-  });
-});
-
-describe("walkthroughLocation", () => {
-  it("resolves dynamic from the description and keeps an explicit choice", () => {
-    const change = sampleChange("github");
-    expect(walkthroughLocation(config(), change)).toBe("description");
-    expect(walkthroughLocation(config(), { ...change, description: "Fixes login." })).toBe("comment");
-    expect(walkthroughLocation(config({ output: { summaryLocation: "description" } }), { ...change, description: "x" })).toBe(
-      "description",
-    );
   });
 });
 
@@ -104,7 +94,7 @@ describe("POST /api/config/preview", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ provider: "gitlab", status: null, inline: [], pr: { number: 42 } });
-    expect(res.body.summaryComment).toContain("## Bammy review");
+    expect(res.body.summaryComment).toMatch(/^## Summary\n/);
   });
 
   it("rejects settings the config would reject", async () => {

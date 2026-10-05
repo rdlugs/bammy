@@ -232,6 +232,9 @@ describe("parseRepoFile", () => {
       "  summary_location: comment",
       "  blast_radius_label: true",
       "  effort_label: true",
+      "  review_stats: false",
+      "  agent_prompts: false",
+      "  agent_prompt_all: true",
       "",
     ].join("\n");
     const { override, warnings } = parseRepoFile(".bammy.yaml", yaml);
@@ -247,7 +250,14 @@ describe("parseRepoFile", () => {
         skipSourceBranches: ["release/"],
         skipTargetBranches: ["legacy"],
       },
-      output: { summaryLocation: "comment", blastRadiusLabel: true, effortLabel: true },
+      output: {
+        summaryLocation: "comment",
+        blastRadiusLabel: true,
+        effortLabel: true,
+        reviewStats: false,
+        agentPrompts: false,
+        agentPromptAll: true,
+      },
     });
   });
 

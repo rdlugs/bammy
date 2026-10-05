@@ -4,8 +4,9 @@
 export const SUMMARY_MARKER = "<!-- bammy:summary -->";
 // A walkthrough posted as a comment of its own.
 export const WALKTHROUGH_MARKER = "<!-- bammy:walkthrough -->";
-// A walkthrough written into the PR/MR description sits between these, so a
-// later run replaces only its own block and leaves the author's text alone.
+// Earlier versions wrote the walkthrough into the PR/MR description between
+// these. It now lives in the review comment; the markers remain so a change
+// read from the forge, and the description itself, can be cleaned of it.
 export const DESCRIPTION_START = "<!-- bammy:walkthrough:start -->";
 export const DESCRIPTION_END = "<!-- bammy:walkthrough:end -->";
 
@@ -17,11 +18,10 @@ export function withoutDescriptionBlock(description: string): string {
   return description.replace(DESCRIPTION_BLOCK, "\n\n").trim();
 }
 
-// The description with `block` in place of Bammy's earlier one, or appended.
-export function withDescriptionBlock(description: string, block: string): string {
-  const wrapped = `${DESCRIPTION_START}\n${block.trim()}\n${DESCRIPTION_END}`;
-  const author = withoutDescriptionBlock(description);
-  return author ? `${author}\n\n${wrapped}\n` : `${wrapped}\n`;
+// The description with Bammy's old block taken out, or exactly as it was when
+// there is none, so the author's own text never triggers an edit.
+export function removeDescriptionBlock(description: string): string {
+  return DESCRIPTION_BLOCK.test(description) ? withoutDescriptionBlock(description) : description;
 }
 
 const FINGERPRINT_MARKER = /<!-- bammy:fp=([0-9a-f]{16}) -->/g;

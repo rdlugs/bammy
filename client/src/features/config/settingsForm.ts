@@ -11,6 +11,9 @@ export const FLAGS = [
   { name: "postInline", section: "output" },
   { name: "postSummary", section: "output" },
   { name: "postCheck", section: "output" },
+  { name: "reviewStats", section: "output" },
+  { name: "agentPrompts", section: "output" },
+  { name: "agentPromptAll", section: "output" },
   { name: "blastRadiusLabel", section: "output" },
   { name: "effortLabel", section: "output" },
   { name: "reviewOnPush", section: "triggers" },
@@ -24,7 +27,6 @@ export type FlagSection = (typeof FLAGS)[number]["section"]
 export const CHOICES = [
   { name: "review", section: "triggers" },
   { name: "summary", section: "triggers" },
-  { name: "summaryLocation", section: "output" },
 ] as const
 
 export type ChoiceName = (typeof CHOICES)[number]["name"]

@@ -6,7 +6,6 @@ import type { ForgeRepo, SavedRepo } from "@/features/forge/api"
 export type LlmProviderName = "anthropic" | "openai" | "google" | "ollama"
 export type ReviewTrigger = "manual" | "published" | "all"
 export type SummaryTrigger = "manual" | "published"
-export type SummaryLocation = "dynamic" | "description" | "comment"
 
 // A partial review config; mirrors server/src/review/config/schema.ts.
 export interface ConfigOverride {
@@ -39,7 +38,9 @@ export interface ConfigOverride {
     postInline?: boolean
     postSummary?: boolean
     postCheck?: boolean
-    summaryLocation?: SummaryLocation
+    reviewStats?: boolean
+    agentPrompts?: boolean
+    agentPromptAll?: boolean
     blastRadiusLabel?: boolean
     effortLabel?: boolean
   }
@@ -95,7 +96,9 @@ export interface EffectiveConfig {
     postInline: boolean
     postSummary: boolean
     postCheck: boolean
-    summaryLocation: SummaryLocation
+    reviewStats: boolean
+    agentPrompts: boolean
+    agentPromptAll: boolean
     blastRadiusLabel: boolean
     effortLabel: boolean
   }
@@ -221,7 +224,6 @@ export interface PreviewPublication {
     author: string
     sourceBranch: string
     targetBranch: string
-    description: string
     labels: string[]
   }
   status: { state: "pending" | "success" | "failure" | "error"; description: string } | null

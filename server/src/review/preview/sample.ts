@@ -49,7 +49,7 @@ export function sampleChange(provider: ForgeProvider): ChangeSet {
       headSha: "a1b2c3d4e5f6",
     },
     title: "Add user lookup endpoint",
-    // Empty, so "dynamic" shows the summary in the description.
+    // Bammy never writes to the description, so the preview does not show it.
     description: "",
     baseRef: "main",
     headRef: "feature/user-lookup",

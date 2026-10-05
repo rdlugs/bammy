@@ -68,11 +68,23 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
   walkthrough: {
     label: "Walkthrough",
     description:
-      "Summarise what the change does in the PR/MR description or a comment of its own. When automatic reviews include it is set on the Triggers tab.",
+      "Summarise what the change does at the top of the review comment. When automatic reviews include it is set on the Triggers tab.",
   },
   postInline: { label: "Post inline comments", description: "Comment on the lines each finding refers to." },
   postSummary: { label: "Post summary comment", description: "Post the review summary as a comment on the change." },
   postCheck: { label: "Post commit status", description: "Report the verdict as the bammy/review status." },
+  reviewStats: {
+    label: "Show review details",
+    description: "Add a line under the summary with the commit, models and how much was reviewed.",
+  },
+  agentPrompts: {
+    label: "Prompt for AI agents per comment",
+    description: "Add a ready-to-paste prompt for a coding agent to each actionable inline comment.",
+  },
+  agentPromptAll: {
+    label: "Prompt for all review comments",
+    description: "Add one prompt covering every finding to the summary comment, to hand the whole review to a coding agent.",
+  },
   blastRadiusLabel: {
     label: "Publish blast radius label",
     description:
@@ -123,16 +135,6 @@ const CHOICE_INFO: Record<ChoiceName, { label: string; description: string; opti
     options: [
       { value: "manual", label: "Manual only" },
       { value: "published", label: "Published PRs" },
-    ],
-  },
-  summaryLocation: {
-    label: "Comment location",
-    description:
-      "Populate the native PR/MR description or publish the PR summary as a standalone comment. Dynamic uses the description when the author left it empty.",
-    options: [
-      { value: "dynamic", label: "Dynamic location" },
-      { value: "description", label: "Native PR/MR description" },
-      { value: "comment", label: "Standalone comment" },
     ],
   },
 }
@@ -744,6 +746,8 @@ export function ConfigFields(props: {
   // shows (and previews) the global values.
   const shownFlag = (name: FlagName) => (disabled ? inheritedFlag(name) : (form.flags[name] ?? inheritedFlag(name))) ?? false
   const walkthroughOn = shownFlag("walkthrough")
+  const postSummaryOn = shownFlag("postSummary")
+  const postInlineOn = shownFlag("postInline")
 
   // The preview follows the form, unsaved edits included: the server layers
   // what the form sets over what it inherits. Values the server would reject
@@ -948,14 +952,16 @@ export function ConfigFields(props: {
       <>
         <Section title="Review comments" description="What the review leaves on the change.">
           <ToggleList>{toggles(["postInline", "postSummary", "postCheck"])}</ToggleList>
+          {/* The details line is part of the summary comment. */}
+          <ToggleList>{toggles(["reviewStats"], !postSummaryOn)}</ToggleList>
+          {/* Each prompt lives in the comment it belongs to. */}
+          <ToggleList>{toggles(["agentPrompts"], !postInlineOn)}</ToggleList>
+          <ToggleList>{toggles(["agentPromptAll"], !postSummaryOn)}</ToggleList>
         </Section>
         <FieldSeparator />
         <Section title="PR summary" description="A summary of what the change does, and labels from its estimates.">
           <ToggleList>{toggles(["walkthrough"])}</ToggleList>
-          {/* Placement and labels only apply while there is a summary to place. */}
-          <div className="grid gap-4 @md/field-group:grid-cols-2">
-            {choiceField("summaryLocation", !walkthroughOn)}
-          </div>
+          {/* Labels come from the summary's estimates, so they need one. */}
           <ToggleList>{toggles(["blastRadiusLabel", "effortLabel"], !walkthroughOn)}</ToggleList>
         </Section>
       </>

@@ -31,7 +31,9 @@ const schema: ConfigSchema = {
       postInline: true,
       postSummary: true,
       postCheck: true,
-      summaryLocation: "dynamic",
+      reviewStats: true,
+      agentPrompts: true,
+      agentPromptAll: true,
       blastRadiusLabel: false,
       effortLabel: false,
     },
@@ -72,14 +74,13 @@ describe("toSettings", () => {
 
   it("saves the trigger choices and skip lists", () => {
     const form = toForm({})
-    expect(form.choices).toEqual({ review: INHERIT, summary: INHERIT, summaryLocation: INHERIT })
+    expect(form.choices).toEqual({ review: INHERIT, summary: INHERIT })
     const next = {
       ...form,
-      choices: { review: "manual", summary: "manual", summaryLocation: "comment" },
+      choices: { review: "manual", summary: "manual" },
       lists: { ...form.lists, ignoreTitles: [" WIP", "Do not review ", " "], skipAuthors: ["dependabot[bot]"] },
     }
     expect(toSettings({}, next)).toEqual({
-      output: { summaryLocation: "comment" },
       triggers: {
         review: "manual",
         summary: "manual",

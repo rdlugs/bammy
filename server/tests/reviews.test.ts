@@ -296,7 +296,34 @@ describe("GET /api/reviews/:id and /markdown", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toMatch(/^text\/markdown/);
+    // No stored output config: a job from before the agent prompt existed.
+    expect(res.text).toBe(toMarkdown(await sampleResult(), { agentPrompt: false }));
+  });
+
+  it("includes the all-comments agent prompt when the review's config had it", async () => {
+    const job = await completedJob();
+    await prisma.reviewJob.update({
+      where: { id: job.id },
+      data: { resolvedConfig: { config: { output: { agentPromptAll: true } } } },
+    });
+
+    const res = await request(app).get(`/api/reviews/${job.id}/markdown`).set("Cookie", cookie);
+
     expect(res.text).toBe(toMarkdown(await sampleResult()));
+    expect(res.text).toContain("Prompt for all review comments with AI agents");
+  });
+
+  it("leaves out the stats line when the review's config turned it off", async () => {
+    const job = await completedJob();
+    await prisma.reviewJob.update({
+      where: { id: job.id },
+      data: { resolvedConfig: { config: { output: { reviewStats: false } } } },
+    });
+
+    const res = await request(app).get(`/api/reviews/${job.id}/markdown`).set("Cookie", cookie);
+
+    expect(res.text).toBe(toMarkdown(await sampleResult(), { stats: false, agentPrompt: false }));
+    expect(res.text).not.toContain("<sub>Reviewed `");
   });
 
   it("409s for markdown before there is a result", async () => {

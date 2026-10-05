@@ -2,9 +2,17 @@ import { BUCKET_TITLE, SUMMARY_BUCKETS } from "../core/buckets.ts";
 import type { Finding, Omission, ReviewResult } from "../core/models.ts";
 import { SEVERITIES } from "../core/severity.ts";
 import { SUMMARY_MARKER } from "../core/markers.ts";
+import { agentPromptBlock, allFindingsPrompt } from "./agentPrompt.ts";
 import { summarize } from "./json.ts";
 
 export { SUMMARY_MARKER };
+
+// Forges fetch the image themselves, so it must be a public absolute URL.
+const LOGO_URL = "https://raw.githubusercontent.com/rdlugs/bammy/main/client/public/bammy-32.png";
+
+// The only place Bammy names itself in what it posts: a small credit at the
+// bottom of every comment, so the content reads as the review, not the tool.
+export const BRAND_FOOTER = `<sub><img src="${LOGO_URL}" alt="" width="14" height="14" align="absmiddle"> Bammy</sub>`;
 
 const VERDICT_LINE = {
   pass: "✅ **Pass**",
@@ -44,7 +52,7 @@ function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-function fence(code: string, language = ""): string {
+export function fence(code: string, language = ""): string {
   const longest = Math.max(2, ...[...code.matchAll(/`+/g)].map((m) => m[0].length));
   const ticks = "`".repeat(longest + 1);
   return `${ticks}${language}\n${code.replace(/\n$/, "")}\n${ticks}`;
@@ -169,26 +177,34 @@ function footer(result: ReviewResult): string {
 // The one markdown document for a review. The forge summary comment and the
 // dashboard's "copy markdown" are this function's output, byte for byte; it
 // depends only on the result, so re-rendering a stored review reproduces it.
-// The forge's summary comment leaves the walkthrough out (`walkthrough:
-// false`) when it is published on its own; see walkthroughMarkdown.
-export function toMarkdown(result: ReviewResult, options: { walkthrough?: boolean } = {}): string {
-  const lines = [
-    "## Bammy review",
-    "",
-    ...verdictSection(result),
-    "",
-    countsLine(result),
-  ];
+// The walkthrough, when there is one, opens the document under the same
+// heading, so one comment carries what the change does and what the review
+// found. `walkthrough: false` leaves it out, and `stats: false` the line
+// naming the commit, models and coverage (output.reviewStats), and
+// `agentPrompt: false` the one prompt covering every finding
+// (output.agentPromptAll).
+export function toMarkdown(
+  result: ReviewResult,
+  options: { walkthrough?: boolean; stats?: boolean; agentPrompt?: boolean } = {},
+): string {
   const walkthrough = options.walkthrough === false ? [] : walkthroughSection(result);
-  if (walkthrough.length) lines.push("", ...walkthrough);
-  lines.push(...bucketSections(result), ...coverageSection(result), "", footer(result), "", SUMMARY_MARKER);
+  const lines = ["## Summary"];
+  if (walkthrough.length) lines.push(...walkthrough.slice(1));
+  lines.push("", ...verdictSection(result), "", countsLine(result));
+  lines.push(...bucketSections(result));
+  if (options.agentPrompt !== false && result.findings.length) {
+    lines.push("", ...agentPromptBlock("Prompt for all review comments with AI agents", allFindingsPrompt(result.findings)));
+  }
+  lines.push(...coverageSection(result));
+  if (options.stats !== false) lines.push("", footer(result));
+  lines.push("", BRAND_FOOTER, "", SUMMARY_MARKER);
   return `${lines.join("\n")}\n`;
 }
 
-// The walkthrough on its own, for the PR/MR description or a comment of its
-// own. Empty when the review has none.
+// The walkthrough on its own, for a comment of its own while the review
+// comment is turned off. Empty when the review has none.
 export function walkthroughMarkdown(result: ReviewResult): string {
   const section = walkthroughSection(result);
   if (!section.length) return "";
-  return `${["## Bammy summary", ...section.slice(1)].join("\n")}\n`;
+  return `${["## Summary", ...section.slice(1), "", BRAND_FOOTER].join("\n")}\n`;
 }
