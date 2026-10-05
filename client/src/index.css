@@ -4,6 +4,9 @@
 @import "@fontsource-variable/geist";
 
 @custom-variant dark (&:is(.dark *));
+/* Set on <html> by features/density; primitives default to comfortable sizing. */
+@custom-variant compact (&:where([data-density=compact], [data-density=compact] *));
+@custom-variant spacious (&:where([data-density=spacious], [data-density=spacious] *));
 
 @theme inline {
     --font-heading: var(--font-sans);

@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react"
 import { Link } from "react-router"
 import { BookOpen, FolderGit2, GitPullRequest, KeyRound, SlidersHorizontal, type LucideIcon } from "lucide-react"
+import { PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageShell"
 import { Card, CardContent } from "@/components/ui/card"
 import { useGlobalConfig } from "@/features/config/api"
 import { useConnections, useRepos } from "@/features/forge/api"
@@ -20,7 +22,7 @@ function IconTile({ icon: Icon }: { icon: LucideIcon }) {
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
-  return <h3 className="text-sm text-muted-foreground">{children}</h3>
+  return <h2 className="text-sm font-medium text-muted-foreground">{children}</h2>
 }
 
 function CodebaseCard({ icon, title, text, link }: { icon: LucideIcon; title: string; text: string; link: { label: string; to: string } }) {
@@ -29,7 +31,7 @@ function CodebaseCard({ icon, title, text, link }: { icon: LucideIcon; title: st
       <CardContent className="flex h-full flex-col items-start gap-4">
         <IconTile icon={icon} />
         <div className="flex flex-col gap-1">
-          <h4 className="text-sm font-medium">{title}</h4>
+          <h3 className="text-sm font-semibold">{title}</h3>
           <p className="text-sm text-muted-foreground">{text}</p>
         </div>
         <Link to={link.to} className="mt-auto text-sm font-medium hover:underline">
@@ -40,7 +42,8 @@ function CodebaseCard({ icon, title, text, link }: { icon: LucideIcon; title: st
   )
 }
 
-const actionRow = "flex w-full items-center gap-4 rounded-xl border bg-card px-5 py-4 text-left transition-colors hover:bg-accent/50"
+const actionRow =
+  "flex w-full items-center gap-4 rounded-xl border bg-card px-6 py-4 text-left transition-colors hover:bg-accent/50 compact:px-4 compact:py-3 spacious:px-8 spacious:py-5"
 
 function ActionText({ title, text }: { title: string; text: string }) {
   return (
@@ -72,14 +75,13 @@ export function HomePage() {
     : "Choose what reviews look for and when they block."
 
   return (
-    <main className="flex-1 p-6">
-      <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="flex flex-col gap-8">
-          <h2 className="text-2xl font-semibold tracking-tight">Overview</h2>
-
+    <PageShell variant="wide">
+      <PageHeader title="Overview" description="Your review setup at a glance, and what to do next." />
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_20rem] compact:gap-8 spacious:gap-12">
+        <div className="flex flex-col gap-8 compact:gap-6 spacious:gap-10">
           <StatusHero />
 
-          <section className="flex flex-col gap-3">
+          <section className="flex flex-col gap-4 compact:gap-3 spacious:gap-5">
             <SectionLabel>From your codebase</SectionLabel>
             <div className="grid gap-4 sm:grid-cols-2">
               <CodebaseCard
@@ -101,7 +103,7 @@ export function HomePage() {
             </div>
           </section>
 
-          <section className="flex flex-col gap-3">
+          <section className="flex flex-col gap-3 compact:gap-2 spacious:gap-4">
             <SectionLabel>Suggested actions</SectionLabel>
             <button type="button" className={actionRow} onClick={() => setReviewOpen(true)}>
               <IconTile icon={GitPullRequest} />
@@ -130,6 +132,6 @@ export function HomePage() {
       </div>
 
       <ManualReviewSheet open={reviewOpen} onOpenChange={setReviewOpen} />
-    </main>
+    </PageShell>
   )
 }

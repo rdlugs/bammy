@@ -1,6 +1,8 @@
 import { Link, useNavigate, useParams } from "react-router"
 import { AlertTriangle, ArrowLeft, Bot, Copy, ExternalLink, Loader2, RotateCw } from "lucide-react"
 import { toast } from "sonner"
+import { PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageShell"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -18,7 +20,7 @@ import { isActive, type ReviewResult } from "@/features/reviews/types"
 
 function BackToReviews() {
   return (
-    <Button asChild variant="ghost" size="sm" className="self-start">
+    <Button asChild variant="ghost" size="sm" className="-ml-2.5 self-start text-muted-foreground">
       <Link to="/reviews">
         <ArrowLeft />
         Back to reviews
@@ -60,21 +62,24 @@ export function ReviewDetailPage() {
 
   if (isPending) {
     return (
-      <main className="flex flex-1 flex-col gap-6 p-6">
+      <PageShell>
         <Skeleton className="h-24 w-full" />
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <Skeleton className="h-64 w-full" />
           <Skeleton className="h-64 w-full" />
         </div>
-      </main>
+      </PageShell>
     )
   }
   if (isError) {
     return (
-      <main className="flex flex-1 flex-col gap-6 p-6">
+      <PageShell>
         <BackToReviews />
-        <p className="text-sm text-destructive">Review not found.</p>
-      </main>
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle>Review not found.</AlertTitle>
+        </Alert>
+      </PageShell>
     )
   }
 
@@ -93,12 +98,12 @@ export function ReviewDetailPage() {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-6">
+    <PageShell>
       <BackToReviews />
-      <header className="flex flex-wrap items-start gap-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h2 className="text-2xl font-semibold tracking-tight break-words">{title}</h2>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        title={title}
+        description={
+          <>
             {review.repository.fullPath} {changeLabel(review.repository.provider, review.number)}
             {webUrl && (
               <>
@@ -109,35 +114,38 @@ export function ReviewDetailPage() {
                 </a>
               </>
             )}
-          </p>
-          <div className="flex items-center gap-2 pt-1">
-            <StatusBadge status={review.status} />
-            <VerdictBadge verdict={review.verdict} />
-          </div>
+          </>
+        }
+        actions={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => result && copyToClipboard(allFindingsPrompt(result.findings), "Agent prompt")}
+              disabled={!result?.findings.length}
+            >
+              <Bot />
+              Copy prompt for all findings
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => copyToClipboard(fetchReviewMarkdown(review.id), "Markdown")}
+              disabled={!result}
+            >
+              <Copy />
+              Copy markdown
+            </Button>
+            <Button variant="outline" onClick={runAgain} disabled={rerun.isPending || isActive(review.status)}>
+              {rerun.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />}
+              Re-run
+            </Button>
+          </>
+        }
+      >
+        <div className="flex items-center gap-2 pt-1">
+          <StatusBadge status={review.status} />
+          <VerdictBadge verdict={review.verdict} />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={() => result && copyToClipboard(allFindingsPrompt(result.findings), "Agent prompt")}
-            disabled={!result?.findings.length}
-          >
-            <Bot />
-            Copy prompt for all findings
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => copyToClipboard(fetchReviewMarkdown(review.id), "Markdown")}
-            disabled={!result}
-          >
-            <Copy />
-            Copy markdown
-          </Button>
-          <Button variant="outline" onClick={runAgain} disabled={rerun.isPending || isActive(review.status)}>
-            {rerun.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />}
-            Re-run
-          </Button>
-        </div>
-      </header>
+      </PageHeader>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-6">
@@ -169,6 +177,6 @@ export function ReviewDetailPage() {
         </div>
         <ReviewSidebar review={review} result={result} />
       </div>
-    </main>
+    </PageShell>
   )
 }

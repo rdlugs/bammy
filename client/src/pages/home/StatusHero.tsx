@@ -56,7 +56,7 @@ export function StatusHero() {
   return (
     <Card className="bg-gradient-to-br from-muted/70 via-card to-card">
       <CardContent className="flex flex-col items-start gap-2">
-        <h3 className="text-lg font-medium">{title}</h3>
+        <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
         <p className="text-sm text-muted-foreground">{text}</p>
         <Button asChild className="mt-2">
           <Link to={action.to}>{action.label}</Link>

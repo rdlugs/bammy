@@ -24,7 +24,7 @@ export function TablePagination({
   const last = Math.min(page * size, total)
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 pt-4 text-sm text-muted-foreground">
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-4 border-t pt-4 text-sm text-muted-foreground">
       <p aria-live="polite">{total > 0 && `Showing ${first}-${last} of ${total}`}</p>
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">

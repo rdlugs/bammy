@@ -10,10 +10,10 @@ const compactTokens = new Intl.NumberFormat("en", { notation: "compact", maximum
 
 export function Stat({ label, icon: Icon, children }: { label: string; icon?: LucideIcon; children: ReactNode }) {
   return (
-    <Card className="py-4">
-      <CardContent className="flex flex-col gap-1 px-4">
+    <Card size="sm">
+      <CardContent className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">{label}</span>
+          <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</span>
           {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
         </div>
         <div className="text-2xl font-semibold tabular-nums">{children}</div>

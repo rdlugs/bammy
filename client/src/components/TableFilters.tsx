@@ -59,7 +59,7 @@ export function FilterPopover({
           {active && <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary" aria-hidden />}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 gap-3">
+      <PopoverContent align="end" className="w-72 gap-4">
         {children}
         {active && (
           <Button variant="ghost" size="sm" className="self-start" onClick={onClear}>
@@ -82,7 +82,7 @@ export function SearchInput({
   onChange: (value: string) => void
 }) {
   return (
-    <InputGroup className="w-full sm:w-64">
+    <InputGroup className="w-full sm:w-72">
       <InputGroupAddon>
         <Search />
       </InputGroupAddon>
@@ -114,7 +114,7 @@ export function FilterSelect({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <Label htmlFor={id} className="text-xs text-muted-foreground">
+      <Label htmlFor={id} className="text-muted-foreground">
         {label}
       </Label>
       <Select value={value} onValueChange={onValueChange}>

@@ -6,24 +6,31 @@ import { ThemeProvider } from "next-themes"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AuthProvider } from "@/features/auth/AuthProvider"
+import { DensityProvider } from "@/features/density/DensityProvider"
+import { applyDensity, readDensity } from "@/features/density/density"
 import { App } from "./App"
 import "./index.css"
 
 const queryClient = new QueryClient()
 
+// Set before the first render so the page never paints at the wrong density.
+applyDensity(readDensity())
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <AuthProvider>
-            <TooltipProvider>
-              <App />
-              <Toaster richColors />
-            </TooltipProvider>
-          </AuthProvider>
-        </BrowserRouter>
-      </QueryClientProvider>
+      <DensityProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <AuthProvider>
+              <TooltipProvider>
+                <App />
+                <Toaster richColors />
+              </TooltipProvider>
+            </AuthProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      </DensityProvider>
     </ThemeProvider>
   </StrictMode>,
 )

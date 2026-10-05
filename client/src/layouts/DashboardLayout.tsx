@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router"
 import {
   Bug,
+  ChevronRight,
   ChevronsUpDown,
   FolderGit2,
   GitPullRequest,
@@ -11,6 +12,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react"
 import { toast } from "sonner"
+import { DensityToggle } from "@/components/density-toggle"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
@@ -46,10 +48,11 @@ const NAV = [
   { to: "/llm-connections", label: "LLM Connections", icon: KeyRound },
 ]
 
-function pageTitle(pathname: string) {
-  if (pathname.startsWith("/reviews/")) return "Review"
-  if (pathname.startsWith("/settings")) return "Settings"
-  return NAV.find((item) => pathname.startsWith(item.to))?.label ?? "Home"
+// Where you are, for the top bar; each page renders its own h1.
+function breadcrumb(pathname: string): { label: string; to?: string }[] {
+  if (pathname.startsWith("/reviews/")) return [{ label: "Reviews", to: "/reviews" }, { label: "Review" }]
+  if (pathname.startsWith("/settings")) return [{ label: "Settings" }]
+  return [{ label: NAV.find((item) => pathname.startsWith(item.to))?.label ?? "Home" }]
 }
 
 function initials(name: string) {
@@ -154,11 +157,29 @@ export function DashboardLayout() {
       {/* min-w-0 lets wide content (code blocks, tables) scroll inside the
           page instead of stretching the whole layout past the viewport. */}
       <SidebarInset className="min-w-0">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-backdrop-filter:bg-background/80 lg:px-6">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
-          <h1 className="text-sm font-medium">{pageTitle(pathname)}</h1>
-          <div className="ml-auto">
+          <nav aria-label="Breadcrumb" className="min-w-0">
+            <ol className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              {breadcrumb(pathname).map((crumb, i) => (
+                <li key={crumb.label} className="flex min-w-0 items-center gap-1.5">
+                  {i > 0 && <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
+                  {crumb.to ? (
+                    <Link to={crumb.to} className="transition-colors hover:text-foreground">
+                      {crumb.label}
+                    </Link>
+                  ) : (
+                    <span aria-current="page" className="truncate font-medium text-foreground">
+                      {crumb.label}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </nav>
+          <div className="ml-auto flex items-center gap-1">
+            <DensityToggle />
             <ModeToggle />
           </div>
         </header>

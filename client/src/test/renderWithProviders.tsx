@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ThemeProvider } from "next-themes"
 import { AuthProvider } from "@/features/auth/AuthProvider"
+import { DensityProvider } from "@/features/density/DensityProvider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 
@@ -12,16 +13,18 @@ export function renderWithProviders(ui: ReactElement, { route = "/" } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[route]}>
-          <AuthProvider>
-            <TooltipProvider>
-              {ui}
-              <Toaster />
-            </TooltipProvider>
-          </AuthProvider>
-        </MemoryRouter>
-      </QueryClientProvider>
+      <DensityProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={[route]}>
+            <AuthProvider>
+              <TooltipProvider>
+                {ui}
+                <Toaster />
+              </TooltipProvider>
+            </AuthProvider>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </DensityProvider>
     </ThemeProvider>,
   )
 }

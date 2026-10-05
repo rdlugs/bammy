@@ -63,7 +63,7 @@ export function ConnectionsPanel() {
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             Git providers
-            <Badge variant="outline" className="h-4 min-w-4 px-1 text-[10px]">
+            <Badge variant="outline" className="h-5 min-w-5 px-1.5 text-xs tabular-nums">
               {connections.length}
             </Badge>
           </div>
@@ -84,7 +84,7 @@ export function ConnectionsPanel() {
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             LLM providers
-            <Badge variant="outline" className="h-4 min-w-4 px-1 text-[10px]">
+            <Badge variant="outline" className="h-5 min-w-5 px-1.5 text-xs tabular-nums">
               {usableKeys.size}
             </Badge>
           </div>

@@ -1,5 +1,7 @@
 import { useSearchParams } from "react-router"
 import { FolderGit2, Plug } from "lucide-react"
+import { PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageShell"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useConnections } from "@/features/forge/api"
 import { InstallationTab } from "@/pages/forge/InstallationTab"
@@ -25,7 +27,11 @@ export function RepositoriesPage() {
   const tab = requested && TABS.includes(requested) ? (requested as Tab) : fallback
 
   return (
-    <main className="flex flex-1 flex-col p-4 sm:p-6">
+    <PageShell>
+      <PageHeader
+        title="Repositories"
+        description="Connect GitHub or GitLab accounts and choose which repositories Bammy reviews."
+      />
       <Tabs className="flex-1" value={tab} onValueChange={(value) => setParams({ tab: value }, { replace: true })}>
         <TabsList>
           {TAB_ITEMS.map((item) => (
@@ -42,6 +48,6 @@ export function RepositoriesPage() {
           <RepositoriesTab />
         </TabsContent>
       </Tabs>
-    </main>
+    </PageShell>
   )
 }

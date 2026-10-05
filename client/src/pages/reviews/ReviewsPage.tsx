@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { GitPullRequest, Play } from "lucide-react"
+import { AlertTriangle, GitPullRequest, Play } from "lucide-react"
 import {
   ActiveFilterChips,
   FilterPopover,
@@ -8,7 +8,10 @@ import {
   SearchInput,
   type ActiveFilter,
 } from "@/components/TableFilters"
+import { PageHeader } from "@/components/PageHeader"
+import { PageShell } from "@/components/PageShell"
 import { TablePagination } from "@/components/TablePagination"
+import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
@@ -102,7 +105,17 @@ export function ReviewsPage() {
   ].filter((filter): filter is ActiveFilter => filter.value !== null)
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-6">
+    <PageShell>
+      <PageHeader
+        title="Reviews"
+        description="Every review Bammy has run on your pull and merge requests."
+        actions={
+          <Button onClick={() => setManualOpen(true)}>
+            <Play />
+            Manual review
+          </Button>
+        }
+      />
       <ReviewStatsStrip />
       <FilterToolbar>
         <Tabs value={view} onValueChange={(value) => filterBy(setView)(value as View)} className="mr-auto">
@@ -158,16 +171,15 @@ export function ReviewsPage() {
             />
           </div>
         </FilterPopover>
-        <Button variant="outline" onClick={() => setManualOpen(true)}>
-          <Play />
-          Manual review
-        </Button>
         <SearchInput label="Search reviews" value={query} onChange={filterBy(setQuery)} />
       </FilterToolbar>
       {isPending ? (
         <Skeleton className="h-40 w-full" />
       ) : isError ? (
-        <p className="text-sm text-destructive">Could not load reviews.</p>
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle>Could not load reviews.</AlertTitle>
+        </Alert>
       ) : data.total === 0 && !narrowed ? (
         <Empty className="flex-1 border border-dashed">
           <EmptyHeader>
@@ -186,7 +198,7 @@ export function ReviewsPage() {
         </Empty>
       ) : data.total === 0 ? (
         <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
             No reviews match these filters.
           </CardContent>
         </Card>
@@ -205,6 +217,6 @@ export function ReviewsPage() {
         </Card>
       )}
       <ManualReviewSheet open={manualOpen} onOpenChange={setManualOpen} />
-    </main>
+    </PageShell>
   )
 }

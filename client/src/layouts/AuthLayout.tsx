@@ -7,9 +7,9 @@ export function AuthLayout({ children }: { children: ReactNode }) {
       <div className="absolute top-4 right-4">
         <ModeToggle />
       </div>
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <div className="flex items-center gap-2 self-center font-medium">
-          <img src="/bammy.svg" alt="" className="size-6 rounded-md" />
+      <div className="flex w-full max-w-md flex-col gap-6">
+        <div className="flex items-center gap-2.5 self-center text-lg font-semibold tracking-tight">
+          <img src="/bammy.svg" alt="" className="size-8 rounded-lg" />
           Bammy
         </div>
         {children}
