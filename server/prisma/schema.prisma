@@ -71,6 +71,35 @@ enum ReviewVerdict {
   @@map("review_verdict")
 }
 
+enum FindingState {
+  open
+  resolved
+  ignored
+
+  @@map("finding_state")
+}
+
+// Declared most severe first: Postgres orders an enum by declaration, so the
+// findings list can sort by rank.
+enum FindingSeverity {
+  critical
+  major
+  minor
+  info
+
+  @@map("finding_severity")
+}
+
+// Why the user dismissed a finding, chosen when ignoring it.
+enum IgnoreReason {
+  false_positive
+  intentional
+  fix_later
+  not_specified
+
+  @@map("ignore_reason")
+}
+
 model ForgeConnection {
   id             String         @id @default(uuid()) @db.Uuid
   userId         String         @map("user_id") @db.Uuid
@@ -111,6 +140,7 @@ model Repository {
   connection     ForgeConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   reviewJobs     ReviewJob[]
   postedFindings PostedFinding[]
+  findings       Finding[]
 
   @@unique([connectionId, externalId])
   @@map("repositories")
@@ -144,6 +174,7 @@ model ReviewJob {
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
 
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  findings   Finding[]
 
   @@index([status, createdAt])
   @@index([repositoryId, number])
@@ -162,6 +193,43 @@ model PostedFinding {
 
   @@unique([repositoryId, number, fingerprint])
   @@map("posted_findings")
+}
+
+// One finding on one pull/merge request across all its runs, keyed like
+// PostedFinding. The worker keeps it in step with each run's result (open while
+// a run still reports it, resolved once a run that read its file does not);
+// "ignored" is only ever set by the user and survives later runs.
+model Finding {
+  id           String       @id @default(uuid()) @db.Uuid
+  repositoryId String       @map("repository_id") @db.Uuid
+  number       Int
+  fingerprint  String
+  state        FindingState @default(open)
+  // Snapshot from the latest run that reported it, so lists never load results.
+  title        String
+  file         String
+  startLine    Int          @map("start_line")
+  severity     FindingSeverity
+  category     String
+  kind         String
+  changeTitle  String       @map("change_title")
+  // Forge login of whoever opened the change; unknown for backfilled rows.
+  author       String?
+  lastJobId    String?      @map("last_job_id") @db.Uuid
+  firstSeenAt  DateTime     @default(now()) @map("first_seen_at") @db.Timestamptz
+  lastSeenAt   DateTime     @default(now()) @map("last_seen_at") @db.Timestamptz
+  resolvedAt   DateTime?    @map("resolved_at") @db.Timestamptz
+  ignoredAt    DateTime?    @map("ignored_at") @db.Timestamptz
+  // Set together with ignoredAt and cleared on reopen.
+  ignoreReason IgnoreReason? @map("ignore_reason")
+  ignoreNote   String?       @map("ignore_note")
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  lastJob    ReviewJob? @relation(fields: [lastJobId], references: [id], onDelete: SetNull)
+
+  @@unique([repositoryId, number, fingerprint])
+  @@index([repositoryId, state])
+  @@map("findings")
 }
 
 model LlmCredential {

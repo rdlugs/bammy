@@ -73,7 +73,12 @@ function deps(
     getChange: async (_p: string, _n: number, cache?: ForgeCache) => {
       reads.push(cache ? "change:cached" : "change");
       const change = makeChangeSet();
-      return { ...change, title: options.title ?? change.title, forgeRef: { ...change.forgeRef, headSha: "newhead" } };
+      return {
+        ...change,
+        title: options.title ?? change.title,
+        author: "alice",
+        forgeRef: { ...change.forgeRef, headSha: "newhead" },
+      };
     },
     getChangeHead: async () => {
       const states = options.states ?? ["open"];
@@ -153,6 +158,10 @@ describe("runJob", () => {
     expect(stored.resolvedConfig).toMatchObject({ repoFile: ".bammy.yaml", sources: { "review.blockOn": "repoSettings" } });
     // The repository file is read at the base revision, never the head.
     expect(reads).toEqual(["change", "base:.bammy.yaml"]);
+    // The findings table follows the run, with the change's author.
+    const findings = await prisma.finding.findMany({ where: { repositoryId, number: 42 } });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ state: "open", author: "alice", lastJobId: job.id });
   });
 
   it("stores a failed review as failed with its errors", async () => {
@@ -163,6 +172,7 @@ describe("runJob", () => {
 
     const stored = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(stored).toMatchObject({ status: "failed", verdict: "error", error: "Review pass 1 failed: provider down" });
+    expect(await prisma.finding.count()).toBe(0);
   });
 
   it("refuses to run without a key for the configured model", async () => {
@@ -389,6 +399,7 @@ describe("runJob when the change closes", () => {
     await runJob(job, runDeps);
 
     expect((await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("cancelled");
+    expect(await prisma.finding.count()).toBe(0);
   });
 });
 

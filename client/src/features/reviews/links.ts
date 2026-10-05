@@ -12,6 +12,11 @@ export function forgeFileUrl(
   return PROVIDERS[change.provider].fileUrl(change.host, change.project, change.headSha, path, startLine, endLine)
 }
 
+// "12" or "12-14", as a finding's location is written.
+export function findingLines(finding: { startLine: number; endLine: number }) {
+  return finding.startLine === finding.endLine ? `${finding.startLine}` : `${finding.startLine}-${finding.endLine}`
+}
+
 export function changeLabel(provider: Provider, number: number) {
   return PROVIDERS[provider].changeLabel(number)
 }

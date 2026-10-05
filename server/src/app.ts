@@ -6,6 +6,7 @@ import { env } from "./config/env.ts";
 import { authRouter } from "./routes/auth.routes.ts";
 import { configRouter } from "./routes/config.routes.ts";
 import { connectionsRouter } from "./routes/connections.routes.ts";
+import { findingsRouter } from "./routes/findings.routes.ts";
 import { reposRouter } from "./routes/repos.routes.ts";
 import { reviewsRouter } from "./routes/reviews.routes.ts";
 import { settingsRouter } from "./routes/settings.routes.ts";
@@ -30,6 +31,7 @@ app.use("/api/connections", connectionsRouter);
 app.use("/api/repos", reposRouter);
 app.use("/api/config", configRouter);
 app.use("/api/reviews", reviewsRouter);
+app.use("/api/findings", findingsRouter);
 app.use("/api/settings", settingsRouter);
 
 app.use((_req, res) => {
