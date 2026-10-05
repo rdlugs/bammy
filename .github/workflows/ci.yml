@@ -19,12 +19,14 @@ jobs:
     timeout-minutes: 25
     env:
       COMPOSE_PROJECT_NAME: bammy-ci
-      COMPOSE_ENV_FILES: ${{ runner.temp }}/bammy-ci.env
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Create disposable development configuration
+        # The runner context is unavailable in job-level env, so later steps get
+        # COMPOSE_ENV_FILES through GITHUB_ENV.
         run: |
-          node --input-type=module <<'JS'
+          echo "COMPOSE_ENV_FILES=$RUNNER_TEMP/bammy-ci.env" >> "$GITHUB_ENV"
+          COMPOSE_ENV_FILES="$RUNNER_TEMP/bammy-ci.env" node --input-type=module <<'JS'
           import { readFileSync, writeFileSync } from 'node:fs';
           import { randomBytes } from 'node:crypto';
           const values = {
