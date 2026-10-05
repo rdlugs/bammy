@@ -94,6 +94,51 @@ describe("GitHubAdapter", () => {
     });
   });
 
+  it("refuses a pagination link to another host", async () => {
+    const { adapter: gh, calls } = adapter([
+      { url: /\/pulls\/42$/, body: { title: "t", body: null, base: { sha: "b", ref: "main" }, head: { sha: "h", ref: "f" } } },
+      {
+        url: /api\.github\.com\/repos\/acme\/web\/pulls\/42\/files/,
+        body: [{ filename: "a.ts", status: "modified", patch: PATCH, changes: 1 }],
+        headers: { link: '<http://169.254.169.254/latest/meta-data?page=2>; rel="next"' },
+      },
+      { url: /169\.254\.169\.254/, body: [] },
+    ]);
+    await expect(gh.getChange("acme/web", 42)).rejects.toThrow(/another host \(http:\/\/169\.254\.169\.254\)/);
+    expect(calls.some((call) => call.url.includes("169.254.169.254"))).toBe(false);
+  });
+
+  it("follows a redirect on the same host, with the token", async () => {
+    const { adapter: gh, calls } = adapter([
+      {
+        url: /\/repos\/acme\/web\/contents\/a\.ts\?ref=main$/,
+        status: 301,
+        body: "",
+        headers: { location: "https://api.github.com/repositories/7/contents/a.ts?ref=main" },
+      },
+      { url: /\/repositories\/7\/contents\/a\.ts\?ref=main$/, body: "export {}" },
+    ]);
+    expect(await gh.getFileAtRef("acme/web", "a.ts", "main")).toBe("export {}");
+    expect(calls[1]!.headers.authorization).toBe(calls[0]!.headers.authorization);
+  });
+
+  it("refuses a redirect to another host", async () => {
+    const { adapter: gh, calls } = adapter([
+      {
+        url: /\/contents\/a\.ts\?ref=main$/,
+        status: 302,
+        body: "",
+        headers: { location: "http://169.254.169.254/latest/meta-data" },
+      },
+      { url: /169\.254\.169\.254/, body: "secret" },
+    ]);
+    await expect(gh.getFileAtRef("acme/web", "a.ts", "main")).rejects.toMatchObject({
+      constructor: ForgeError,
+      status: 502,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
   it("lists installation repositories", async () => {
     const { adapter: gh } = adapter([
       {

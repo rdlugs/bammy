@@ -8,6 +8,25 @@ While Bammy is pre-1.0, minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.1.0-alpha.2] - 2026-10-05
+
+### Security
+
+- Forge requests now stay on the connection's own host. Pagination links and
+  redirects that point elsewhere are refused, so a self-hosted forge can no
+  longer steer the server, with its access token, to internal addresses that
+  the production host check is meant to block.
+
+### Added
+
+- Rate limits for the API (600 requests per minute per user, or per address
+  before sign-in) and for webhooks (300 per minute per address).
+
+### Fixed
+
+- Text containing backslashes before a pipe no longer loses characters in the
+  summary comment's tables.
+
 ## [0.1.0-alpha.1] - 2026-10-05
 
 First public alpha.
@@ -60,5 +79,6 @@ boundaries.
 - The Docker Compose setup is for development, not public production hosting.
 - Registration is open, with no invitation gate.
 
-[Unreleased]: https://github.com/rdlugs/bammy/compare/v0.1.0-alpha.1...HEAD
+[Unreleased]: https://github.com/rdlugs/bammy/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/rdlugs/bammy/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/rdlugs/bammy/releases/tag/v0.1.0-alpha.1
