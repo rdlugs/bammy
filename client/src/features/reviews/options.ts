@@ -17,4 +17,5 @@ const options = <T extends string>(labels: Record<T, string>) =>
 
 export const STATUS_OPTIONS = options(STATUS_LABEL)
 export const VERDICT_OPTIONS = options(VERDICT_LABEL)
-export const TRIGGER_OPTIONS = options<Trigger>({ manual: "Manual", webhook: "Webhook", comment: "Comment" })
+export const TRIGGER_LABEL: Record<Trigger, string> = { manual: "Manual", webhook: "Webhook", comment: "Comment" }
+export const TRIGGER_OPTIONS = options(TRIGGER_LABEL)

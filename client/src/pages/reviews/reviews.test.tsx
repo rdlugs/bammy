@@ -168,8 +168,29 @@ describe("Reviews page rows, filters and stats", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Actions for Add b and c" }))
     await userEvent.click(await screen.findByRole("menuitem", { name: "Re-run" }))
 
+    const dialog = await screen.findByRole("dialog", { name: "Re-run review of Add b and c?" })
+    expect(rerun).not.toHaveBeenCalled()
+    await userEvent.click(within(dialog).getByRole("button", { name: "Re-run review" }))
+
     expect(await screen.findByText("Review queued")).toBeInTheDocument()
     expect(rerun).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  it("does not re-run when the confirmation is cancelled", async () => {
+    const rerun = vi.fn(() => jsonResponse(202, { review: { ...listItem, id: "new", status: "queued" } }))
+    mockApi({
+      "GET /api/reviews?view=changes&page=1&limit=10": firstPage([listItem]),
+      [`POST /api/reviews/${listItem.id}/rerun`]: rerun,
+    })
+    renderWithProviders(<App />, { route: "/reviews" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for Add b and c" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Re-run" }))
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(rerun).not.toHaveBeenCalled()
   })
 
   it("filters on the server and starts over at page 1", async () => {
@@ -289,7 +310,83 @@ describe("Review detail page", () => {
     ).toBeInTheDocument()
   })
 
-    it("explains a review that failed before producing a result", async () => {
+  it("lists failed inline comments and usage in the sidebar", async () => {
+    const publication = {
+      inlinePosted: [],
+      inlineSkipped: 0,
+      inlineFailed: [{ fingerprint: "a", error: "line outside diff" }],
+      summaryCommentId: null,
+      statusState: null,
+      errors: ["Commit status: 403"],
+    }
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: { ...detail, publication } } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const sidebar = await screen.findByRole("complementary", { name: "Review details" })
+    expect(within(sidebar).getByText("1 inline comment failed to post")).toBeInTheDocument()
+    expect(within(sidebar).getByText("Commit status: 403")).toBeInTheDocument()
+    expect(within(sidebar).getByText("1,200")).toBeInTheDocument()
+    expect(within(sidebar).getByText("abcdef1")).toBeInTheDocument()
+  })
+
+  it("starts nitpicks collapsed and expands them on demand", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: detail } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const nitpicks = await screen.findByRole("region", { name: "Nitpick comments" })
+    const trigger = within(nitpicks).getByRole("button", { name: /Rename c/ })
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+
+    await userEvent.click(trigger)
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+
+    await userEvent.click(screen.getByRole("button", { name: "Collapse all" }))
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    expect(
+      within(screen.getByRole("region", { name: "Actionable comments" })).getByRole("button", { name: /SQL injection/ }),
+    ).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("filters findings by severity and clears the filter", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: detail } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const toolbar = await screen.findByRole("toolbar", { name: "Filter findings" })
+    await userEvent.click(within(toolbar).getByRole("button", { name: /critical/ }))
+
+    expect(within(toolbar).getByRole("button", { name: /critical/ })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByText("SQL injection in search")).toBeInTheDocument()
+    expect(screen.queryByText("Rename c")).not.toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "Outside diff range comments" })).not.toBeInTheDocument()
+
+    await userEvent.click(within(toolbar).getByRole("button", { name: "Clear filters" }))
+    expect(screen.getByText("Rename c")).toBeInTheDocument()
+  })
+
+  it("reads severity filters from the URL", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: detail } })
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}?severity=minor` })
+
+    expect(await screen.findByText("Rename c")).toBeInTheDocument()
+    expect(screen.queryByText("SQL injection in search")).not.toBeInTheDocument()
+  })
+
+  it("copies an agent prompt for one finding", async () => {
+    mockApi({ [`GET /api/reviews/${detail.id}`]: { review: detail } })
+    const user = userEvent.setup()
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue()
+    renderWithProviders(<App />, { route: `/reviews/${detail.id}` })
+
+    const actionable = await screen.findByRole("region", { name: "Actionable comments" })
+    await user.click(within(actionable).getByRole("button", { name: "Copy agent prompt" }))
+
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringMatching(/^In src\/app\.ts around line 11: SQL injection in search\n\nWhy it matters\./),
+    )
+    expect(writeText.mock.calls[0][0]).toContain("Suggested replacement for those lines:\n\ndb.query(sql, [q])")
+  })
+
+  it("explains a review that failed before producing a result", async () => {
     mockApi({
       [`GET /api/reviews/${detail.id}`]: {
         review: { ...detail, status: "failed", verdict: "error", result: null, error: "No API key for anthropic" },

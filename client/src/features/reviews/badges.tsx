@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { STATUS_LABEL, VERDICT_LABEL } from "./options"
+import { SEVERITY_CLASS } from "./severity"
 import type { JobStatus, Severity, Trigger, Verdict } from "./types"
 
 // With a reason (why it failed or was skipped), the badge explains itself on hover.
@@ -42,7 +43,6 @@ export function TriggerIcon({ trigger }: { trigger: Trigger }) {
   )
 }
 
-
 export function VerdictBadge({ verdict }: { verdict: Verdict | null }) {
   if (!verdict) return <span className="text-muted-foreground">-</span>
   return (
@@ -56,13 +56,6 @@ export function VerdictBadge({ verdict }: { verdict: Verdict | null }) {
       {VERDICT_LABEL[verdict]}
     </Badge>
   )
-}
-
-const SEVERITY_CLASS: Record<Severity, string> = {
-  critical: "bg-destructive/15 text-destructive",
-  major: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
-  minor: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
-  info: "bg-muted text-muted-foreground",
 }
 
 export function SeverityBadge({ severity }: { severity: Severity }) {
