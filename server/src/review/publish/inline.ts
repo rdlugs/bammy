@@ -24,8 +24,9 @@ export function inlineBody(finding: Finding, provider: ForgeProvider, options: I
     "",
     sanitize(finding.body),
   ];
-  if (finding.evidenceNote) lines.push("", `<sub>Evidence: ${sanitize(finding.evidenceNote)}</sub>`);
   if (finding.suggestion) lines.push("", fence(finding.suggestion, FORGE_INFO[provider].suggestionInfo(finding.startLine, finding.endLine)));
+  // Collapsed like the agent prompt: supporting detail, not what a reader needs first.
+  if (finding.evidenceNote) lines.push("", "<details>", "<summary>Evidence</summary>", "", sanitize(finding.evidenceNote), "", "</details>");
   if (options.agentPrompt !== false) lines.push("", ...agentPromptBlock("Prompt for AI agents", findingPrompt(finding)));
   lines.push("", BRAND_FOOTER, "", fingerprintMarker(finding.fingerprint));
   return lines.join("\n");

@@ -6,10 +6,26 @@ import { STATUS_LABEL, VERDICT_LABEL } from "./options"
 import { SEVERITY_CLASS } from "./severity"
 import type { JobStatus, Severity, Trigger, Verdict } from "./types"
 
+// Same palette as VerdictBadge below and features/forge/ConnectionStatusBadge.tsx.
+// Runs that never produced a review (superseded, skipped) stay muted.
+const STATUS_CLASS: Record<JobStatus, string> = {
+  completed: "border-emerald-600/40 text-emerald-700 dark:text-emerald-400",
+  partial: "border-amber-600/40 text-amber-700 dark:text-amber-400",
+  failed: "border-destructive/40 text-destructive",
+  running: "border-sky-600/40 text-sky-700 dark:text-sky-400",
+  queued: "border-violet-600/40 text-violet-700 dark:text-violet-400",
+  superseded: "text-muted-foreground",
+  skipped: "border-dashed text-muted-foreground",
+}
+
 // With a reason (why it failed or was skipped), the badge explains itself on hover.
 export function StatusBadge({ status, reason }: { status: JobStatus; reason?: string | null }) {
-  const variant = status === "failed" ? "destructive" : status === "completed" ? "secondary" : "outline"
-  const badge = <Badge variant={variant}>{STATUS_LABEL[status]}</Badge>
+  const badge = (
+    <Badge variant="outline" className={STATUS_CLASS[status]}>
+      <span className={cn("size-1.5 rounded-full bg-current", status === "running" && "animate-pulse")} aria-hidden />
+      {STATUS_LABEL[status]}
+    </Badge>
+  )
   if (!reason) return badge
   return (
     <Tooltip>

@@ -94,6 +94,11 @@ async function openTab(name: string) {
   await userEvent.click(await screen.findByRole("tab", { name: new RegExp(`^${name}`) }))
 }
 
+async function choosePreviewView(preview: HTMLElement, name: "Summary" | "In-line") {
+  await userEvent.click(within(preview).getByRole("combobox", { name: "View" }))
+  await userEvent.click(screen.getByRole("option", { name }))
+}
+
 async function selectConnectionOnLlmTab() {
   await openTab("LLM Config")
   await selectOpenAiConnection()
@@ -467,23 +472,31 @@ describe("Configuration page", () => {
     // Bammy never writes to the description, so the preview leaves it out.
     expect(within(preview).queryByRole("region", { name: "Pull request description" })).not.toBeInTheDocument()
     expect(within(preview).getByRole("list", { name: "Labels" })).toHaveTextContent("Medium blast radius")
+    // The summary view is shown first, without the inline threads.
+    expect(within(preview).getByRole("combobox", { name: "View" })).toHaveTextContent("Summary")
     const summary = within(preview).getByRole("region", { name: "Summary comment" })
-    // Posted before the inline comments, so drawn above them.
-    const inlineThreads = within(preview).getByRole("region", { name: "Inline comments" })
-    expect(summary.compareDocumentPosition(inlineThreads) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(preview).queryByRole("region", { name: "Inline comments" })).not.toBeInTheDocument()
     expect(within(summary).getByRole("heading", { name: "Summary" })).toBeInTheDocument()
     expect(summary).toHaveTextContent("Adds a lookup endpoint.")
     // Bammy no longer offers to write into the PR/MR description.
     expect(screen.queryByRole("combobox", { name: "Comment location" })).not.toBeInTheDocument()
     // Hidden markers stay hidden, as on the forge.
     expect(preview).not.toHaveTextContent("bammy:summary")
-    const suggestion = within(preview).getByRole("group", { name: "Suggested change" })
-    expect(suggestion).toHaveTextContent("- const rows = old()")
-    expect(suggestion).toHaveTextContent("Commit suggestion")
     expect(within(preview).getByRole("region", { name: "Commit status" })).toHaveTextContent(
       "Failing: 1 finding at or above critical",
     )
     expect(bodies.at(-1)).toMatchObject({ provider: "github", base: { review: { blockOn: "critical" } } })
+
+    const sent = bodies.length
+    await choosePreviewView(preview, "In-line")
+    expect(within(preview).getByRole("region", { name: "Inline comments" })).toBeInTheDocument()
+    expect(within(preview).queryByRole("region", { name: "Summary comment" })).not.toBeInTheDocument()
+    expect(within(preview).queryByRole("region", { name: "Commit status" })).not.toBeInTheDocument()
+    // Switching views reuses the loaded preview.
+    expect(bodies).toHaveLength(sent)
+    const suggestion = within(preview).getByRole("group", { name: "Suggested change" })
+    expect(suggestion).toHaveTextContent("- const rows = old()")
+    expect(suggestion).toHaveTextContent("Commit suggestion")
 
     await userEvent.click(screen.getByRole("switch", { name: "Post inline comments" }))
     await waitFor(() => expect(within(preview).queryByRole("region", { name: "Inline comments" })).not.toBeInTheDocument())
@@ -503,6 +516,7 @@ describe("Configuration page", () => {
     await userEvent.click(screen.getByRole("option", { name: "GitLab" }))
 
     expect(await within(preview).findByText("!42")).toBeInTheDocument()
+    await choosePreviewView(preview, "In-line")
     expect(within(preview).getByRole("group", { name: "Suggested change" })).toHaveTextContent("Apply suggestion")
     expect(bodies.at(-1)?.provider).toBe("gitlab")
   })
@@ -524,13 +538,30 @@ describe("Configuration page", () => {
     expect(all).toBeDisabled()
   })
 
+  it("shows one example inline thread", async () => {
+    const second = { ...PREVIEW.inline[0]!, path: "src/api/orders.ts", startLine: 3, endLine: 3 }
+    mockApi(globalRoutes({ "POST /api/config/preview": { ...PREVIEW, inline: [...PREVIEW.inline, second] } }))
+    renderWithProviders(<App />, { route: "/configuration?tab=display" })
+
+    const preview = await screen.findByRole("region", { name: "Review preview" })
+    await within(preview).findByText("#42")
+    await choosePreviewView(preview, "In-line")
+
+    expect(within(preview).getAllByRole("group", { name: "Suggested change" })).toHaveLength(1)
+    expect(within(preview).getByText("src/api/users.ts")).toBeInTheDocument()
+    expect(within(preview).queryByText("src/api/orders.ts")).not.toBeInTheDocument()
+    expect(within(preview).getByText(/One example/)).toBeInTheDocument()
+  })
+
   it("says when nothing is posted", async () => {
     mockApi(globalRoutes({ "POST /api/config/preview": { ...PREVIEW, pr: { ...PREVIEW.pr, labels: [] }, ...NOTHING } }))
     renderWithProviders(<App />, { route: "/configuration?tab=display" })
 
     const preview = await screen.findByRole("region", { name: "Review preview" })
-    expect(await within(preview).findByText(/Bammy posts nothing to the change/)).toBeInTheDocument()
+    expect(await within(preview).findByText(/Bammy posts no summary to the change/)).toBeInTheDocument()
     expect(within(preview).queryByText("No description provided.")).not.toBeInTheDocument()
+    await choosePreviewView(preview, "In-line")
+    expect(within(preview).getByText("Bammy posts no inline comments on the diff.")).toBeInTheDocument()
   })
 
   it("sends the finding settings, and holds the preview while a value is invalid", async () => {
