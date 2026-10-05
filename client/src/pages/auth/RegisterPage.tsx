@@ -25,7 +25,7 @@ export function RegisterPage() {
     try {
       const user = await register(values)
       toast.success(`Welcome, ${user.name}!`)
-      navigate("/dashboard", { replace: true })
+      navigate("/home", { replace: true })
     } catch (error) {
       applyServerErrors(error, form.setError)
     }

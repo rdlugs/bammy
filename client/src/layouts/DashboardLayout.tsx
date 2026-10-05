@@ -4,8 +4,8 @@ import {
   ChevronsUpDown,
   FolderGit2,
   GitPullRequest,
+  House,
   KeyRound,
-  LayoutDashboard,
   LogOut,
   Settings,
   SlidersHorizontal,
@@ -38,7 +38,7 @@ import {
 import { useAuth } from "@/features/auth/useAuth"
 
 const NAV = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/home", label: "Home", icon: House },
   { to: "/reviews", label: "Reviews", icon: GitPullRequest },
   { to: "/findings", label: "Findings", icon: Bug },
   { to: "/repositories", label: "Repositories", icon: FolderGit2 },
@@ -49,7 +49,7 @@ const NAV = [
 function pageTitle(pathname: string) {
   if (pathname.startsWith("/reviews/")) return "Review"
   if (pathname.startsWith("/settings")) return "Settings"
-  return NAV.find((item) => pathname.startsWith(item.to))?.label ?? "Dashboard"
+  return NAV.find((item) => pathname.startsWith(item.to))?.label ?? "Home"
 }
 
 function initials(name: string) {

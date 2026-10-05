@@ -15,7 +15,7 @@ export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const from = (location.state as { from?: string } | null)?.from ?? "/dashboard"
+  const from = (location.state as { from?: string } | null)?.from ?? "/home"
 
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),

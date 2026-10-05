@@ -3,7 +3,7 @@ import { ProtectedRoute } from "@/features/auth/ProtectedRoute"
 import { PublicOnlyRoute } from "@/features/auth/PublicOnlyRoute"
 import { DashboardLayout } from "@/layouts/DashboardLayout"
 import { ConfigurationPage } from "@/pages/config/ConfigurationPage"
-import { DashboardPage } from "@/pages/dashboard/DashboardPage"
+import { HomePage } from "@/pages/home/HomePage"
 import { FindingsPage } from "@/pages/findings/FindingsPage"
 import { LlmConnectionsPage } from "@/pages/llm-connections/LlmConnectionsPage"
 import { LoginPage } from "@/pages/auth/LoginPage"
@@ -30,7 +30,9 @@ export function App() {
       </Route>
       <Route element={<ProtectedRoute />}>
         <Route element={<DashboardLayout />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/home" element={<HomePage />} />
+          {/* Old bookmarks and links. */}
+          <Route path="/dashboard" element={<Navigate to="/home" replace />} />
           <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/reviews/:id" element={<ReviewDetailPage />} />
           <Route path="/findings" element={<FindingsPage />} />
@@ -41,7 +43,7 @@ export function App() {
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>
   )
 }

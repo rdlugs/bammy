@@ -1,0 +1,135 @@
+import { useState, type ReactNode } from "react"
+import { Link } from "react-router"
+import { BookOpen, FolderGit2, GitPullRequest, KeyRound, SlidersHorizontal, type LucideIcon } from "lucide-react"
+import { Card, CardContent } from "@/components/ui/card"
+import { useGlobalConfig } from "@/features/config/api"
+import { useConnections, useRepos } from "@/features/forge/api"
+import { ManualReviewSheet } from "@/features/reviews/ManualReviewSheet"
+import { ConnectionsPanel } from "./ConnectionsPanel"
+import { RecentReviewsTimeline } from "./RecentReviewsTimeline"
+import { StatusHero } from "./StatusHero"
+
+const DOCS_URL = "https://github.com/rdlugs/bammy#readme"
+
+function IconTile({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted/50">
+      <Icon className="size-4" aria-hidden />
+    </span>
+  )
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return <h3 className="text-sm text-muted-foreground">{children}</h3>
+}
+
+function CodebaseCard({ icon, title, text, link }: { icon: LucideIcon; title: string; text: string; link: { label: string; to: string } }) {
+  return (
+    <Card className="bg-muted/30">
+      <CardContent className="flex h-full flex-col items-start gap-4">
+        <IconTile icon={icon} />
+        <div className="flex flex-col gap-1">
+          <h4 className="text-sm font-medium">{title}</h4>
+          <p className="text-sm text-muted-foreground">{text}</p>
+        </div>
+        <Link to={link.to} className="mt-auto text-sm font-medium hover:underline">
+          {link.label}
+        </Link>
+      </CardContent>
+    </Card>
+  )
+}
+
+const actionRow = "flex w-full items-center gap-4 rounded-xl border bg-card px-5 py-4 text-left transition-colors hover:bg-accent/50"
+
+function ActionText({ title, text }: { title: string; text: string }) {
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span className="text-sm font-medium">{title}</span>
+      <span className="text-sm text-muted-foreground">{text}</span>
+    </span>
+  )
+}
+
+function plural(count: number, noun: string, nouns = `${noun}s`) {
+  return `${count} ${count === 1 ? noun : nouns}`
+}
+
+function capitalize(text: string) {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+export function HomePage() {
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const connections = useConnections().data?.connections ?? []
+  const repos = useRepos().data?.repos ?? []
+  const config = useGlobalConfig().data?.config
+
+  const enabledRepos = repos.filter((r) => r.enabled).length
+  const blockOn = config?.review.blockOn
+  const configText = config
+    ? `${capitalize(config.profile)} profile, blocks on ${blockOn === "critical" ? "critical" : `${blockOn} or worse`} findings.`
+    : "Choose what reviews look for and when they block."
+
+  return (
+    <main className="flex-1 p-6">
+      <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="flex flex-col gap-8">
+          <h2 className="text-2xl font-semibold tracking-tight">Overview</h2>
+
+          <StatusHero />
+
+          <section className="flex flex-col gap-3">
+            <SectionLabel>From your codebase</SectionLabel>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <CodebaseCard
+                icon={FolderGit2}
+                title="Repositories"
+                text={
+                  enabledRepos === 0
+                    ? "No repositories enabled yet."
+                    : `${plural(enabledRepos, "repository", "repositories")} enabled across ${plural(connections.length, "connection")}.`
+                }
+                link={{ label: "Manage repositories", to: "/repositories" }}
+              />
+              <CodebaseCard
+                icon={SlidersHorizontal}
+                title="Review configuration"
+                text={configText}
+                link={{ label: "Configure reviews", to: "/configuration" }}
+              />
+            </div>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <SectionLabel>Suggested actions</SectionLabel>
+            <button type="button" className={actionRow} onClick={() => setReviewOpen(true)}>
+              <IconTile icon={GitPullRequest} />
+              <ActionText title="Review a change" text="Pick an open pull request or paste a link to review it now." />
+            </button>
+            <Link to="/llm-connections" className={actionRow}>
+              <IconTile icon={KeyRound} />
+              <ActionText title="Connect an LLM provider" text="Add an Anthropic, OpenAI, Google or Ollama key for reviews." />
+            </Link>
+          </section>
+        </div>
+
+        <aside className="flex flex-col gap-5">
+          <ConnectionsPanel />
+          <RecentReviewsTimeline />
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-3 rounded-md py-1 text-sm transition-colors hover:text-muted-foreground"
+          >
+            <IconTile icon={BookOpen} />
+            Documentation
+          </a>
+        </aside>
+      </div>
+
+      <ManualReviewSheet open={reviewOpen} onOpenChange={setReviewOpen} />
+    </main>
+  )
+}

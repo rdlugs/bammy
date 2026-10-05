@@ -3,37 +3,32 @@ import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { App } from "./App"
 import { jsonResponse, mockFetch, renderWithProviders } from "./test/renderWithProviders"
+import { mockApi } from "./test/apiRoutes"
 
 const user = { id: "1", name: "Ada Lovelace", email: "ada@example.com", createdAt: "" }
 
 describe("routing and auth", () => {
-  it("redirects an anonymous visitor from /dashboard to the login page", async () => {
+  it("redirects an anonymous visitor from /home to the login page", async () => {
     mockFetch(() => jsonResponse(401, { message: "Not authenticated" }))
-    renderWithProviders(<App />, { route: "/dashboard" })
+    renderWithProviders(<App />, { route: "/home" })
 
     expect(await screen.findByText("Welcome back")).toBeInTheDocument()
   })
 
-  it("shows the dashboard with setup steps for a new user", async () => {
-    mockFetch((url) =>
-      url.includes("/connections")
-        ? jsonResponse(200, { connections: [], availableApps: ["github"] })
-        : url.includes("/reviews")
-          ? jsonResponse(200, { reviews: [], total: 0, page: 1, limit: 10 })
-          : jsonResponse(200, { user }),
-    )
+  it("sends a new user from the old /dashboard link to Home, which asks for a Git provider", async () => {
+    mockApi({ "GET /api/connections": { connections: [], availableApps: ["github"] } })
     renderWithProviders(<App />, { route: "/dashboard" })
 
-    expect(await screen.findByText("Welcome, Ada Lovelace")).toBeInTheDocument()
-    expect(await screen.findByText("Get started")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Connect GitHub or GitLab" })).toHaveAttribute("href", "/repositories?tab=installation")
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument()
+    expect(await screen.findByText("Connect a Git provider")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Connect a provider" })).toHaveAttribute("href", "/repositories?tab=installation")
   })
 
   it("redirects a logged-in user away from /login", async () => {
-    mockFetch(() => jsonResponse(200, { user }))
+    mockApi({})
     renderWithProviders(<App />, { route: "/login" })
 
-    expect(await screen.findByText("Welcome, Ada Lovelace")).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument()
   })
 })
 
@@ -54,7 +49,7 @@ describe("register form", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1) // only the initial /auth/me check
   })
 
-  it("registers and lands on the dashboard", async () => {
+  it("registers and lands on Home", async () => {
     mockFetch((url) =>
       url.endsWith("/auth/register")
         ? jsonResponse(201, { user })
@@ -68,7 +63,7 @@ describe("register form", () => {
     await userEvent.type(screen.getByLabelText("Confirm password"), "supersecret123")
     await userEvent.click(screen.getByRole("button", { name: "Create account" }))
 
-    expect(await screen.findByText("Welcome, Ada Lovelace")).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument()
   })
 })
 
