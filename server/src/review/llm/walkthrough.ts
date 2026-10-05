@@ -4,7 +4,7 @@ import { estimateTokens } from "../context/budget.ts";
 import { renderFileDiff } from "../context/diffText.ts";
 import { WALKTHROUGH_SYSTEM_PROMPT, walkthroughUserPrompt } from "./prompt.ts";
 import { generateWithFallback, type Generate } from "./providers.ts";
-import { walkthroughOutputSchema } from "./schemas.ts";
+import { repairWalkthroughOutput, walkthroughOutputSchema } from "./schemas.ts";
 
 // The overview needs breadth, not every line: files are included whole until
 // this budget, then listed by name only.
@@ -39,6 +39,7 @@ export async function generateWalkthrough(
     prompt: walkthroughUserPrompt(changeSet, overviewDiff(files)),
     schema: walkthroughOutputSchema,
     schemaName: "walkthrough",
+    repair: repairWalkthroughOutput,
     temperature: config.llm.temperature,
     maxOutputTokens: Math.min(config.llm.maxTokens, 4000),
   });
