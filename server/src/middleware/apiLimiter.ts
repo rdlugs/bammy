@@ -10,20 +10,19 @@ function userOrIp(req: Request): string {
 }
 
 // Generous enough for dashboard polling; it exists to bound runaway clients and
-// scripted abuse of endpoints that queue model work or call forges.
-export function createUserLimiter(limit: number, skip: () => boolean = () => false) {
-  return rateLimit({
-    windowMs: 60 * 1000,
-    limit,
-    keyGenerator: userOrIp,
-    standardHeaders: "draft-8",
-    legacyHeaders: false,
-    skip,
-    message: { message: "Too many requests, please slow down" },
-  });
-}
+// scripted abuse of endpoints that queue model work or call forges. Exported so
+// tests can build a lower limit; the limiter itself is a direct rateLimit call
+// so code scanning recognizes it on every route.
+export const userLimitOptions = {
+  windowMs: 60 * 1000,
+  limit: 600,
+  keyGenerator: userOrIp,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { message: "Too many requests, please slow down" },
+} as const;
 
-export const userLimiter = createUserLimiter(600, () => env.NODE_ENV === "test");
+export const userLimiter = rateLimit({ ...userLimitOptions, skip: () => env.NODE_ENV === "test" });
 
 // Webhooks arrive unauthenticated until their signature is checked, so they are
 // limited by sender before the body is read.

@@ -1,7 +1,8 @@
 import express from "express";
+import rateLimit from "express-rate-limit";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createUserLimiter } from "../src/middleware/apiLimiter.ts";
+import { userLimitOptions } from "../src/middleware/apiLimiter.ts";
 
 // A bare app stands in for requireAuth with an x-user header, so the limiter
 // is tested on its own instead of through the database.
@@ -11,13 +12,13 @@ function limitedApp(limit: number) {
     req.userId = req.header("x-user") ?? undefined;
     next();
   });
-  app.get("/", createUserLimiter(limit), (_req, res) => {
+  app.get("/", rateLimit({ ...userLimitOptions, limit }), (_req, res) => {
     res.json({ ok: true });
   });
   return app;
 }
 
-describe("createUserLimiter", () => {
+describe("userLimiter", () => {
   it("answers 429 with a JSON message once a user is over the limit", async () => {
     const app = limitedApp(2);
     await request(app).get("/").set("x-user", "u1").expect(200);
