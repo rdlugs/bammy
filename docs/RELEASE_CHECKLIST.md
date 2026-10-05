@@ -14,8 +14,7 @@
 - Compose defaults API and worker to development and resolves production when
   selected. Container checks confirm production secure cookies and forge-host
   restrictions, development behavior, and rejection of the invalid value `prod`.
-- CI YAML parses. The hosted GitHub Actions run still needs verification after
-  an authorized push; no repository settings have been changed.
+- The hosted GitHub Actions run passes on the release pull request.
 - Gitleaks scans all 37 local Git commits and tracked/publishable new files without
   finding leaks. Ignored environment files are excluded from the publishable-file
   scan. A separate scan of the disposable setup flagged its intentionally generated
@@ -50,7 +49,8 @@ The underlying advisories reported by npm are
   link in SECURITY.md and CODE_OF_CONDUCT.md works for reporters.
 - [x] Review and explicitly accept or remediate the dependency audit findings for
   the alpha release.
-- [ ] Obtain a passing hosted CI run after an authorized commit and push.
+- [x] Obtain a passing hosted CI run after an authorized commit and push
+  ([run 37313406503](https://github.com/rdlugs/bammy/actions/runs/37313406503)).
 - [ ] Announce alpha status, AI review limitations, and development-only Docker
   infrastructure. `NODE_ENV=production` changes backend behavior, not deployment
   infrastructure.
