@@ -15,6 +15,23 @@ export interface ChangeHead {
   isDraft: boolean;
 }
 
+// An open PR/MR as listed for picking one to review by hand.
+export interface ChangeSummary {
+  number: number;
+  title: string;
+  author?: string;
+  isDraft: boolean;
+  headSha: string;
+  sourceBranch: string;
+  targetBranch: string;
+  webUrl: string;
+  updatedAt: string;
+}
+
+// Busy repositories can have thousands of open changes; the most recently
+// updated few hundred are the ones anyone would pick by hand.
+export const MAX_OPEN_CHANGE_PAGES = 3;
+
 export interface ForgeAccount {
   login: string;
 }
@@ -30,6 +47,8 @@ export interface ForgeAdapter {
   getChange(project: string, number: number): Promise<ChangeSet>;
   // Just enough to queue a review, without fetching the diff.
   getChangeHead(project: string, number: number): Promise<ChangeHead>;
+  // Open changes, most recently updated first.
+  listOpenChanges(project: string): Promise<ChangeSummary[]>;
   // Raw file content at a ref, or null when the file does not exist there.
   getFileAtRef(project: string, path: string, ref: string): Promise<string | null>;
 }

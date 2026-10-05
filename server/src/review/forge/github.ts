@@ -5,7 +5,9 @@ import { ForgeError, ForgeHttp, isNotFound, linkHeaderNext, type FetchLike } fro
 import { githubApiBase } from "./githubApp.ts";
 import {
   STATUS_CONTEXT,
+  MAX_OPEN_CHANGE_PAGES,
   type ChangeHead,
+  type ChangeSummary,
   type CommitStatus,
   type ForgeAccount,
   type ForgeAdapter,
@@ -39,6 +41,8 @@ interface GhRepo {
 }
 
 interface GhPull {
+  number: number;
+  updated_at: string;
   state: "open" | "closed";
   merged?: boolean;
   merged_at?: string | null;
@@ -204,6 +208,25 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       state: merged ? "merged" : pull.state,
       isDraft: pull.draft ?? false,
     };
+  }
+
+  async listOpenChanges(project: string): Promise<ChangeSummary[]> {
+    const pulls = await this.http.paginate<GhPull>(
+      `${repoApiPath(project)}/pulls?state=open&sort=updated&direction=desc&per_page=100`,
+      linkHeaderNext,
+      MAX_OPEN_CHANGE_PAGES,
+    );
+    return pulls.map((pull) => ({
+      number: pull.number,
+      title: pull.title,
+      author: pull.user?.login,
+      isDraft: pull.draft ?? false,
+      headSha: pull.head.sha,
+      sourceBranch: pull.head.ref,
+      targetBranch: pull.base.ref,
+      webUrl: pull.html_url,
+      updatedAt: pull.updated_at,
+    }));
   }
 
   async getFileAtRef(project: string, path: string, ref: string): Promise<string | null> {

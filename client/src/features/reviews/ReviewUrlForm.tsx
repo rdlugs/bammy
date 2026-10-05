@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { ApiError } from "@/lib/api"
 import { useCreateReview } from "./api"
 
-export function ReviewUrlForm() {
+export function ReviewUrlForm({ onQueued }: { onQueued?: () => void }) {
   const [url, setUrl] = useState("")
   const [error, setError] = useState<string | null>(null)
   const createReview = useCreateReview()
@@ -17,8 +17,9 @@ export function ReviewUrlForm() {
     event.preventDefault()
     setError(null)
     try {
-      const { review } = await createReview.mutateAsync(url)
+      const { review } = await createReview.mutateAsync({ url })
       setUrl("")
+      onQueued?.()
       navigate(`/reviews/${review.id}`)
     } catch (err) {
       setError(err instanceof ApiError ? (err.fieldErrors?.url?.[0] ?? err.message) : "Something went wrong")

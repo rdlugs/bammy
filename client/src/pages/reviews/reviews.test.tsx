@@ -43,6 +43,7 @@ describe("Reviews page", () => {
     renderWithProviders(<App />, { route: "/reviews" })
 
     expect(await screen.findByText("No reviews yet")).toBeInTheDocument()
+    await openManualReview()
     await userEvent.type(screen.getByLabelText("Review a pull or merge request"), "https://github.com/acme/web/pull/1")
     await userEvent.click(screen.getByRole("button", { name: "Review" }))
 
@@ -57,11 +58,76 @@ describe("Reviews page", () => {
     })
     renderWithProviders(<App />, { route: "/reviews" })
 
+    await openManualReview()
     await userEvent.type(await screen.findByLabelText("Review a pull or merge request"), "https://github.com/acme/web/pull/42")
     await userEvent.click(screen.getByRole("button", { name: "Review" }))
 
     expect(await screen.findByText("Waiting for a worker...")).toBeInTheDocument()
   })
+
+  it("lists a repository's open changes and reviews the one picked", async () => {
+    const queued = vi.fn((init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ repoId: "r1", number: 4 })
+      return jsonResponse(202, { review: { ...listItem, status: "queued", verdict: null } })
+    })
+    mockApi({
+      "GET /api/reviews?view=changes&page=1&limit=10": { reviews: [], total: 0, page: 1, limit: 10 },
+      "GET /api/repos": { repos: [savedRepo("r1", "team/web"), savedRepo("r2", "team/off", { enabled: false })] },
+      "GET /api/repos/r1/changes": {
+        changes: [openChange(4, "Add search"), openChange(5, "Fix login", { isDraft: true })],
+      },
+      "POST /api/reviews": queued,
+      [`GET /api/reviews/${listItem.id}`]: { review: { ...detail, status: "queued", verdict: null, result: null } },
+    })
+    renderWithProviders(<App />, { route: "/reviews" })
+
+    await openManualReview()
+    await userEvent.click(await screen.findByRole("combobox", { name: "Repository" }))
+    expect(screen.queryByRole("option", { name: /team\/off/ })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("option", { name: /team\/web/ }))
+
+    const list = await screen.findByRole("list", { name: "Open merge requests" })
+    expect(within(list).getByText("Fix login")).toBeInTheDocument()
+    expect(within(list).getByText("Draft")).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText("Filter merge requests"), "search")
+    expect(within(list).queryByText("Fix login")).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Review !4" }))
+
+    expect(await screen.findByText("Waiting for a worker...")).toBeInTheDocument()
+    expect(queued).toHaveBeenCalledOnce()
+  })
+})
+
+async function openManualReview() {
+  await userEvent.click((await screen.findAllByRole("button", { name: "Manual review" }))[0]!)
+}
+
+const savedRepo = (id: string, fullPath: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  connectionId: "c1",
+  account: { login: "dev", provider: "gitlab", host: "gitlab.com" },
+  externalId: id,
+  fullPath,
+  defaultBranch: "main",
+  webUrl: `https://gitlab.com/${fullPath}`,
+  enabled: true,
+  settings: {},
+  followGlobal: true,
+  ...extra,
+})
+
+const openChange = (number: number, title: string, extra: Record<string, unknown> = {}) => ({
+  number,
+  title,
+  author: "dev",
+  isDraft: false,
+  headSha: `h${number}`,
+  sourceBranch: `feature-${number}`,
+  targetBranch: "main",
+  webUrl: `https://gitlab.com/team/web/-/merge_requests/${number}`,
+  updatedAt: new Date().toISOString(),
+  ...extra,
 })
 
 describe("Reviews page rows, filters and stats", () => {

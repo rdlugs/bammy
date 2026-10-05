@@ -167,3 +167,17 @@ export async function getRepoConfig(req: Request, res: Response) {
   });
   res.json({ ref: repo.defaultBranch, ...loaded });
 }
+
+// Open pull/merge requests, for picking one to review by hand. Read live from
+// the forge; Bammy only knows about changes it has already reviewed.
+export async function listRepoChanges(req: Request, res: Response) {
+  const { id } = repoIdParamSchema.parse(req.params);
+  const repo = await loadOwnedRepo(req.userId!, id);
+
+  const changes = await adapterForConnection(repo.connection)
+    .listOpenChanges(repo.fullPath)
+    .catch((err: unknown) => {
+      throw toHttpError(err, repo.provider);
+    });
+  res.json({ changes });
+}

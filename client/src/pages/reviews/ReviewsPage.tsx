@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { GitPullRequest } from "lucide-react"
+import { GitPullRequest, Play } from "lucide-react"
 import {
   ActiveFilterChips,
   FilterPopover,
@@ -9,8 +9,9 @@ import {
   type ActiveFilter,
 } from "@/components/TableFilters"
 import { TablePagination } from "@/components/TablePagination"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
@@ -21,7 +22,7 @@ import { useRepos } from "@/features/forge/api"
 import { useReviews, type ReviewQuery } from "@/features/reviews/api"
 import { STATUS_OPTIONS, TRIGGER_OPTIONS, VERDICT_OPTIONS } from "@/features/reviews/options"
 import { ReviewStatsStrip } from "@/features/reviews/ReviewStatsStrip"
-import { ReviewUrlForm } from "@/features/reviews/ReviewUrlForm"
+import { ManualReviewSheet } from "@/features/reviews/ManualReviewSheet"
 import { ReviewsTable } from "@/features/reviews/ReviewsTable"
 
 type View = "changes" | "runs"
@@ -47,6 +48,7 @@ export function ReviewsPage() {
   const [repo, setRepo] = useState(ALL)
   const [includeSuperseded, setIncludeSuperseded] = useState(false)
   const [query, setQuery] = useState("")
+  const [manualOpen, setManualOpen] = useState(false)
   const q = useDebounced(query.trim())
 
   const repos = useRepos()
@@ -110,11 +112,6 @@ export function ReviewsPage() {
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-6">
-      <Card>
-        <CardContent>
-          <ReviewUrlForm />
-        </CardContent>
-      </Card>
       <ReviewStatsStrip />
       <FilterToolbar>
         <Tabs value={view} onValueChange={(value) => filterBy(setView)(value as View)} className="mr-auto">
@@ -170,6 +167,10 @@ export function ReviewsPage() {
             />
           </div>
         </FilterPopover>
+        <Button variant="outline" onClick={() => setManualOpen(true)}>
+          <Play />
+          Manual review
+        </Button>
         <SearchInput label="Search reviews" value={query} onChange={filterBy(setQuery)} />
       </FilterToolbar>
       {isPending ? (
@@ -183,8 +184,14 @@ export function ReviewsPage() {
               <GitPullRequest />
             </EmptyMedia>
             <EmptyTitle>No reviews yet</EmptyTitle>
-            <EmptyDescription>Paste a pull or merge request link above to run the first one.</EmptyDescription>
+            <EmptyDescription>Start a manual review to run the first one.</EmptyDescription>
           </EmptyHeader>
+          <EmptyContent>
+            <Button onClick={() => setManualOpen(true)}>
+              <Play />
+              Manual review
+            </Button>
+          </EmptyContent>
         </Empty>
       ) : data.total === 0 ? (
         <Card>
@@ -206,6 +213,7 @@ export function ReviewsPage() {
           </CardContent>
         </Card>
       )}
+      <ManualReviewSheet open={manualOpen} onOpenChange={setManualOpen} />
     </main>
   )
 }

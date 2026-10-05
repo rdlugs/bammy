@@ -5,7 +5,9 @@ import { ForgeHttp, isNotFound, type FetchLike } from "./http.ts";
 import {
   hostOrigin,
   STATUS_CONTEXT,
+  MAX_OPEN_CHANGE_PAGES,
   type ChangeHead,
+  type ChangeSummary,
   type CommitState,
   type CommitStatus,
   type ForgeAccount,
@@ -35,6 +37,8 @@ interface GlProject {
 }
 
 interface GlMergeRequest {
+  iid: number;
+  updated_at: string;
   state: "opened" | "closed" | "merged" | "locked";
   sha: string;
   title: string;
@@ -146,13 +150,27 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return toRepo(await this.http.json<GlProject>(this.project(externalId)));
   }
 
+  // `/diffs` arrived in GitLab 15.7; older self-managed instances 404 on it.
+  // `/changes` (deprecated, still in API v4) returns the same diff objects in
+  // one unpaginated response, so fall back to it only on a 404. The MR itself
+  // was just fetched, so a 404 here means the route is missing, not the MR.
+  private async mergeRequestDiffs(base: string): Promise<GlDiff[]> {
+    try {
+      return await this.http.paginate<GlDiff>(`${base}/diffs?per_page=100`, nextPage);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+      const mr = await this.http.json<{ changes?: GlDiff[] }>(`${base}/changes`);
+      return mr.changes ?? [];
+    }
+  }
+
   async getChange(project: string, number: number): Promise<ChangeSet> {
     const base = `${this.project(project)}/merge_requests/${number}`;
     const mr = await this.http.json<GlMergeRequest>(base);
     if (!mr.diff_refs) {
       throw new Error(`Merge request !${number} has no diff yet`);
     }
-    const diffs = await this.http.paginate<GlDiff>(`${base}/diffs?per_page=100`, nextPage);
+    const diffs = await this.mergeRequestDiffs(base);
 
     return {
       forgeRef: {
@@ -192,6 +210,25 @@ export class GitLabAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       state: mr.state === "merged" ? "merged" : mr.state === "closed" ? "closed" : "open",
       isDraft: mr.draft ?? mr.work_in_progress ?? false,
     };
+  }
+
+  async listOpenChanges(project: string): Promise<ChangeSummary[]> {
+    const mrs = await this.http.paginate<GlMergeRequest>(
+      `${this.project(project)}/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100`,
+      nextPage,
+      MAX_OPEN_CHANGE_PAGES,
+    );
+    return mrs.map((mr) => ({
+      number: mr.iid,
+      title: mr.title,
+      author: mr.author?.username,
+      isDraft: mr.draft ?? mr.work_in_progress ?? false,
+      headSha: mr.sha,
+      sourceBranch: mr.source_branch,
+      targetBranch: mr.target_branch,
+      webUrl: mr.web_url,
+      updatedAt: mr.updated_at,
+    }));
   }
 
   async getFileAtRef(project: string, path: string, ref: string): Promise<string | null> {
