@@ -76,6 +76,7 @@
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
     --radius: 0.625rem;
+    --dot-color: oklch(0.145 0 0 / 0.14);
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
@@ -118,6 +119,34 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    /* Light dots glow on dark surfaces, so they need less alpha to match. */
+    --dot-color: oklch(1 0 0 / 0.11);
+}
+
+/* Faint dot grid behind page content, fading out about a screen down so long
+   tables stay clean. It sits on a ::before layer: isolation keeps the
+   z-index -1 layer above the element's own background but under all of its
+   children, so content needs no z-index of its own. Needs a positioned element. */
+@utility bg-dots {
+  isolation: isolate;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: radial-gradient(circle at center, var(--dot-color) 1px, transparent 1.5px);
+    background-size: 20px 20px;
+    background-position: center top;
+    mask-image: linear-gradient(to bottom, #000, transparent 40rem);
+  }
+
+  @media (prefers-contrast: more) {
+    &::before {
+      display: none;
+    }
+  }
 }
 
 @layer base {

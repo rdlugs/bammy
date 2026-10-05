@@ -156,7 +156,7 @@ export function DashboardLayout() {
       </Sidebar>
       {/* min-w-0 lets wide content (code blocks, tables) scroll inside the
           page instead of stretching the whole layout past the viewport. */}
-      <SidebarInset className="min-w-0">
+      <SidebarInset className="min-w-0 bg-dots">
         <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-backdrop-filter:bg-background/80 lg:px-6">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />

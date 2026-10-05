@@ -3,7 +3,7 @@ import { ModeToggle } from "@/components/mode-toggle"
 
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="relative flex min-h-svh flex-col items-center justify-center gap-6 bg-muted p-6 md:p-10">
+    <div className="relative flex min-h-svh flex-col items-center justify-center gap-6 bg-muted bg-dots p-6 md:p-10">
       <div className="absolute top-4 right-4">
         <ModeToggle />
       </div>
