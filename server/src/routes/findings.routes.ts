@@ -5,7 +5,7 @@ import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const findingsRouter = Router();
 
-findingsRouter.use(requireAuth, userLimiter);
+findingsRouter.use(userLimiter, requireAuth);
 findingsRouter.get("/", listFindings);
 // Before "/:id", which would reject "stats" as a malformed id.
 findingsRouter.get("/stats", getFindingStats);

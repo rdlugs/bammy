@@ -12,7 +12,7 @@ import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const reviewsRouter = Router();
 
-reviewsRouter.use(requireAuth, userLimiter);
+reviewsRouter.use(userLimiter, requireAuth);
 reviewsRouter.get("/", listReviews);
 reviewsRouter.post("/", createReview);
 // Before "/:id", which would reject "stats" as a malformed id.

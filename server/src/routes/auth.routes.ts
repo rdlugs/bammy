@@ -9,4 +9,4 @@ export const authRouter = Router();
 authRouter.post("/register", authLimiter, register);
 authRouter.post("/login", authLimiter, login);
 authRouter.post("/logout", userLimiter, logout);
-authRouter.get("/me", requireAuth, userLimiter, me);
+authRouter.get("/me", userLimiter, requireAuth, me);

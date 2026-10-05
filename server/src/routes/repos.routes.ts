@@ -5,7 +5,7 @@ import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const reposRouter = Router();
 
-reposRouter.use(requireAuth, userLimiter);
+reposRouter.use(userLimiter, requireAuth);
 reposRouter.get("/", listRepos);
 reposRouter.get("/available", listAvailableRepos);
 reposRouter.post("/", enableRepo);

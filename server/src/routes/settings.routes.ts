@@ -15,7 +15,7 @@ import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const settingsRouter = Router();
 
-settingsRouter.use(requireAuth, userLimiter);
+settingsRouter.use(userLimiter, requireAuth);
 settingsRouter.patch("/profile", updateProfile);
 settingsRouter.put("/password", authLimiter, changePassword);
 settingsRouter.get("/api-keys", listApiKeys);

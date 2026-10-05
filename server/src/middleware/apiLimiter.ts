@@ -1,12 +1,17 @@
 import type { Request } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { env } from "../config/env.ts";
+import { AUTH_COOKIE, verifyToken } from "../lib/jwt.ts";
 
-// Keyed by user once requireAuth has run: in development every request reaches
-// the API through the Vite proxy, so a per-IP limit would be one shared bucket.
-// Requests without a user (logout, the GitHub install callback) fall back to IP.
+// Runs before requireAuth, so the limit also covers requests that fail
+// authentication. It is still keyed by user, read from the auth cookie: in
+// development every request reaches the API through the Vite proxy, so a per-IP
+// limit would be one shared bucket. Requests without a valid cookie (logout,
+// the GitHub install callback, expired sessions) fall back to IP.
 function userOrIp(req: Request): string {
-  return req.userId ? `user:${req.userId}` : `ip:${ipKeyGenerator(req.ip ?? "")}`;
+  const token = req.cookies?.[AUTH_COOKIE];
+  const payload = typeof token === "string" ? verifyToken(token) : null;
+  return payload ? `user:${payload.sub}` : `ip:${ipKeyGenerator(req.ip ?? "")}`;
 }
 
 // Generous enough for dashboard polling; it exists to bound runaway clients and

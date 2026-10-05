@@ -13,7 +13,7 @@ import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const connectionsRouter = Router();
 
-connectionsRouter.use(requireAuth, userLimiter);
+connectionsRouter.use(userLimiter, requireAuth);
 connectionsRouter.get("/", listConnections);
 connectionsRouter.get("/github/install", githubInstall);
 connectionsRouter.get("/github/callback", githubCallback);
