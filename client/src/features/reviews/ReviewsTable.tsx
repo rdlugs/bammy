@@ -16,7 +16,8 @@ import { formatDuration, timeAgo } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { fetchReviewMarkdown, useRerunReview, useReviews } from "./api"
 import { SeverityBadge, StatusBadge, TriggerIcon, VerdictBadge } from "./badges"
-import { changeLabel } from "./links"
+import { changeLabel, changeTitle } from "./links"
+import { RerunReviewDialog } from "./RerunReviewDialog"
 import { isActive, SEVERITIES, type ReviewListItem } from "./types"
 
 // Ticks only while something is running, so idle tables never re-render.
@@ -54,15 +55,9 @@ function Duration({ review, now }: { review: ReviewListItem; now: number }) {
   return <div className="text-xs">took {formatDuration(new Date(review.finishedAt).getTime() - start)}</div>
 }
 
-function changeTitle(review: ReviewListItem) {
-  return (
-    review.summary?.title ??
-    `${PROVIDERS[review.repository.provider].changeNoun} ${changeLabel(review.repository.provider, review.number)}`
-  )
-}
-
 function ReviewActions({ review }: { review: ReviewListItem }) {
   const rerun = useRerunReview()
+  const [confirming, setConfirming] = useState(false)
   const forge = PROVIDERS[review.repository.provider].label
   const webUrl = review.summary?.webUrl
 
@@ -70,6 +65,7 @@ function ReviewActions({ review }: { review: ReviewListItem }) {
     try {
       await rerun.mutateAsync(review.id)
       toast.success("Review queued")
+      setConfirming(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start a new review")
     }
@@ -85,33 +81,43 @@ function ReviewActions({ review }: { review: ReviewListItem }) {
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-8" aria-label={`Actions for ${changeTitle(review)}`}>
-          <MoreHorizontal />
-        </Button>
-      </DropdownMenuTrigger>
-      {/* The shared menu matches its trigger's width, which is far too narrow for an icon button. */}
-      <DropdownMenuContent align="end" className="w-max whitespace-nowrap">
-        <DropdownMenuItem onSelect={runAgain} disabled={rerun.isPending || isActive(review.status)}>
-          <RotateCw />
-          Re-run
-        </DropdownMenuItem>
-        {/* A summary is only stored alongside a result, which the markdown is rendered from. */}
-        <DropdownMenuItem onSelect={copyMarkdown} disabled={!review.summary}>
-          <Copy />
-          Copy markdown
-        </DropdownMenuItem>
-        {webUrl && (
-          <DropdownMenuItem asChild>
-            <a href={webUrl} target="_blank" rel="noreferrer">
-              <ExternalLink />
-              Open on {forge}
-            </a>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="size-8" aria-label={`Actions for ${changeTitle(review)}`}>
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        {/* The shared menu matches its trigger's width, which is far too narrow for an icon button. */}
+        <DropdownMenuContent align="end" className="w-max whitespace-nowrap">
+          <DropdownMenuItem onSelect={() => setConfirming(true)} disabled={rerun.isPending || isActive(review.status)}>
+            <RotateCw />
+            Re-run
           </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          {/* A summary is only stored alongside a result, which the markdown is rendered from. */}
+          <DropdownMenuItem onSelect={copyMarkdown} disabled={!review.summary}>
+            <Copy />
+            Copy markdown
+          </DropdownMenuItem>
+          {webUrl && (
+            <DropdownMenuItem asChild>
+              <a href={webUrl} target="_blank" rel="noreferrer">
+                <ExternalLink />
+                Open on {forge}
+              </a>
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* A sibling of the menu, not inside it, so it stays mounted after the menu closes. */}
+      <RerunReviewDialog
+        review={review}
+        open={confirming}
+        onOpenChange={setConfirming}
+        onConfirm={runAgain}
+        pending={rerun.isPending}
+      />
+    </>
   )
 }
 

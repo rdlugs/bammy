@@ -1,5 +1,5 @@
 import { PROVIDERS } from "@/features/forge/providers"
-import type { Provider } from "./types"
+import type { Provider, ReviewListItem } from "./types"
 
 // A link to the reviewed revision of a file at a line range.
 export function forgeFileUrl(
@@ -14,4 +14,12 @@ export function forgeFileUrl(
 
 export function changeLabel(provider: Provider, number: number) {
   return PROVIDERS[provider].changeLabel(number)
+}
+
+// What a review is called in lists and dialogs: the change title, or "Pull request #42" before there is one.
+export function changeTitle(review: ReviewListItem) {
+  return (
+    review.summary?.title ??
+    `${PROVIDERS[review.repository.provider].changeNoun} ${changeLabel(review.repository.provider, review.number)}`
+  )
 }

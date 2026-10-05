@@ -1,34 +1,20 @@
 import { Link, useNavigate, useParams } from "react-router"
-import { AlertTriangle, ArrowLeft, Copy, ExternalLink, Loader2, RotateCw } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Bot, Copy, ExternalLink, Loader2, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { allFindingsPrompt } from "@/features/reviews/agentPrompt"
 import { fetchReviewMarkdown, useRerunReview, useReview } from "@/features/reviews/api"
 import { StatusBadge, VerdictBadge } from "@/features/reviews/badges"
-import { FindingCard } from "@/features/reviews/FindingCard"
+import { FindingsSection } from "@/features/reviews/detail/FindingsSection"
+import { ReviewSidebar } from "@/features/reviews/detail/ReviewSidebar"
 import { PROVIDERS } from "@/features/forge/providers"
 import { changeLabel } from "@/features/reviews/links"
-import {
-  BUCKET_ORDER,
-  BUCKET_TITLE,
-  isActive,
-  type Finding,
-  type Publication,
-  type ReviewResult,
-} from "@/features/reviews/types"
-
-const OMISSION_TEXT: Record<string, string> = {
-  ignored: "ignored by configuration",
-  binary: "binary file",
-  deleted: "deleted",
-  patch_unavailable: "diff not provided by the forge",
-  too_large: "too large for one review pass",
-  budget: "review pass limit reached",
-  chunk_failed: "review pass failed",
-}
+import { copyToClipboard } from "@/lib/clipboard"
+import { isActive, type ReviewResult } from "@/features/reviews/types"
 
 function BackToReviews() {
   return (
@@ -41,54 +27,34 @@ function BackToReviews() {
   )
 }
 
-function plural(count: number, word: string) {
-  return `${count} ${word}${count === 1 ? "" : "s"}`
-}
-
-// One line on what reached the forge, so nobody has to go and check.
-function publicationText(publication: Publication, forge: string) {
-  const parts: string[] = []
-  if (publication.inlinePosted.length) parts.push(plural(publication.inlinePosted.length, "inline comment"))
-  if (publication.inlineSkipped) parts.push(`${publication.inlineSkipped} already posted`)
-  if (publication.summaryCommentId) parts.push("summary")
-  if (publication.statusState) parts.push(`commit status (${publication.statusState})`)
-  return parts.length ? `Posted to ${forge}: ${parts.join(", ")}` : `Nothing posted to ${forge}`
-}
-
-function groupByFile(findings: Finding[]) {
-  const groups = new Map<string, Finding[]>()
-  for (const finding of findings) {
-    groups.set(finding.file, [...(groups.get(finding.file) ?? []), finding])
-  }
-  return [...groups.entries()]
-}
-
-function Findings({ result }: { result: ReviewResult }) {
-  if (result.findings.length === 0) {
-    return <p className="text-sm text-muted-foreground">No findings.</p>
-  }
+function Walkthrough({ walkthrough }: { walkthrough: NonNullable<ReviewResult["walkthrough"]> }) {
   return (
-    <>
-      {BUCKET_ORDER.map((bucket) => {
-        const findings = result.findings.filter((f) => f.bucket === bucket)
-        if (!findings.length) return null
-        return (
-          <section key={bucket} aria-label={BUCKET_TITLE[bucket]} className="flex flex-col gap-3">
-            <h2 className="text-lg font-semibold">
-              {BUCKET_TITLE[bucket]} <span className="text-muted-foreground">({findings.length})</span>
-            </h2>
-            {groupByFile(findings).map(([file, items]) => (
-              <div key={file} className="flex flex-col gap-2">
-                <h3 className="font-mono text-sm text-muted-foreground">{file}</h3>
-                {items.map((finding) => (
-                  <FindingCard key={finding.fingerprint} finding={finding} change={result.change} />
-                ))}
+    <Card>
+      <CardHeader>
+        <CardTitle>Walkthrough</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4 text-sm">
+        <p className="whitespace-pre-wrap">{walkthrough.overview}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {walkthrough.labels.map((label) => (
+            <Badge key={label} variant="secondary">
+              {label}
+            </Badge>
+          ))}
+          <span className="text-muted-foreground">Review effort {walkthrough.estimatedEffort}/5</span>
+        </div>
+        {walkthrough.fileSummaries.length > 0 && (
+          <dl className="grid gap-x-4 gap-y-2 border-t pt-4 sm:grid-cols-[minmax(0,16rem)_1fr]">
+            {walkthrough.fileSummaries.map((entry) => (
+              <div key={entry.path} className="contents">
+                <dt className="font-mono text-xs break-all text-muted-foreground sm:pt-0.5">{entry.path}</dt>
+                <dd className="mb-2 sm:mb-0">{entry.summary}</dd>
               </div>
             ))}
-          </section>
-        )
-      })}
-    </>
+          </dl>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -109,56 +75,8 @@ function ResultView({ result }: { result: ReviewResult }) {
           </AlertDescription>
         </Alert>
       )}
-      {result.walkthrough && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Walkthrough</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3 text-sm">
-            <p className="whitespace-pre-wrap">{result.walkthrough.overview}</p>
-            <div className="flex flex-wrap items-center gap-2">
-              {result.walkthrough.labels.map((label) => (
-                <Badge key={label} variant="secondary">
-                  {label}
-                </Badge>
-              ))}
-              <span className="text-muted-foreground">Review effort {result.walkthrough.estimatedEffort}/5</span>
-            </div>
-            {result.walkthrough.fileSummaries.length > 0 && (
-              <ul className="flex flex-col gap-1">
-                {result.walkthrough.fileSummaries.map((entry) => (
-                  <li key={entry.path}>
-                    <code className="text-xs">{entry.path}</code>: {entry.summary}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      )}
-      <Findings result={result} />
-      <Card>
-        <CardHeader>
-          <CardTitle>Coverage</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2 text-sm">
-          <p>
-            {result.coverage.reviewedFiles.length} of {result.files.length} files reviewed in {result.coverage.passes}{" "}
-            {result.coverage.passes === 1 ? "pass" : "passes"} · {result.usageTotals.inputTokens.toLocaleString()} input
-            and {result.usageTotals.outputTokens.toLocaleString()} output tokens
-          </p>
-          {result.coverage.omissions.length > 0 && (
-            <ul className="list-disc pl-4 text-muted-foreground">
-              {result.coverage.omissions.map((o, i) => (
-                <li key={`${o.path}-${i}`}>
-                  <code className="text-xs">{o.path}</code>: {OMISSION_TEXT[o.reason] ?? o.reason}
-                  {o.detail ? `, ${o.detail}` : ""}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      {result.walkthrough && <Walkthrough walkthrough={result.walkthrough} />}
+      <FindingsSection result={result} />
     </>
   )
 }
@@ -173,7 +91,10 @@ export function ReviewDetailPage() {
     return (
       <main className="flex flex-1 flex-col gap-6 p-6">
         <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-64 w-full" />
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <Skeleton className="h-64 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
       </main>
     )
   }
@@ -191,15 +112,6 @@ export function ReviewDetailPage() {
   const title = review.summary?.title ?? result?.change.title ?? review.repository.fullPath
   const webUrl = review.summary?.webUrl ?? result?.change.webUrl
 
-  async function copyMarkdown() {
-    try {
-      await navigator.clipboard.writeText(await fetchReviewMarkdown(review.id))
-      toast.success("Markdown copied")
-    } catch {
-      toast.error("Could not copy the markdown")
-    }
-  }
-
   async function runAgain() {
     try {
       const { review: next } = await rerun.mutateAsync(review.id)
@@ -212,12 +124,11 @@ export function ReviewDetailPage() {
   return (
     <main className="flex flex-1 flex-col gap-6 p-6">
       <BackToReviews />
-      <div className="flex flex-wrap items-start gap-4">
+      <header className="flex flex-wrap items-start gap-4">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
+          <h2 className="text-2xl font-semibold tracking-tight break-words">{title}</h2>
           <p className="text-sm text-muted-foreground">
-            {review.repository.fullPath} {changeLabel(review.repository.provider, review.number)} ·{" "}
-            <code>{review.headSha.slice(0, 7)}</code>
+            {review.repository.fullPath} {changeLabel(review.repository.provider, review.number)}
             {webUrl && (
               <>
                 {" · "}
@@ -231,15 +142,22 @@ export function ReviewDetailPage() {
           <div className="flex items-center gap-2 pt-1">
             <StatusBadge status={review.status} />
             <VerdictBadge verdict={review.verdict} />
-            {review.publication && (
-              <span className="text-xs text-muted-foreground">
-                {publicationText(review.publication, PROVIDERS[review.repository.provider].label)}
-              </span>
-            )}
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={copyMarkdown} disabled={!result}>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => result && copyToClipboard(allFindingsPrompt(result.findings), "Agent prompt")}
+            disabled={!result?.findings.length}
+          >
+            <Bot />
+            Copy prompt for all findings
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => copyToClipboard(fetchReviewMarkdown(review.id), "Markdown")}
+            disabled={!result}
+          >
             <Copy />
             Copy markdown
           </Button>
@@ -248,30 +166,36 @@ export function ReviewDetailPage() {
             Re-run
           </Button>
         </div>
-      </div>
+      </header>
 
-      {isActive(review.status) ? (
-        <Card>
-          <CardContent className="flex items-center gap-3 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            {review.status === "queued" ? "Waiting for a worker..." : "Reviewing the change..."}
-          </CardContent>
-        </Card>
-      ) : result ? (
-        <ResultView result={result} />
-      ) : (
-        <Alert variant="destructive">
-          <AlertTriangle />
-          <AlertTitle>
-            {review.status === "superseded"
-              ? "Superseded by a newer push"
-              : review.status === "skipped"
-                ? "Skipped"
-                : "The review did not run"}
-          </AlertTitle>
-          {review.error && <AlertDescription>{review.error}</AlertDescription>}
-        </Alert>
-      )}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="flex min-w-0 flex-col gap-6">
+          {isActive(review.status) ? (
+            <Card>
+              <CardContent className="flex items-center gap-3 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                {review.status === "queued" ? "Waiting for a worker..." : "Reviewing the change..."}
+              </CardContent>
+            </Card>
+          ) : result ? (
+            // Keyed so a re-run navigating here starts with fresh collapse state.
+            <ResultView key={review.id} result={result} />
+          ) : (
+            <Alert variant="destructive">
+              <AlertTriangle />
+              <AlertTitle>
+                {review.status === "superseded"
+                  ? "Superseded by a newer push"
+                  : review.status === "skipped"
+                    ? "Skipped"
+                    : "The review did not run"}
+              </AlertTitle>
+              {review.error && <AlertDescription>{review.error}</AlertDescription>}
+            </Alert>
+          )}
+        </div>
+        <ReviewSidebar review={review} result={result} />
+      </div>
     </main>
   )
 }
