@@ -49,6 +49,14 @@ export interface FindingStats {
   total: number
   // Null when nothing was found in the period.
   resolutionRate: number | null
+  // Open findings first seen before the period.
+  staleOpen: number
+  // Milliseconds, over findings resolved in the period; null when there were none.
+  medianTimeToResolve: number | null
+  falsePositives: number
+  // Everything first seen in the period, ignored findings included.
+  found: number
+  falsePositiveRate: number | null
 }
 
 // GET /api/findings/:id: the row, plus the full finding and its change from the

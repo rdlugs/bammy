@@ -257,7 +257,7 @@ describe("Reviews page rows, filters and stats", () => {
         blocked: 2,
         passed: 6,
         failed: 1,
-        findings: { critical: 3, major: 0, minor: 5, info: 1 },
+        duration: { median: 102_000, max: 245_000 },
       },
     })
     renderWithProviders(<App />, { route: "/reviews" })
@@ -267,7 +267,9 @@ describe("Reviews page rows, filters and stats", () => {
     expect(within(stats).getByText("9")).toBeInTheDocument()
     expect(within(stats).getByText("25%")).toBeInTheDocument()
     expect(within(stats).getByText("2 of 8")).toBeInTheDocument()
-    await waitFor(() => expect(within(stats).getByText("5")).toBeInTheDocument())
+    expect(within(stats).getByText("Median review time")).toBeInTheDocument()
+    expect(within(stats).getByText("1m 42s")).toBeInTheDocument()
+    expect(within(stats).getByText("slowest 4m 05s")).toBeInTheDocument()
   })
 })
 

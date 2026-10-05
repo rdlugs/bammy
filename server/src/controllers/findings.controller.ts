@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
+import { median } from "../lib/stats.ts";
 import type { Prisma } from "../generated/prisma/client.ts";
 import { reviewResultSchema } from "../review/core/models.ts";
 import { SEVERITIES } from "../review/core/severity.ts";
@@ -96,7 +97,7 @@ export async function getFindingStats(req: Request, res: Response) {
   const { repoId, days } = findingStatsQuerySchema.parse(req.query);
   const since = new Date(Date.now() - days * 86_400_000);
   const scope = { ...ownedBy(req.userId!), ...(repoId ? { repositoryId: repoId } : {}) };
-  const [open, recent] = await prisma.$transaction([
+  const [open, recent, staleOpen, resolvedRecently, found, falsePositives] = await prisma.$transaction([
     prisma.finding.groupBy({
       by: ["severity"],
       where: { ...scope, state: "open" },
@@ -110,8 +111,20 @@ export async function getFindingStats(req: Request, res: Response) {
       orderBy: { state: "asc" },
       _count: { _all: true },
     }),
+    // Usually left behind by changes that were merged or closed without another run.
+    prisma.finding.count({ where: { ...scope, state: "open", firstSeenAt: { lt: since } } }),
+    prisma.finding.findMany({
+      where: { ...scope, state: "resolved", resolvedAt: { gte: since } },
+      select: { firstSeenAt: true, resolvedAt: true },
+    }),
+    // Unlike the resolution rate, this counts ignored findings: dismissing one
+    // as a false positive is exactly what it measures.
+    prisma.finding.count({ where: { ...scope, firstSeenAt: { gte: since } } }),
+    prisma.finding.count({
+      where: { ...scope, firstSeenAt: { gte: since }, state: "ignored", ignoreReason: "false_positive" },
+    }),
   ]);
-  const count = (row: { _count?: unknown }) => (row._count as { _all: number })._all;
+  const count =(row: { _count?: unknown }) => (row._count as { _all: number })._all;
   const openBySeverity = Object.fromEntries(SEVERITIES.map((s) => [s, 0])) as Record<(typeof SEVERITIES)[number], number>;
   for (const row of open) {
     if (row.severity in openBySeverity) openBySeverity[row.severity as keyof typeof openBySeverity] = count(row);
@@ -125,6 +138,11 @@ export async function getFindingStats(req: Request, res: Response) {
     resolved,
     total,
     resolutionRate: total ? Math.round((resolved / total) * 100) : null,
+    staleOpen,
+    medianTimeToResolve: median(resolvedRecently.map((f) => f.resolvedAt!.getTime() - f.firstSeenAt.getTime())),
+    falsePositives,
+    found,
+    falsePositiveRate: found ? Math.round((falsePositives / found) * 100) : null,
   });
 }
 
