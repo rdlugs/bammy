@@ -1,7 +1,8 @@
 # Contributing to Bammy
 
 Bammy is an alpha project. Start with a focused bug report or feature proposal
-before substantial changes. For questions, open an issue explaining what you
+before substantial changes. For questions and ideas, start a
+[discussion](https://github.com/rdlugs/bammy/discussions) explaining what you
 tried and what you need. Follow the [code of conduct](CODE_OF_CONDUCT.md).
 Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 
