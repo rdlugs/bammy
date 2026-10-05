@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, GitPullRequest, Play } from "lucide-react"
+import { AlertTriangle, Play } from "lucide-react"
 import {
   ActiveFilterChips,
   FilterPopover,
@@ -14,7 +14,6 @@ import { TablePagination } from "@/components/TablePagination"
 import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
@@ -74,6 +73,9 @@ export function ReviewsPage() {
 
   const filtering = status !== ALL || verdict !== ALL || trigger !== ALL || repo !== ALL || includeSuperseded
   const narrowed = filtering || q !== ""
+  const emptyMessage = narrowed
+    ? "No reviews match your filters."
+    : "No reviews yet. Start a manual review to run the first one."
 
   // A new filter, search or view starts over at the first page.
   function filterBy<T>(set: (value: T) => void) {
@@ -109,12 +111,6 @@ export function ReviewsPage() {
       <PageHeader
         title="Reviews"
         description="Every review Bammy has run on your pull and merge requests."
-        actions={
-          <Button onClick={() => setManualOpen(true)}>
-            <Play />
-            Manual review
-          </Button>
-        }
       />
       <ReviewStatsStrip />
       <FilterToolbar>
@@ -124,6 +120,10 @@ export function ReviewsPage() {
             <TabsTrigger value="runs">All runs</TabsTrigger>
           </TabsList>
         </Tabs>
+        <Button onClick={() => setManualOpen(true)}>
+          <Play />
+          Manual review
+        </Button>
         <ActiveFilterChips filters={activeFilters} />
         <FilterPopover active={filtering} onClear={clearFilters}>
           <FilterSelect
@@ -180,39 +180,24 @@ export function ReviewsPage() {
           <AlertTriangle />
           <AlertTitle>Could not load reviews.</AlertTitle>
         </Alert>
-      ) : data.total === 0 && !narrowed ? (
-        <Empty className="flex-1 border border-dashed">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <GitPullRequest />
-            </EmptyMedia>
-            <EmptyTitle>No reviews yet</EmptyTitle>
-            <EmptyDescription>Start a manual review to run the first one.</EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button onClick={() => setManualOpen(true)}>
-              <Play />
-              Manual review
-            </Button>
-          </EmptyContent>
-        </Empty>
-      ) : data.total === 0 ? (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No reviews match these filters.
-          </CardContent>
-        </Card>
       ) : (
         <Card>
           <CardContent>
-            <ReviewsTable reviews={data.reviews} actions grouped={view === "changes"} />
-            <TablePagination
-              page={Math.min(pagination.page, lastPage)}
-              size={pagination.size}
-              total={data.total}
-              onPageChange={pagination.setPage}
-              onSizeChange={pagination.setSize}
+            <ReviewsTable
+              reviews={data.reviews}
+              actions
+              grouped={view === "changes"}
+              emptyMessage={emptyMessage}
             />
+            {data.total > 0 && (
+              <TablePagination
+                page={Math.min(pagination.page, lastPage)}
+                size={pagination.size}
+                total={data.total}
+                onPageChange={pagination.setPage}
+                onSizeChange={pagination.setSize}
+              />
+            )}
           </CardContent>
         </Card>
       )}

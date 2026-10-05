@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useEffect, useState, type ReactNode } from "react"
 import { Link } from "react-router"
 import { ChevronRight, Copy, ExternalLink, MoreHorizontal, RotateCw } from "lucide-react"
 import { toast } from "sonner"
+import { NoMatchesRow } from "@/components/TableFilters"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -165,12 +166,15 @@ export function ReviewsTable({
   reviews,
   actions = false,
   grouped = false,
+  emptyMessage,
 }: {
   reviews: ReviewListItem[]
   // Row menu (re-run, copy markdown, open on forge).
   actions?: boolean
   // Rows are the latest run per change; ones with more runs can expand.
   grouped?: boolean
+  // Shown in place of rows; the headers stay so the table keeps its shape.
+  emptyMessage: ReactNode
 }) {
   const now = useNow(reviews.some((review) => review.status === "running"))
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -198,6 +202,7 @@ export function ReviewsTable({
         </TableRow>
       </TableHeader>
       <TableBody>
+        {!reviews.length && <NoMatchesRow colSpan={colSpan}>{emptyMessage}</NoMatchesRow>}
         {reviews.map((review) => {
           const runs = review.runCount ?? 1
           const open = expanded.has(review.id)

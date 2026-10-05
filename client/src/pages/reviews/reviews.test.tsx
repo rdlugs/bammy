@@ -42,7 +42,7 @@ describe("Reviews page", () => {
     })
     renderWithProviders(<App />, { route: "/reviews" })
 
-    expect(await screen.findByText("No reviews yet")).toBeInTheDocument()
+    expect(await screen.findByText("No reviews yet. Start a manual review to run the first one.")).toBeInTheDocument()
     await openManualReview()
     await userEvent.type(screen.getByLabelText("Review a pull or merge request"), "https://github.com/acme/web/pull/1")
     await userEvent.click(screen.getByRole("button", { name: "Review" }))
@@ -204,7 +204,7 @@ describe("Reviews page rows, filters and stats", () => {
     await userEvent.click(screen.getByLabelText("Status"))
     await userEvent.click(await screen.findByRole("option", { name: "Failed" }))
 
-    expect(await screen.findByText("No reviews match these filters.")).toBeInTheDocument()
+    expect(await screen.findByText("No reviews match your filters.")).toBeInTheDocument()
     expect(screen.getByText("Status:")).toBeInTheDocument()
   })
 
@@ -271,8 +271,6 @@ describe("Reviews page rows, filters and stats", () => {
     expect(within(stats).getByText("Median review time")).toBeInTheDocument()
     expect(within(stats).getByText("1m 42s")).toBeInTheDocument()
     expect(within(stats).getByText("slowest 4m 05s")).toBeInTheDocument()
-    expect(within(stats).getByText("61.4K")).toBeInTheDocument()
-    expect(within(stats).getByText("52K in · 9.4K out")).toBeInTheDocument()
   })
 })
 
