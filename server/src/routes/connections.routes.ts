@@ -9,10 +9,11 @@ import {
   listConnections,
 } from "../controllers/connections.controller.ts";
 import { requireAuth } from "../middleware/requireAuth.ts";
+import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const connectionsRouter = Router();
 
-connectionsRouter.use(requireAuth);
+connectionsRouter.use(requireAuth, userLimiter);
 connectionsRouter.get("/", listConnections);
 connectionsRouter.get("/github/install", githubInstall);
 connectionsRouter.get("/github/callback", githubCallback);

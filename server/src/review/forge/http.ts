@@ -21,13 +21,24 @@ export class ForgeHttp {
   constructor(private options: ForgeHttpOptions) {}
 
   async request(path: string, init: RequestInit = {}): Promise<Response> {
-    const url = path.startsWith("http") ? path : `${this.options.baseUrl}${path}`;
+    let url = this.sameOrigin(path.startsWith("http") ? path : `${this.options.baseUrl}${path}`);
     const doFetch = this.options.fetch ?? globalThis.fetch;
     const json: Record<string, string> = typeof init.body === "string" ? { "Content-Type": "application/json" } : {};
-    const res = await doFetch(url, {
-      ...init,
-      headers: { ...json, ...(await this.options.headers()), ...(init.headers as Record<string, string> | undefined) },
-    });
+    const headers = { ...json, ...(await this.options.headers()), ...(init.headers as Record<string, string> | undefined) };
+    let res = await doFetch(url, { ...init, headers, redirect: "manual" });
+    // Redirects are followed by hand so each hop gets the same origin check;
+    // GitHub answers renamed repositories with a 301 on its own API host.
+    for (let hop = 0; isRedirect(res.status) && hop < MAX_REDIRECTS; hop++) {
+      const location = res.headers.get("location");
+      if (!location) {
+        break;
+      }
+      url = this.sameOrigin(new URL(location, url).toString());
+      res = await doFetch(url, { ...init, headers, redirect: "manual" });
+    }
+    if (isRedirect(res.status)) {
+      throw new ForgeError(res.status, `${init.method ?? "GET"} ${url} redirected too many times`);
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       let message = body.slice(0, 300);
@@ -40,6 +51,18 @@ export class ForgeHttp {
       throw new ForgeError(res.status, `${init.method ?? "GET"} ${url} failed (${res.status}): ${message}`);
     }
     return res;
+  }
+
+  // Every request carries the connection's token, and the forge host is only
+  // vetted when the connection is made. Absolute URLs (pagination links,
+  // redirects) come from the forge's responses, so a forge must not be able to
+  // point the server, token included, at any other host.
+  private sameOrigin(url: string): string {
+    const { origin } = new URL(url);
+    if (origin !== new URL(this.options.baseUrl).origin) {
+      throw new ForgeError(502, `Forge pointed to another host (${origin}); refusing to follow`);
+    }
+    return url;
   }
 
   async json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -63,6 +86,12 @@ export class ForgeHttp {
     }
     return items;
   }
+}
+
+const MAX_REDIRECTS = 3;
+
+function isRedirect(status: number): boolean {
+  return status >= 300 && status < 400 && status !== 304;
 }
 
 export function linkHeaderNext(res: Response): string | null {

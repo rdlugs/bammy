@@ -54,8 +54,15 @@ export function sanitize(text: string): string {
     .replace(/(^|[^\w`])@(?=[\w-])/g, "$1@​");
 }
 
-// For text inside HTML (summary tags) and table cells.
+// For text inside HTML (summary tags) and table cells. Backslashes are escaped
+// first so text ending in "\" cannot swallow the escape of a following "|".
 function inline(text: string): string {
+  return codeCell(text.replace(/\\/g, "\\\\"));
+}
+
+// For text inside a code span, where markdown keeps backslashes as written but
+// a table still needs its pipes escaped.
+function codeCell(text: string): string {
   return sanitize(text).replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;")).replace(/\|/g, "\\|").replace(/\n+/g, " ");
 }
 
@@ -183,7 +190,7 @@ function walkthroughSection(
   const heading = summary ? "## High-level summary" : "## Summary";
   const lines = ["", sanitize(summary ?? walkthrough.overview)];
   const meta = [
-    walkthrough.labels.length ? `🏷️ Labels: ${walkthrough.labels.map((l) => `\`${inline(l)}\``).join(", ")}` : "",
+    walkthrough.labels.length ? `🏷️ Labels: ${walkthrough.labels.map((l) => `\`${codeCell(l)}\``).join(", ")}` : "",
     options.effort !== false ? `⏱️ Review effort: ${walkthrough.estimatedEffort}/5` : "",
     walkthrough.blastRadius ? `💥 Blast radius: ${walkthrough.blastRadius}` : "",
   ].filter(Boolean);
@@ -192,7 +199,7 @@ function walkthroughSection(
     lines.push("", "<details>", `<summary>📂 Changes (${plural(walkthrough.fileSummaries.length, "file")})</summary>`, "");
     lines.push("| File | Summary |", "| --- | --- |");
     for (const entry of walkthrough.fileSummaries) {
-      lines.push(`| \`${inline(entry.path)}\` | ${inline(entry.summary)} |`);
+      lines.push(`| \`${codeCell(entry.path)}\` | ${inline(entry.summary)} |`);
     }
     lines.push("", "</details>");
   }
@@ -244,7 +251,7 @@ function coverageSection(result: ReviewResult): string[] {
     lines.push("", "<details>", `<summary>🚫 Not reviewed (${plural(omissions.length, "item")})</summary>`, "");
     for (const omission of omissions) {
       const detail = omission.detail ? `, ${inline(omission.detail)}` : "";
-      lines.push(`- \`${inline(omission.path)}\`: ${OMISSION_TEXT[omission.reason]}${detail}`);
+      lines.push(`- \`${codeCell(omission.path)}\`: ${OMISSION_TEXT[omission.reason]}${detail}`);
     }
     lines.push("", "</details>");
   }

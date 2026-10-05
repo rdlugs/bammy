@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { getFinding, getFindingStats, listFindings, updateFinding } from "../controllers/findings.controller.ts";
 import { requireAuth } from "../middleware/requireAuth.ts";
+import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const findingsRouter = Router();
 
-findingsRouter.use(requireAuth);
+findingsRouter.use(requireAuth, userLimiter);
 findingsRouter.get("/", listFindings);
 // Before "/:id", which would reject "stats" as a malformed id.
 findingsRouter.get("/stats", getFindingStats);

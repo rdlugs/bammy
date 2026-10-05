@@ -11,10 +11,11 @@ import {
 } from "../controllers/settings.controller.ts";
 import { authLimiter } from "../middleware/authLimiter.ts";
 import { requireAuth } from "../middleware/requireAuth.ts";
+import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const settingsRouter = Router();
 
-settingsRouter.use(requireAuth);
+settingsRouter.use(requireAuth, userLimiter);
 settingsRouter.patch("/profile", updateProfile);
 settingsRouter.put("/password", authLimiter, changePassword);
 settingsRouter.get("/api-keys", listApiKeys);

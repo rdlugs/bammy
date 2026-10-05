@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { deleteRepo, enableRepo, getRepoConfig, listAvailableRepos, listRepoChanges, listRepos, updateRepo } from "../controllers/repos.controller.ts";
 import { requireAuth } from "../middleware/requireAuth.ts";
+import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const reposRouter = Router();
 
-reposRouter.use(requireAuth);
+reposRouter.use(requireAuth, userLimiter);
 reposRouter.get("/", listRepos);
 reposRouter.get("/available", listAvailableRepos);
 reposRouter.post("/", enableRepo);
