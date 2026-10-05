@@ -91,6 +91,8 @@ export interface GenerateRequest<T> {
   // Fixes predictable model mistakes in a reply the provider did not enforce
   // the schema on, before it is validated.
   repair?: (raw: unknown) => unknown;
+  // Cancels the request, e.g. when the PR/MR is closed mid-review.
+  abortSignal?: AbortSignal;
 }
 
 export interface GenerateResponse<T> {
@@ -120,6 +122,7 @@ export function createGenerate(keys: ApiKeys, endpoint?: Endpoint, baseUrls: Pro
       prompt: request.prompt,
       temperature: request.temperature,
       maxOutputTokens: request.maxOutputTokens,
+      abortSignal: request.abortSignal,
     };
     const respond = (object: T, usage: { inputTokens?: number; outputTokens?: number } | undefined) => ({
       object,
@@ -170,9 +173,20 @@ export async function generateWithFallback<T>(
     try {
       return await generate({ ...request, model });
     } catch (err) {
+      // A cancelled review has no use for the fallbacks either.
+      if (request.abortSignal?.aborted) throw err;
       errors.push(err);
     }
   }
   if (errors.length === 1) throw errors[0] instanceof Error ? errors[0] : new Error(message(errors[0]));
   throw new Error(errors.map((err, i) => `${models[i]}: ${message(err)}`).join(" | "));
+}
+
+// Every request made through the result carries the signal, and none starts
+// once it has fired, so a cancelled review stops spending model calls.
+export function abortableGenerate(generate: Generate, signal: AbortSignal): Generate {
+  return async (request) => {
+    signal.throwIfAborted();
+    return generate({ ...request, abortSignal: signal });
+  };
 }

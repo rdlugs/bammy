@@ -12,7 +12,7 @@ export const createReviewByRepoSchema = z.object({
 
 export const listReviewsQuerySchema = z.object({
   repoId: z.uuid().optional(),
-  status: z.enum(["queued", "running", "completed", "partial", "failed", "superseded", "skipped"]).optional(),
+  status: z.enum(["queued", "running", "completed", "partial", "failed", "superseded", "skipped", "cancelled"]).optional(),
   verdict: z.enum(["pass", "blocked", "error"]).optional(),
   trigger: z.enum(["manual", "webhook", "comment"]).optional(),
   number: z.coerce.number().int().min(1).optional(),

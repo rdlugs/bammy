@@ -1,7 +1,8 @@
+import { cacheKey, cached, type ForgeCache } from "../forge/cache.ts";
 import type { ForgeAdapter } from "../forge/types.ts";
 import { parseRepoFile, REPO_CONFIG_FILES } from "./repoFile.ts";
 import { resolveConfig, type ResolvedConfig } from "./resolve.ts";
-import { dashboardOverrideSchema, type ConfigOverride, type DashboardOverride } from "./schema.ts";
+import { dashboardOverrideSchema, type Config, type ConfigOverride, type DashboardOverride } from "./schema.ts";
 
 export interface LoadConfigInput {
   adapter: ForgeAdapter;
@@ -15,6 +16,8 @@ export interface LoadConfigInput {
   // (but kept, so turning this off brings them back).
   followGlobal?: boolean;
   trigger?: ConfigOverride;
+  // Files at a sha never change, so a cached read is as good as a fresh one.
+  cache?: ForgeCache;
 }
 
 export interface LoadedConfig extends ResolvedConfig {
@@ -22,11 +25,11 @@ export interface LoadedConfig extends ResolvedConfig {
   warnings: string[];
 }
 
-export async function loadReviewConfig(input: LoadConfigInput): Promise<LoadedConfig> {
-  const warnings: string[] = [];
+type SavedSettings = Pick<LoadConfigInput, "globalSettings" | "repoSettings" | "followGlobal">;
 
-  // Saved settings were valid when written; a schema change since then must
-  // not take every review of the repository down with it.
+// Saved settings were valid when written; a schema change since then must
+// not take every review of the repository down with it.
+function savedLayers(input: SavedSettings, warnings: string[]) {
   function saved(value: unknown, label: string): DashboardOverride | undefined {
     if (value === undefined) return undefined;
     const parsed = dashboardOverrideSchema.safeParse(value);
@@ -34,13 +37,29 @@ export async function loadReviewConfig(input: LoadConfigInput): Promise<LoadedCo
     warnings.push(`Saved ${label} settings are no longer valid and were ignored`);
     return undefined;
   }
-  const global = saved(input.globalSettings, "global");
-  const repoSettings = input.followGlobal ? undefined : saved(input.repoSettings, "repository");
+  return {
+    global: saved(input.globalSettings, "global"),
+    repoSettings: input.followGlobal ? undefined : saved(input.repoSettings, "repository"),
+  };
+}
+
+// The configuration before the repository file is read, for decisions that
+// come first: whether to read through the cache, and whether a webhook may
+// cancel a review without a forge call.
+export function loadDashboardConfig(input: SavedSettings): Config {
+  return resolveConfig(savedLayers(input, [])).config;
+}
+
+export async function loadReviewConfig(input: LoadConfigInput): Promise<LoadedConfig> {
+  const warnings: string[] = [];
+  const { global, repoSettings } = savedLayers(input, warnings);
 
   let repoFile: string | null = null;
   let fileOverride: ConfigOverride | undefined;
   for (const name of REPO_CONFIG_FILES) {
-    const text = await input.adapter.getFileAtRef(input.project, name, input.ref);
+    const text = await cached(input.cache, cacheKey("file", input.adapter.host, input.project, name, input.ref), () =>
+      input.adapter.getFileAtRef(input.project, name, input.ref),
+    );
     if (text === null) continue;
     // Like roborak, the first file found wins; the two are never merged.
     repoFile = name;

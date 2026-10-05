@@ -6,7 +6,7 @@ import { resolveConfig } from "../src/review/config/resolve.ts";
 import type { ConfigOverride } from "../src/review/config/schema.ts";
 import { runReview } from "../src/review/pipeline.ts";
 import { previewPublication } from "../src/review/preview/preview.ts";
-import { SAMPLE_NOW, sampleChange, sampleGenerate } from "../src/review/preview/sample.ts";
+import { SAMPLE_NOW, sampleChange, sampleGenerate, sampleIssues } from "../src/review/preview/sample.ts";
 import { toMarkdown } from "../src/review/render/markdown.ts";
 import { createUser } from "./helpers/users.ts";
 
@@ -16,7 +16,7 @@ describe("previewPublication", () => {
   it("posts exactly what the publisher would for the sample review", async () => {
     const preview = await previewPublication(config(), "github");
     const result = await runReview(
-      { changeSet: sampleChange("github"), config: config() },
+      { changeSet: sampleChange("github"), config: config(), issues: sampleIssues("github") },
       { generate: sampleGenerate, now: () => SAMPLE_NOW },
     );
 
@@ -59,6 +59,44 @@ describe("previewPublication", () => {
     const strict = await previewPublication(config({ review: { blockOn: "major", severityFloor: "major" } }), "github");
     expect(strict.status?.description).toBe("2 findings at or above major");
     expect(strict.summaryComment).not.toContain("rate limit");
+  });
+
+  it("shows each optional walkthrough part only while its setting is on", async () => {
+    const all = await previewPublication(config(), "github");
+    expect(all.summaryComment).toContain("```mermaid\nsequenceDiagram");
+    expect(all.summaryComment).toContain("⏱️ Review effort: 2/5");
+    expect(all.summaryComment).toContain("[#12](https://github.com/acme/users/issues/12)");
+    expect(all.summaryComment).toContain("🟡 Partly addressed");
+    expect(all.summaryComment).toContain("[#31](https://github.com/acme/users/issues/31)");
+    // The candidate the model did not pick is left out.
+    expect(all.summaryComment).not.toContain("#7");
+    // The summary goes in the description by default, not the comment.
+    expect(all.summaryComment).not.toContain("High-level summary");
+    expect(all.pr.description).toContain("<!-- bammy:summary:start -->\n## High-level summary");
+    expect(all.pr.description).toMatch(/^Closes #12\n\n/);
+
+    const none = await previewPublication(
+      config({
+        output: {
+          sequenceDiagrams: false,
+          estimateEffort: false,
+          assessLinkedIssues: false,
+          relatedIssues: false,
+          highLevelSummary: false,
+        },
+      }),
+      "github",
+    );
+    expect(none.summaryComment).not.toMatch(/mermaid|Review effort|#12|#31/);
+    expect(none.pr.description).toBe("Closes #12");
+
+    const inWalkthrough = await previewPublication(config({ output: { highLevelSummaryPlacement: "walkthrough" } }), "github");
+    // It takes the overview's place at the top of the comment.
+    expect(inWalkthrough.summaryComment).toMatch(/^## High-level summary\n\n\*\*New Features\*\*/);
+    expect(inWalkthrough.summaryComment).not.toContain("Adds a `GET /users/:id` endpoint");
+    expect(inWalkthrough.summaryComment).toContain("💥 Blast radius: medium");
+    expect(all.summaryComment).toMatch(/^## Summary\n\nAdds a `GET \/users\/:id` endpoint/);
+    expect(inWalkthrough.pr.description).toBe("Closes #12");
   });
 
   it("uses each forge's suggestion syntax", async () => {

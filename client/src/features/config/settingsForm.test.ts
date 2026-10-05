@@ -25,6 +25,7 @@ const schema: ConfigSchema = {
       requireEvidence: true,
       fullFile: false,
       committableSuggestions: true,
+      disableCache: false,
     },
     output: {
       walkthrough: true,
@@ -36,12 +37,20 @@ const schema: ConfigSchema = {
       agentPromptAll: true,
       blastRadiusLabel: false,
       effortLabel: false,
+      sequenceDiagrams: true,
+      estimateEffort: true,
+      assessLinkedIssues: true,
+      relatedIssues: true,
+      highLevelSummary: true,
+      highLevelSummaryPlacement: "description",
+      highLevelSummaryInstructions: "",
     },
     triggers: {
       review: "published",
       reviewOnPush: true,
       summary: "published",
       command: true,
+      abortOnClose: true,
       ignoreTitles: [],
       skipAuthors: [],
       skipLabels: [],
@@ -60,6 +69,29 @@ const schema: ConfigSchema = {
 }
 
 describe("toSettings", () => {
+  it("saves the walkthrough content switches, summary placement and instructions", () => {
+    const form = toForm({})
+    const next = {
+      ...form,
+      flags: { ...form.flags, sequenceDiagrams: false, relatedIssues: false, abortOnClose: false, disableCache: true },
+      choices: { ...form.choices, highLevelSummaryPlacement: "walkthrough" },
+      summaryInstructions: "  Bullets only  ",
+    }
+    const saved = toSettings({}, next)
+    expect(saved).toEqual({
+      review: { disableCache: true },
+      output: {
+        sequenceDiagrams: false,
+        relatedIssues: false,
+        highLevelSummaryPlacement: "walkthrough",
+        highLevelSummaryInstructions: "Bullets only",
+      },
+      triggers: { abortOnClose: false },
+    })
+    expect(toForm(saved).summaryInstructions).toBe("Bullets only")
+    expect(validateForm({ ...next, summaryInstructions: "x".repeat(2001) }).summaryInstructions).toBe("At most 2000 characters")
+  })
+
   it("round-trips saved settings through the form", () => {
     const saved = {
       profile: "strict",
@@ -74,10 +106,10 @@ describe("toSettings", () => {
 
   it("saves the trigger choices and skip lists", () => {
     const form = toForm({})
-    expect(form.choices).toEqual({ review: INHERIT, summary: INHERIT })
+    expect(form.choices).toEqual({ review: INHERIT, summary: INHERIT, highLevelSummaryPlacement: INHERIT })
     const next = {
       ...form,
-      choices: { review: "manual", summary: "manual" },
+      choices: { review: "manual", summary: "manual", highLevelSummaryPlacement: INHERIT },
       lists: { ...form.lists, ignoreTitles: [" WIP", "Do not review ", " "], skipAuthors: ["dependabot[bot]"] },
     }
     expect(toSettings({}, next)).toEqual({

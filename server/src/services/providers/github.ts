@@ -7,7 +7,7 @@ import type { ForgeConnection } from "../../generated/prisma/client.ts";
 import { GitHubAdapter } from "../../review/forge/github.ts";
 import { ForgeError } from "../../review/forge/http.ts";
 import { githubConnectSchema } from "../../schemas/connections.schema.ts";
-import { enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
+import { cancelQueuedForClosedChange, enqueue, enqueueFromWebhook } from "../../worker/queue.ts";
 import { getGitHubApp, githubConfigured } from "../githubApp.ts";
 import type { HeaderReader, ProviderDefinition, RepoWithConnection, WebhookOutcome } from "./types.ts";
 
@@ -72,8 +72,13 @@ function isReviewCommand(event: string | undefined, payload: GitHubPayload): boo
   );
 }
 
+// Closed covers merged: GitHub sends "closed" with merged set for both.
+function isPullRequestClose(event: string | undefined, payload: GitHubPayload): boolean {
+  return event === "pull_request" && payload.action === "closed";
+}
+
 export function isGithubReviewEvent(event: string | undefined, payload: GitHubPayload): boolean {
-  return isPullRequestPush(event, payload) || isReviewCommand(event, payload);
+  return isPullRequestPush(event, payload) || isPullRequestClose(event, payload) || isReviewCommand(event, payload);
 }
 
 // Shared by the app's webhook and per-repository hooks once the repository is
@@ -83,6 +88,11 @@ export async function handleGithubEvent(
   event: string | undefined,
   payload: GitHubPayload,
 ): Promise<WebhookOutcome> {
+  if (isPullRequestClose(event, payload)) {
+    const cancelled = await cancelQueuedForClosedChange(repo, payload.pull_request!.number);
+    return { body: { outcome: "closed", cancelled } };
+  }
+
   if (isPullRequestPush(event, payload)) {
     const pull = payload.pull_request!;
     const result = await enqueueFromWebhook({

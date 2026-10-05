@@ -5,7 +5,7 @@ import type { Prisma, Repository } from "../generated/prisma/client.ts";
 import { reviewResultSchema } from "../review/core/models.ts";
 import { parseChangeUrl } from "../review/forge/url.ts";
 import { toJson } from "../review/render/json.ts";
-import { toMarkdown } from "../review/render/markdown.ts";
+import { toMarkdown, walkthroughOptions } from "../review/render/markdown.ts";
 import { adapterForConnection, toHttpError } from "../services/forge.ts";
 import { enqueue } from "../worker/queue.ts";
 import {
@@ -190,7 +190,7 @@ export async function getReviewStats(req: Request, res: Response) {
       ...ownedBy(req.userId!),
       ...(repoId ? { repositoryId: repoId } : {}),
       createdAt: { gte: since },
-      status: { notIn: ["superseded", "skipped"] },
+      status: { notIn: ["superseded", "skipped", "cancelled"] },
     },
     select: { status: true, verdict: true, summary: true },
   });
@@ -245,12 +245,21 @@ export async function getReviewMarkdown(req: Request, res: Response) {
   // stored before output.reviewStats existed showed the stats line; jobs
   // stored before output.agentPromptAll existed had no prompt.
   const stored = review.resolvedConfig as {
-    config?: { output?: { reviewStats?: boolean; agentPromptAll?: boolean } };
+    config?: {
+      output?: {
+        reviewStats?: boolean;
+        agentPromptAll?: boolean;
+        estimateEffort?: boolean;
+        highLevelSummaryPlacement?: string;
+      };
+    };
   } | null;
   const output = stored?.config?.output;
   const stats = output?.reviewStats !== false;
   const agentPrompt = output?.agentPromptAll === true;
-  res.type("text/markdown; charset=utf-8").send(toMarkdown(result, { stats, agentPrompt }));
+  res
+    .type("text/markdown; charset=utf-8")
+    .send(toMarkdown(result, { stats, agentPrompt, ...walkthroughOptions(output) }));
 }
 
 export async function rerunReview(req: Request, res: Response) {

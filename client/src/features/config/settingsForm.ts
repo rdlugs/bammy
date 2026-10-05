@@ -7,6 +7,7 @@ export const FLAGS = [
   { name: "requireEvidence", section: "review" },
   { name: "fullFile", section: "review" },
   { name: "committableSuggestions", section: "review" },
+  { name: "disableCache", section: "review" },
   { name: "walkthrough", section: "output" },
   { name: "postInline", section: "output" },
   { name: "postSummary", section: "output" },
@@ -16,8 +17,14 @@ export const FLAGS = [
   { name: "agentPromptAll", section: "output" },
   { name: "blastRadiusLabel", section: "output" },
   { name: "effortLabel", section: "output" },
+  { name: "sequenceDiagrams", section: "output" },
+  { name: "estimateEffort", section: "output" },
+  { name: "assessLinkedIssues", section: "output" },
+  { name: "relatedIssues", section: "output" },
+  { name: "highLevelSummary", section: "output" },
   { name: "reviewOnPush", section: "triggers" },
   { name: "command", section: "triggers" },
+  { name: "abortOnClose", section: "triggers" },
 ] as const
 
 export type FlagName = (typeof FLAGS)[number]["name"]
@@ -27,6 +34,7 @@ export type FlagSection = (typeof FLAGS)[number]["section"]
 export const CHOICES = [
   { name: "review", section: "triggers" },
   { name: "summary", section: "triggers" },
+  { name: "highLevelSummaryPlacement", section: "output" },
 ] as const
 
 export type ChoiceName = (typeof CHOICES)[number]["name"]
@@ -72,6 +80,7 @@ export const MAX_FALLBACK_MODELS = 3
 const MAX_IGNORE_PATHS = 200
 const MAX_INSTRUCTIONS = 4000
 const MAX_LANGUAGE_INSTRUCTIONS = 2000
+const MAX_SUMMARY_INSTRUCTIONS = 2000
 
 export interface LanguageRow {
   language: string
@@ -94,6 +103,8 @@ export interface FormState {
   // One glob per line; empty inherits. Not split on commas: globs use them in braces.
   ignorePaths: string
   instructions: string
+  // output.highLevelSummaryInstructions; "" inherits.
+  summaryInstructions: string
   // Rows missing a language or text are not saved.
   languageInstructions: LanguageRow[]
   // undefined inherits the value from the layers below.
@@ -114,6 +125,7 @@ export type FormErrors = Partial<
     | "categories"
     | "ignorePaths"
     | "instructions"
+    | "summaryInstructions"
     | "languageInstructions",
     string
   >
@@ -191,6 +203,7 @@ export function toForm(settings: ConfigOverride): FormState {
     lists,
     ignorePaths: (settings.ignorePaths ?? []).join("\n"),
     instructions: settings.instructions ?? "",
+    summaryInstructions: settings.output?.highLevelSummaryInstructions ?? "",
     languageInstructions: Object.entries(settings.languageInstructions ?? {}).map(([language, text]) => ({
       language,
       text,
@@ -232,7 +245,7 @@ export function toSettings(base: ConfigOverride, form: FormState): ConfigOverrid
       ["blockOn", pick(form.blockOn)],
       ["categories", form.categories],
     ],
-    output: [],
+    output: [["highLevelSummaryInstructions", form.summaryInstructions.trim() || undefined]],
     triggers: [
       // Replaced by `review`, which the form reads them into.
       ["onPush", undefined],
@@ -297,6 +310,8 @@ export function validateForm(form: FormState, connectionRequired = false, savedC
   if (form.categories?.length === 0) errors.categories = "Choose at least one category"
   if (pathList(form.ignorePaths).length > MAX_IGNORE_PATHS) errors.ignorePaths = `At most ${MAX_IGNORE_PATHS} paths`
   if (form.instructions.trim().length > MAX_INSTRUCTIONS) errors.instructions = `At most ${MAX_INSTRUCTIONS} characters`
+  if (form.summaryInstructions.trim().length > MAX_SUMMARY_INSTRUCTIONS)
+    errors.summaryInstructions = `At most ${MAX_SUMMARY_INSTRUCTIONS} characters`
 
   const languages = form.languageInstructions.map((row) => row.language.trim().toLowerCase()).filter(Boolean)
   if (new Set(languages).size !== languages.length) errors.languageInstructions = "Each language can only be listed once"

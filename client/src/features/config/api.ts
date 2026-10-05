@@ -6,6 +6,7 @@ import type { ForgeRepo, SavedRepo } from "@/features/forge/api"
 export type LlmProviderName = "anthropic" | "openai" | "google" | "ollama"
 export type ReviewTrigger = "manual" | "published" | "all"
 export type SummaryTrigger = "manual" | "published"
+export type HighLevelSummaryPlacement = "description" | "walkthrough"
 
 // A partial review config; mirrors server/src/review/config/schema.ts.
 export interface ConfigOverride {
@@ -32,6 +33,7 @@ export interface ConfigOverride {
     requireEvidence?: boolean
     fullFile?: boolean
     committableSuggestions?: boolean
+    disableCache?: boolean
   }
   output?: {
     walkthrough?: boolean
@@ -43,12 +45,20 @@ export interface ConfigOverride {
     agentPromptAll?: boolean
     blastRadiusLabel?: boolean
     effortLabel?: boolean
+    sequenceDiagrams?: boolean
+    estimateEffort?: boolean
+    assessLinkedIssues?: boolean
+    relatedIssues?: boolean
+    highLevelSummary?: boolean
+    highLevelSummaryPlacement?: HighLevelSummaryPlacement
+    highLevelSummaryInstructions?: string
   }
   triggers?: {
     review?: ReviewTrigger
     reviewOnPush?: boolean
     summary?: SummaryTrigger
     command?: boolean
+    abortOnClose?: boolean
     ignoreTitles?: string[]
     skipAuthors?: string[]
     skipLabels?: string[]
@@ -90,6 +100,7 @@ export interface EffectiveConfig {
     requireEvidence: boolean
     fullFile: boolean
     committableSuggestions: boolean
+    disableCache: boolean
   }
   output: {
     walkthrough: boolean
@@ -101,12 +112,20 @@ export interface EffectiveConfig {
     agentPromptAll: boolean
     blastRadiusLabel: boolean
     effortLabel: boolean
+    sequenceDiagrams: boolean
+    estimateEffort: boolean
+    assessLinkedIssues: boolean
+    relatedIssues: boolean
+    highLevelSummary: boolean
+    highLevelSummaryPlacement: HighLevelSummaryPlacement
+    highLevelSummaryInstructions: string
   }
   triggers: {
     review: ReviewTrigger
     reviewOnPush: boolean
     summary: SummaryTrigger
     command: boolean
+    abortOnClose: boolean
     ignoreTitles: string[]
     skipAuthors: string[]
     skipLabels: string[]
@@ -225,6 +244,8 @@ export interface PreviewPublication {
     sourceBranch: string
     targetBranch: string
     labels: string[]
+    // The description after publishing, with the high-level summary when it goes there.
+    description: string
   }
   status: { state: "pending" | "success" | "failure" | "error"; description: string } | null
   summaryComment: string | null

@@ -1,8 +1,10 @@
 import { markersIn, SUMMARY_MARKER, withoutDescriptionBlock } from "../core/markers.ts";
-import type { ChangeSet, ChangeType, ForgeRef } from "../core/models.ts";
+import type { ChangeSet, ChangeType, ForgeRef, IssueContext } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
 import { ForgeError, ForgeHttp, isNotFound, linkHeaderNext, type FetchLike } from "./http.ts";
+import { cacheKey, cached, type ForgeCache } from "./cache.ts";
 import { githubApiBase } from "./githubApp.ts";
+import { closingIssueNumbers, MAX_CANDIDATE_ISSUES } from "./issues.ts";
 import {
   STATUS_CONTEXT,
   MAX_OPEN_CHANGE_PAGES,
@@ -95,6 +97,26 @@ function toRepo(repo: GhRepo): ForgeRepo {
   };
 }
 
+interface GhIssue {
+  number: number;
+  title: string;
+  body: string | null;
+  state: "open" | "closed";
+  html_url: string;
+  // Set when the "issue" is a pull request; the issues API returns both.
+  pull_request?: unknown;
+}
+
+function toIssue(issue: GhIssue): IssueContext {
+  return {
+    ref: `#${issue.number}`,
+    title: issue.title,
+    url: issue.html_url,
+    state: issue.state,
+    body: issue.body ?? "",
+  };
+}
+
 interface GhComment {
   id: number;
   body: string;
@@ -159,13 +181,12 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return toRepo(await this.http.json<GhRepo>(`/repositories/${encodeURIComponent(externalId)}`));
   }
 
-  async getChange(project: string, number: number): Promise<ChangeSet> {
+  async getChange(project: string, number: number, cache?: ForgeCache): Promise<ChangeSet> {
     const repoPath = repoApiPath(project);
     const pull = await this.http.json<GhPull>(`${repoPath}/pulls/${number}`);
-    const files = await this.http.paginate<GhFile>(
-      `${repoPath}/pulls/${number}/files?per_page=100`,
-      linkHeaderNext,
-      MAX_FILE_PAGES,
+    // The files of a PR are fixed by its base and head.
+    const files = await cached(cache, cacheKey("github-files", this.host, project, number, pull.base.sha, pull.head.sha), () =>
+      this.http.paginate<GhFile>(`${repoPath}/pulls/${number}/files?per_page=100`, linkHeaderNext, MAX_FILE_PAGES),
     );
 
     return {
@@ -243,6 +264,31 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
       }
       throw err;
     }
+  }
+
+  async getLinkedIssues(change: ChangeSet): Promise<IssueContext[]> {
+    const { project, number: self } = change.forgeRef;
+    const numbers = closingIssueNumbers(change.description, project, this.host).filter((n) => n !== self);
+    const issues = await Promise.all(
+      numbers.map((n) =>
+        this.http.json<GhIssue>(`${repoApiPath(project)}/issues/${n}`).catch((err: unknown) => {
+          // A reference to a missing issue is the author's typo, not a failure.
+          if (isNotFound(err)) return null;
+          throw err;
+        }),
+      ),
+    );
+    return issues.filter((issue): issue is GhIssue => !!issue && !issue.pull_request).map(toIssue);
+  }
+
+  // Terms are ORed: a title rarely shares every word with the issue it relates to.
+  async searchIssues(project: string, terms: string[]): Promise<IssueContext[]> {
+    if (terms.length === 0) return [];
+    const query = `repo:${project} is:issue ${terms.join(" OR ")}`;
+    const result = await this.http.json<{ items: GhIssue[] }>(
+      `/search/issues?q=${encodeURIComponent(query)}&per_page=${MAX_CANDIDATE_ISSUES}`,
+    );
+    return result.items.filter((issue) => !issue.pull_request).map(toIssue);
   }
 
   private isSelf(comment: GhComment): boolean {

@@ -48,7 +48,7 @@ export const TAB_ERRORS: Record<ConfigTab, (keyof FormErrors)[]> = {
   llm: ["model", "fallbackModels", "connection", "temperature", "maxTokens", "contextBudget"],
   findings: ["categories", "maxFindings", "minConfidence"],
   files: ["ignorePaths", "maxChunks"],
-  display: [],
+  display: ["summaryInstructions"],
   triggers: ["ignoreTitles", "skipAuthors", "skipLabels", "skipSourceBranches", "skipTargetBranches"],
   guidance: ["instructions", "languageInstructions"],
 }

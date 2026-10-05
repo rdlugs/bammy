@@ -1,7 +1,8 @@
-import type { ChangeSet, ForgeProvider } from "../core/models.ts";
+import type { ChangeSet, ForgeProvider, IssueContext } from "../core/models.ts";
 import { toChangedFile } from "../diff/parse.ts";
 import type { Generate, GenerateRequest, GenerateResponse } from "../llm/providers.ts";
-import type { ModelFinding, WalkthroughOutput } from "../llm/schemas.ts";
+import type { FullWalkthroughOutput, ModelFinding } from "../llm/schemas.ts";
+import type { WalkthroughIssues } from "../llm/walkthrough.ts";
 
 // A made-up change and a scripted model, so the dashboard can preview what a
 // review posts by running the real pipeline and renderers without a model call.
@@ -49,8 +50,7 @@ export function sampleChange(provider: ForgeProvider): ChangeSet {
       headSha: "a1b2c3d4e5f6",
     },
     title: "Add user lookup endpoint",
-    // Bammy never writes to the description, so the preview does not show it.
-    description: "",
+    description: "Closes #12",
     baseRef: "main",
     headRef: "feature/user-lookup",
     isDraft: false,
@@ -140,7 +140,26 @@ const SAMPLE_FINDINGS: ModelFinding[] = [
   }),
 ];
 
-const SAMPLE_WALKTHROUGH: WalkthroughOutput = {
+// What the forge would return for the sample change's issue lookups.
+export function sampleIssues(provider: ForgeProvider): WalkthroughIssues {
+  const base = provider === "github" ? "https://github.com/acme/users/issues" : "https://gitlab.com/acme/users/-/issues";
+  const issue = (number: number, title: string, body: string): IssueContext => ({
+    ref: `#${number}`,
+    title,
+    url: `${base}/${number}`,
+    state: "open",
+    body,
+  });
+  return {
+    linked: [issue(12, "Look up a single user by id", "Add GET /users/:id returning the user's id and name, and 404 for an unknown id.")],
+    candidates: [
+      issue(31, "User profile endpoints", "Endpoints to read and update a user's profile."),
+      issue(7, "Upgrade the CI runners", "Move CI to the new runner images."),
+    ],
+  };
+}
+
+const SAMPLE_WALKTHROUGH: FullWalkthroughOutput = {
   overview:
     "Adds a `GET /users/:id` endpoint that looks a user up by id and returns their id and name, and documents it in the README.",
   fileSummaries: [
@@ -150,6 +169,21 @@ const SAMPLE_WALKTHROUGH: WalkthroughOutput = {
   labels: ["api", "feature"],
   estimatedEffort: 2,
   blastRadius: "medium",
+  sequenceDiagram: [
+    "sequenceDiagram",
+    "  participant Client",
+    "  participant Router as Users router",
+    "  participant DB",
+    "  Client->>Router: GET /users/:id",
+    "  Router->>DB: SELECT user by id",
+    "  DB-->>Router: rows",
+    "  Router-->>Client: 200 { id, name }",
+  ].join("\n"),
+  highLevelSummary: "**New Features**\n- Look up a single user with `GET /users/:id`.\n\n**Documentation**\n- The README describes the new lookup endpoint.",
+  linkedIssues: [
+    { ref: "#12", assessment: "partial", note: "The lookup is added, but an unknown id fails instead of returning 404." },
+  ],
+  relatedIssues: [{ ref: "#31", reason: "Profile endpoints build on this user lookup." }],
 };
 
 // Answers like a model would, by schema name; never touches the network.

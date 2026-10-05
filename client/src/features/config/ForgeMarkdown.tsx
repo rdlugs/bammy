@@ -3,6 +3,7 @@ import Markdown, { type Components } from "react-markdown"
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
+import { MermaidDiagram } from "@/components/MermaidDiagram"
 import { cn } from "@/lib/utils"
 import type { ForgeProvider } from "./api"
 
@@ -76,9 +77,12 @@ export function ForgeMarkdown(props: {
     pre({ node, children }): ReactNode {
       const code = node?.children[0]
       const className = code?.type === "element" ? code.properties.className : undefined
-      const isSuggestion = Array.isArray(className) && String(className[0]).startsWith("language-suggestion")
-      if (isSuggestion && code?.type === "element") {
-        const text = code.children.map((child) => (child.type === "text" ? child.value : "")).join("")
+      const language = Array.isArray(className) ? String(className[0]) : ""
+      const text =
+        code?.type === "element" ? code.children.map((child) => (child.type === "text" ? child.value : "")).join("") : ""
+      // Both forges draw ```mermaid blocks, e.g. the walkthrough's sequence diagram.
+      if (language === "language-mermaid") return <MermaidDiagram source={text.replace(/\n$/, "")} />
+      if (language.startsWith("language-suggestion")) {
         return (
           <SuggestedChange
             original={props.original ?? []}

@@ -2,12 +2,13 @@ import { MessageSquare, MousePointerClick, Webhook } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { SEVERITY_ICON, VERDICT_ICON } from "./icons"
 import { STATUS_LABEL, VERDICT_LABEL } from "./options"
 import { SEVERITY_CLASS } from "./severity"
 import type { JobStatus, Severity, Trigger, Verdict } from "./types"
 
 // Same palette as VerdictBadge below and features/forge/ConnectionStatusBadge.tsx.
-// Runs that never produced a review (superseded, skipped) stay muted.
+// Runs that never produced a review (superseded, skipped, cancelled) stay muted.
 const STATUS_CLASS: Record<JobStatus, string> = {
   completed: "border-emerald-600/40 text-emerald-700 dark:text-emerald-400",
   partial: "border-amber-600/40 text-amber-700 dark:text-amber-400",
@@ -16,6 +17,7 @@ const STATUS_CLASS: Record<JobStatus, string> = {
   queued: "border-violet-600/40 text-violet-700 dark:text-violet-400",
   superseded: "text-muted-foreground",
   skipped: "border-dashed text-muted-foreground",
+  cancelled: "border-dashed text-muted-foreground",
 }
 
 // With a reason (why it failed or was skipped), the badge explains itself on hover.
@@ -61,6 +63,7 @@ export function TriggerIcon({ trigger }: { trigger: Trigger }) {
 
 export function VerdictBadge({ verdict }: { verdict: Verdict | null }) {
   if (!verdict) return <span className="text-muted-foreground">-</span>
+  const Icon = VERDICT_ICON[verdict]
   return (
     <Badge
       variant={verdict === "blocked" ? "destructive" : "outline"}
@@ -69,11 +72,18 @@ export function VerdictBadge({ verdict }: { verdict: Verdict | null }) {
         verdict === "error" && "border-amber-600/40 text-amber-700 dark:text-amber-400",
       )}
     >
+      <Icon data-icon="inline-start" aria-hidden />
       {VERDICT_LABEL[verdict]}
     </Badge>
   )
 }
 
 export function SeverityBadge({ severity }: { severity: Severity }) {
-  return <Badge className={cn("border-transparent", SEVERITY_CLASS[severity])}>{severity}</Badge>
+  const Icon = SEVERITY_ICON[severity]
+  return (
+    <Badge className={cn("border-transparent", SEVERITY_CLASS[severity])}>
+      <Icon data-icon="inline-start" aria-hidden />
+      {severity}
+    </Badge>
+  )
 }

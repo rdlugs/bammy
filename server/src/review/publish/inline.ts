@@ -3,7 +3,7 @@ import { fingerprintMarker } from "../core/markers.ts";
 import { FORGE_INFO } from "../forge/providers.ts";
 import type { InlineComment } from "../forge/types.ts";
 import { agentPromptBlock, findingPrompt } from "../render/agentPrompt.ts";
-import { BRAND_FOOTER, sanitize } from "../render/markdown.ts";
+import { BRAND_FOOTER, SEVERITY_ICON, sanitize } from "../render/markdown.ts";
 
 function fence(code: string, info: string): string {
   const longest = Math.max(2, ...[...code.matchAll(/`+/g)].map((m) => m[0].length));
@@ -18,7 +18,7 @@ export interface InlineOptions {
 
 export function inlineBody(finding: Finding, provider: ForgeProvider, options: InlineOptions = {}): string {
   const lines = [
-    `**${finding.severity}** · ${finding.category}${finding.kind === "potential_issue" ? "" : ` · ${finding.kind.replace(/_/g, " ")}`}`,
+    `${SEVERITY_ICON[finding.severity]} **${finding.severity}** · ${finding.category}${finding.kind === "potential_issue" ? "" : ` · ${finding.kind.replace(/_/g, " ")}`}`,
     "",
     `**${sanitize(finding.title)}**`,
     "",
@@ -26,7 +26,7 @@ export function inlineBody(finding: Finding, provider: ForgeProvider, options: I
   ];
   if (finding.suggestion) lines.push("", fence(finding.suggestion, FORGE_INFO[provider].suggestionInfo(finding.startLine, finding.endLine)));
   // Collapsed like the agent prompt: supporting detail, not what a reader needs first.
-  if (finding.evidenceNote) lines.push("", "<details>", "<summary>Evidence</summary>", "", sanitize(finding.evidenceNote), "", "</details>");
+  if (finding.evidenceNote) lines.push("", "<details>", "<summary>🔎 Evidence</summary>", "", sanitize(finding.evidenceNote), "", "</details>");
   if (options.agentPrompt !== false) lines.push("", ...agentPromptBlock("Prompt for AI agents", findingPrompt(finding)));
   lines.push("", BRAND_FOOTER, "", fingerprintMarker(finding.fingerprint));
   return lines.join("\n");

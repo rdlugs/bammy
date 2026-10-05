@@ -4,9 +4,10 @@ import type { CommitStatus } from "../forge/types.ts";
 import { runReview } from "../pipeline.ts";
 import { inlineComments } from "../publish/inline.ts";
 import { labelChanges } from "../publish/labels.ts";
-import { summaryPlacement } from "../publish/publisher.ts";
+import { withDescriptionSummary } from "../core/markers.ts";
+import { descriptionSummary, summaryPlacement } from "../publish/publisher.ts";
 import { commitStatus } from "../publish/status.ts";
-import { SAMPLE_NOW, sampleChange, sampleGenerate } from "./sample.ts";
+import { SAMPLE_NOW, sampleChange, sampleGenerate, sampleIssues } from "./sample.ts";
 
 export interface DiffLine {
   type: "add" | "context";
@@ -33,6 +34,8 @@ export interface PreviewPublication {
     sourceBranch: string;
     targetBranch: string;
     labels: string[];
+    // The description after publishing, with the high-level summary when it goes there.
+    description: string;
   };
   status: CommitStatus | null;
   summaryComment: string | null;
@@ -70,7 +73,10 @@ function diffAbove(file: ChangedFile, endLine: number): DiffLine[] {
 // preview cannot drift from the real output.
 export async function previewPublication(config: Config, provider: ForgeProvider): Promise<PreviewPublication> {
   const change = sampleChange(provider);
-  const result = await runReview({ changeSet: change, config }, { generate: sampleGenerate, now: () => SAMPLE_NOW });
+  const result = await runReview(
+    { changeSet: change, config, issues: sampleIssues(provider) },
+    { generate: sampleGenerate, now: () => SAMPLE_NOW },
+  );
   const { output } = config;
 
   const placement = summaryPlacement(config, result);
@@ -85,6 +91,7 @@ export async function previewPublication(config: Config, provider: ForgeProvider
       sourceBranch: change.headRef ?? "",
       targetBranch: change.baseRef ?? "",
       labels: result.walkthrough ? labelChanges(result.walkthrough, output).add : [],
+      description: withDescriptionSummary(change.description, descriptionSummary(config, result)),
     },
     status: output.postCheck ? commitStatus(result) : null,
     summaryComment: placement.summary,

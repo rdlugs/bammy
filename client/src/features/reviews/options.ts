@@ -8,6 +8,7 @@ export const STATUS_LABEL: Record<JobStatus, string> = {
   failed: "Failed",
   superseded: "Superseded",
   skipped: "Skipped",
+  cancelled: "Cancelled",
 }
 
 export const VERDICT_LABEL: Record<Verdict, string> = { pass: "Pass", blocked: "Blocked", error: "Incomplete" }

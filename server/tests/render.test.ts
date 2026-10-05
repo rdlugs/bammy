@@ -47,9 +47,9 @@ describe("toMarkdown", () => {
 
   it("indexes actionable findings and details the rest", async () => {
     const markdown = toMarkdown(await sampleResult());
-    expect(markdown).toContain("<summary>Actionable comments (2)</summary>");
-    expect(markdown).toContain("<summary>Nitpick comments (1)</summary>");
-    expect(markdown).toContain("<summary>Outside diff range comments (1)</summary>");
+    expect(markdown).toContain("<summary>🛠️ Actionable comments (2)</summary>");
+    expect(markdown).toContain("<summary>🧹 Nitpick comments (1)</summary>");
+    expect(markdown).toContain("<summary>📍 Outside diff range comments (1)</summary>");
     expect(markdown).toContain("#### `src/app.ts:40`: Caller ignores &lt;result&gt;");
     expect(markdown).toContain("- `package-lock.json`: ignored by configuration");
   });
@@ -85,6 +85,17 @@ describe("toMarkdown with a walkthrough", () => {
     expect(merged.indexOf("Review effort:")).toBeLessThan(merged.indexOf("**Blocked**"));
     expect(merged.trimEnd().endsWith(SUMMARY_MARKER)).toBe(true);
     expect(toMarkdown(result, { walkthrough: false })).toMatch(/^## Summary\n\n⛔ \*\*Blocked\*\*/);
+  });
+  it("opens with the high-level summary in the overview's place when it is placed there", async () => {
+    const result = await sampleResult();
+    const withSummary = { ...result, walkthrough: { ...result.walkthrough!, highLevelSummary: "- Adds b" } };
+    const placed = toMarkdown(withSummary, { highLevelSummary: true });
+    expect(placed).toMatch(/^## High-level summary\n\n- Adds b\n/);
+    expect(placed).not.toContain("Adds b and c.");
+    expect(placed).toContain("Review effort:");
+    // Placed in the description, or missing from the stored review: the overview stays.
+    expect(toMarkdown(withSummary)).toMatch(/^## Summary\n\nAdds b and c\./);
+    expect(toMarkdown(result, { highLevelSummary: true })).toMatch(/^## Summary\n\nAdds b and c\./);
   });
 });
 
@@ -127,7 +138,7 @@ describe("agent prompts", () => {
     const [finding] = (await sampleResult()).findings;
     const body = inlineBody({ ...finding!, evidenceNote: "Called with user input.", suggestion: "const fixed = true;\n" }, "github");
     expect(body).not.toContain("<sub>Evidence");
-    const evidence = body.indexOf("<summary>Evidence</summary>");
+    const evidence = body.indexOf("<summary>🔎 Evidence</summary>");
     expect(evidence).toBeGreaterThan(body.indexOf("```suggestion"));
     expect(evidence).toBeLessThan(body.indexOf("Prompt for AI agents"));
     expect(body).toContain("Called with user input.");

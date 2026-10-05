@@ -17,7 +17,7 @@ import { reviewSystemPrompt } from "./llm/prompt.ts";
 import type { Generate } from "./llm/providers.ts";
 import { reviewChunk } from "./llm/review.ts";
 import type { ModelFinding } from "./llm/schemas.ts";
-import { generateWalkthrough } from "./llm/walkthrough.ts";
+import { generateWalkthrough, type WalkthroughIssues } from "./llm/walkthrough.ts";
 import { validateFindings } from "./validate/validator.ts";
 
 export interface ReviewDeps {
@@ -32,6 +32,8 @@ export interface RunReviewInput {
   config: Config;
   // Carried into the result, e.g. an ignored repository config file.
   warnings?: string[];
+  // Linked and candidate issues for the walkthrough, fetched by the caller.
+  issues?: WalkthroughIssues;
 }
 
 // Omissions that mean the change was not fully reviewed. Ignored, binary and
@@ -102,7 +104,7 @@ export async function runReview(input: RunReviewInput, deps: ReviewDeps): Promis
 
   const walkthroughTask: Promise<Walkthrough | undefined> =
     config.output.walkthrough && reviewable.length > 0
-      ? generateWalkthrough(deps.generate, changeSet, reviewable, config).then(
+      ? generateWalkthrough(deps.generate, changeSet, reviewable, config, input.issues).then(
           ({ walkthrough, usage: callUsage }) => {
             usage.push(callUsage);
             return walkthrough;

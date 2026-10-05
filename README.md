@@ -78,7 +78,7 @@ Register and login are rate limited (20 requests per 15 minutes per IP).
 **GitHub**: create a GitHub App (Settings, Developer settings, GitHub Apps) and put its details in `.env`:
 
 - Setup URL: `http://localhost:5173/api/connections/github/callback`, with **Request user authorization (OAuth) during installation** checked. Bammy uses that OAuth code to confirm the installing user can actually access the installation.
-- Repository permissions: Pull requests (read and write), Contents (read), Commit statuses (read and write), Metadata (read).
+- Repository permissions: Pull requests (read and write), Contents (read), Commit statuses (read and write), Issues (read), Metadata (read). Issues is used for linked and related issues in the walkthrough; without it those parts are skipped with a warning.
 - Copy the App ID, slug, client ID, a client secret and a generated private key into the `GITHUB_APP_*` variables.
 - Webhook: URL `<API_PUBLIC_URL>/api/webhooks/github`, a secret in `GITHUB_WEBHOOK_SECRET`, and the events **Pull request**, **Issue comment** and **Installation**.
 
@@ -91,7 +91,9 @@ In production, self-hosted forge hosts must use https and resolve to public addr
 When a review starts, Bammy posts a "reviewing" summary comment and sets a pending `bammy/review` commit status. When it finishes it publishes, each step independently:
 
 - **Inline comments** for actionable findings only (GitHub: one review posted as `COMMENT`, never approve or request changes; GitLab: one discussion per finding). Suggestions use each forge's suggestion syntax. Each comment carries a hidden fingerprint, so a later run never posts the same finding twice, even if Bammy's own records are lost.
-- **The summary comment**, edited in place: the markdown served by `GET /api/reviews/:id/markdown`. One comment carries both what the change does (the walkthrough, when `output.walkthrough` is on) and what the review found. It ends with a line naming the commit, models and coverage, which `output.review_stats` turns off. With `output.post_summary` off, the walkthrough is posted as a comment of its own. Bammy no longer writes into the PR/MR description; a block an earlier version left there is removed on the next review, and `output.summary_location` is accepted but ignored.
+- **The summary comment**, edited in place: the markdown served by `GET /api/reviews/:id/markdown`. One comment carries both what the change does (the walkthrough, when `output.walkthrough` is on) and what the review found. It ends with a line naming the commit, models and coverage, which `output.review_stats` turns off. With `output.post_summary` off, the walkthrough is posted as a comment of its own. `output.summary_location` is accepted but ignored, and a walkthrough block an earlier version wrote into the description is removed on the next review.
+- **The walkthrough's optional parts**, each with its own switch: the review effort estimate (`output.estimate_effort`), a Mermaid sequence diagram of the main flow (`output.sequence_diagrams`), an assessment of how well the change addresses the issues it closes (`output.assess_linked_issues`; "fixes #12" style references on GitHub, GitLab's own closing issues on GitLab) and possibly related issues found by searching the tracker for the title's keywords (`output.related_issues`). Only issues the forge returned are ever shown.
+- **The high-level summary** (`output.high_level_summary`): release notes by default, or whatever `output.high_level_summary_instructions` asks for. `output.high_level_summary_placement` puts it in the PR/MR description (the default, between hidden markers at the end, replaced on each run and never read back as the author's text) or in the walkthrough.
 - **Labels**, when `output.blast_radius_label` or `output.effort_label` is on: the walkthrough's estimates as native labels such as `Large blast radius` or `10-20 Minutes`. A later run swaps a changed estimate's label. GitHub and GitLab only; on GitHub both labels and the cleanup of old description blocks use the Pull requests (write) permission.
 - **The commit status**: `success` (pass), `failure` (blocked) or `error` (incomplete; GitLab shows it as `failed`), linking to the review in the dashboard. Branch protection can require it.
 
@@ -107,6 +109,9 @@ Turn the first three off with `output.post_inline`, `output.post_summary` and `o
 - All of this is checked by the worker with the full configuration, so a skipped review shows in the dashboard with the reason.
 - Older settings keep their meaning: `triggers.on_push: false` reads as `review: manual` and `triggers.drafts: true` as `review: all`, unless the same layer sets `review`.
 - Each user has at most `WORKER_USER_CONCURRENCY` reviews running at once, and a repository holds at most 10 queued.
+- With `triggers.abort_on_close` (the default), closing or merging a PR/MR cancels its queued reviews, and a running review stops: the worker checks the change before it starts, every 15 seconds while it runs (aborting model calls in flight) and before publishing. A cancelled review publishes nothing and closes its pending commit status as `error`. The webhook decides on queued reviews from the dashboard settings; the worker uses the full configuration, repository file included.
+
+The worker keeps a small in-memory cache of what a commit fixes: the repository config file at the base revision and the change's diff for a given base and head. Reruns of the same head skip those forge calls; titles, descriptions, labels and state are always read fresh. `review.disable_cache` turns it off. Set in the dashboard it covers every read; set in `.bammy.yaml` the diff is fetched again once the file has been read.
 
 ## Review configuration
 
@@ -153,6 +158,7 @@ review:
   require_evidence: true    # unproven critical/major findings are demoted
   full_file: false          # allow findings on lines the change did not touch
   committable_suggestions: true
+  disable_cache: false      # fetch the diff and config file fresh on every run
 output:
   walkthrough: true
   post_inline: true
@@ -163,11 +169,19 @@ output:
   agent_prompt_all: true    # one prompt for every finding in the summary comment
   blast_radius_label: false # e.g. "Large blast radius"
   effort_label: false       # e.g. "10-20 Minutes"
+  estimate_effort: true     # review effort in the walkthrough
+  sequence_diagrams: true   # Mermaid sequence diagram in the walkthrough
+  assess_linked_issues: true
+  related_issues: true
+  high_level_summary: true
+  high_level_summary_placement: description   # description | walkthrough
+  high_level_summary_instructions: ""         # empty: release notes
 triggers:
   review: published         # manual | published | all (drafts too)
   review_on_push: true      # review new commits pushed to an open PR/MR
   summary: published        # manual | published: walkthrough in automatic reviews
   command: true             # allow "/bammy review" in a comment
+  abort_on_close: true      # stop a review when its PR/MR is closed or merged
   ignore_titles: ["WIP"]    # title contains, ignoring case
   skip_authors: ["dependabot[bot]"]
   skip_labels: ["no-review"]          # exact, case-sensitive
