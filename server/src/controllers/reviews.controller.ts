@@ -9,6 +9,7 @@ import { toMarkdown } from "../review/render/markdown.ts";
 import { adapterForConnection, toHttpError } from "../services/forge.ts";
 import { enqueue } from "../worker/queue.ts";
 import {
+  createReviewByRepoSchema,
   createReviewSchema,
   listReviewsQuerySchema,
   reviewIdParamSchema,
@@ -34,7 +35,9 @@ function ownedBy(userId: string) {
   return { repository: { connection: { userId } } };
 }
 
-async function queueLatest(repo: Repository & { connection: Parameters<typeof adapterForConnection>[0] }, number: number) {
+type RepoWithConnection = Repository & { connection: Parameters<typeof adapterForConnection>[0] };
+
+async function queueLatest(repo: RepoWithConnection, number: number) {
   const head = await adapterForConnection(repo.connection)
     .getChangeHead(repo.fullPath, number)
     .catch((err: unknown) => {
@@ -43,7 +46,30 @@ async function queueLatest(repo: Repository & { connection: Parameters<typeof ad
   return enqueue({ repositoryId: repo.id, number, headSha: head.headSha, trigger: "manual" });
 }
 
+// Both ways of asking for a review end here, so they refuse and queue alike.
+async function queueManual(res: Response, repo: RepoWithConnection, number: number) {
+  if (!repo.enabled) {
+    throw new HttpError(409, `Reviews are turned off for ${repo.fullPath}`);
+  }
+  const job = await queueLatest(repo, number);
+  const review = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id }, select: listFields });
+  res.status(202).json({ review });
+}
+
 export async function createReview(req: Request, res: Response) {
+  if (req.body && typeof req.body === "object" && "repoId" in req.body) {
+    const { repoId, number } = createReviewByRepoSchema.parse(req.body);
+    const repo = await prisma.repository.findFirst({
+      where: { id: repoId, connection: { userId: req.userId } },
+      include: { connection: true },
+    });
+    if (!repo) {
+      throw new HttpError(404, "Repository not found");
+    }
+    await queueManual(res, repo, number);
+    return;
+  }
+
   const { url } = createReviewSchema.parse(req.body);
   const parsed = parseChangeUrl(url);
   if (!parsed) {
@@ -59,13 +85,7 @@ export async function createReview(req: Request, res: Response) {
   if (!repo) {
     throw new HttpError(404, `${parsed.project} is not connected; enable it under Repositories first`);
   }
-  if (!repo.enabled) {
-    throw new HttpError(409, `Reviews are turned off for ${repo.fullPath}`);
-  }
-
-  const job = await queueLatest(repo, parsed.number);
-  const review = await prisma.reviewJob.findUniqueOrThrow({ where: { id: job.id }, select: listFields });
-  res.status(202).json({ review });
+  await queueManual(res, repo, parsed.number);
 }
 
 type ListQuery = ReturnType<typeof listReviewsQuerySchema.parse>;

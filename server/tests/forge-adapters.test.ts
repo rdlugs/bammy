@@ -125,6 +125,44 @@ describe("GitHubAdapter", () => {
     expect(stub.calls[0]!.url).toMatch(/^https:\/\/ghe\.acme\.com\/api\/v3\/user\/repos/);
   });
 
+  it("lists open pull requests, most recently updated first", async () => {
+    const pull = (number: number, draft = false) => ({
+      number,
+      title: `PR ${number}`,
+      draft,
+      state: "open",
+      html_url: `https://github.com/acme/web/pull/${number}`,
+      updated_at: "2026-10-01T00:00:00Z",
+      user: { login: "dev" },
+      base: { sha: "b", ref: "main" },
+      head: { sha: `h${number}`, ref: `feature-${number}` },
+    });
+    const { adapter: gh, calls } = adapter([
+      {
+        url: /\/repos\/acme\/web\/pulls\?state=open&sort=updated&direction=desc&per_page=100$/,
+        body: [pull(3)],
+        headers: { link: '<https://api.github.com/repos/acme/web/pulls?state=open&page=2>; rel="next"' },
+      },
+      { url: /\/repos\/acme\/web\/pulls\?state=open&page=2$/, body: [pull(2, true)] },
+    ]);
+
+    expect(await gh.listOpenChanges("acme/web")).toEqual([
+      {
+        number: 3,
+        title: "PR 3",
+        author: "dev",
+        isDraft: false,
+        headSha: "h3",
+        sourceBranch: "feature-3",
+        targetBranch: "main",
+        webUrl: "https://github.com/acme/web/pull/3",
+        updatedAt: "2026-10-01T00:00:00Z",
+      },
+      expect.objectContaining({ number: 2, isDraft: true }),
+    ]);
+    expect(calls).toHaveLength(2);
+  });
+
   it("creates a repository hook and tolerates deleting one that is gone", async () => {
     const repo = { externalId: "9", fullPath: "acme/web" };
     const { adapter: gh, calls } = adapter([
@@ -222,6 +260,44 @@ describe("GitLabAdapter", () => {
     return { ...stub, adapter: new GitLabAdapter({ host, token: async () => "glpat", fetch: stub.fetch }) };
   };
 
+  it("lists open merge requests by iid", async () => {
+    const { adapter: gl, calls } = adapter([
+      {
+        url: /\/projects\/team%2Fapp\/merge_requests\?state=opened&order_by=updated_at&sort=desc&per_page=100$/,
+        body: [
+          {
+            iid: 7,
+            title: "Draft: thing",
+            work_in_progress: true,
+            sha: "h7",
+            state: "opened",
+            web_url: "https://gitlab.acme.com/team/app/-/merge_requests/7",
+            updated_at: "2026-10-01T00:00:00Z",
+            author: { username: "dev" },
+            source_branch: "feature",
+            target_branch: "main",
+          },
+        ],
+        headers: { "x-next-page": "" },
+      },
+    ]);
+
+    expect(await gl.listOpenChanges("team/app")).toEqual([
+      {
+        number: 7,
+        title: "Draft: thing",
+        author: "dev",
+        isDraft: true,
+        headSha: "h7",
+        sourceBranch: "feature",
+        targetBranch: "main",
+        webUrl: "https://gitlab.acme.com/team/app/-/merge_requests/7",
+        updatedAt: "2026-10-01T00:00:00Z",
+      },
+    ]);
+    expect(calls).toHaveLength(1);
+  });
+
   it("builds a ChangeSet with GitLab's diff refs and follows x-next-page", async () => {
     const { adapter: gl, calls } = adapter([
       {
@@ -286,6 +362,60 @@ describe("GitLabAdapter", () => {
     ]);
     expect(calls[0]!.url.startsWith("https://gitlab.acme.com/api/v4/")).toBe(true);
     expect(calls[0]!.headers["private-token"]).toBe("glpat");
+  });
+
+  const MR_7 = {
+    url: /\/projects\/team%2Fapp\/merge_requests\/7$/,
+    body: {
+      title: "t",
+      description: null,
+      web_url: "u",
+      source_branch: "f",
+      target_branch: "m",
+      diff_refs: { base_sha: "b", start_sha: "s", head_sha: "h" },
+    },
+  };
+
+  it("falls back to /changes when /diffs is missing (GitLab < 15.7)", async () => {
+    const { adapter: gl, calls } = adapter([
+      MR_7,
+      { url: /\/merge_requests\/7\/diffs\?per_page=100$/, status: 404, body: { message: "404 Not Found" } },
+      {
+        url: /\/merge_requests\/7\/changes$/,
+        body: {
+          changes: [
+            { old_path: "a.ts", new_path: "a.ts", new_file: false, renamed_file: false, deleted_file: false, diff: PATCH },
+            {
+              old_path: "big.sql",
+              new_path: "big.sql",
+              new_file: true,
+              renamed_file: false,
+              deleted_file: false,
+              diff: "",
+              too_large: true,
+            },
+          ],
+        },
+      },
+    ]);
+
+    const change = await gl.getChange("team/app", 7);
+
+    expect(change.files.map((f) => [f.path, f.changeType, f.patchUnavailable])).toEqual([
+      ["a.ts", "modified", false],
+      ["big.sql", "added", true],
+    ]);
+    expect(calls.map((c) => c.url.replace(/^.*\/merge_requests\/7/, ""))).toEqual(["", "/diffs?per_page=100", "/changes"]);
+  });
+
+  it("does not fall back on non-404 diff errors", async () => {
+    const { adapter: gl, calls } = adapter([
+      MR_7,
+      { url: /\/merge_requests\/7\/diffs\?per_page=100$/, status: 500, body: { message: "boom" } },
+    ]);
+
+    await expect(gl.getChange("team/app", 7)).rejects.toThrow(/failed \(500\)/);
+    expect(calls.some((c) => c.url.endsWith("/changes"))).toBe(false);
   });
 
   it("refuses a merge request with no diff yet", async () => {

@@ -103,6 +103,19 @@ export interface ReviewListItem {
   runCount?: number
 }
 
+// An open pull/merge request, as GET /api/repos/:id/changes lists it.
+export interface OpenChange {
+  number: number
+  title: string
+  author?: string
+  isDraft: boolean
+  headSha: string
+  sourceBranch: string
+  targetBranch: string
+  webUrl: string
+  updatedAt: string
+}
+
 export interface Publication {
   inlinePosted: { fingerprint: string; forgeCommentId: string }[]
   inlineSkipped: number

@@ -120,6 +120,33 @@ describe("POST /api/reviews", () => {
   });
 });
 
+describe("POST /api/reviews by repository", () => {
+  it("queues a review of a change picked from the repository", async () => {
+    vi.stubGlobal("fetch", fetchStub([mrRoute("abc123")]).fetch);
+
+    const res = await request(app).post("/api/reviews").set("Cookie", cookie).send({ repoId, number: 7 });
+
+    expect(res.status).toBe(202);
+    expect(res.body.review).toMatchObject({ number: 7, headSha: "abc123", trigger: "manual", status: "queued" });
+  });
+
+  it("validates the body", async () => {
+    const res = await request(app).post("/api/reviews").set("Cookie", cookie).send({ repoId, number: 0 });
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toHaveProperty("number");
+  });
+
+  it("409s for a disabled repository and 404s for another user's", async () => {
+    await prisma.repository.update({ where: { id: repoId }, data: { enabled: false } });
+    const disabled = await request(app).post("/api/reviews").set("Cookie", cookie).send({ repoId, number: 7 });
+    expect(disabled.status).toBe(409);
+
+    const other = await createUser("other@example.com");
+    const foreign = await request(app).post("/api/reviews").set("Cookie", other.cookie).send({ repoId, number: 7 });
+    expect(foreign.status).toBe(404);
+  });
+});
+
 describe("GET /api/reviews", () => {
   it("lists newest first in pages with a total and without full results", async () => {
     for (const number of [1, 2, 3]) await completedJob(number);

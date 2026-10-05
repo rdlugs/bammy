@@ -4,6 +4,12 @@ export const createReviewSchema = z.object({
   url: z.string().trim().min(1, "Paste a pull or merge request URL"),
 });
 
+// Picked from a repository's open changes rather than pasted as a link.
+export const createReviewByRepoSchema = z.object({
+  repoId: z.uuid(),
+  number: z.number().int().min(1),
+});
+
 export const listReviewsQuerySchema = z.object({
   repoId: z.uuid().optional(),
   status: z.enum(["queued", "running", "completed", "partial", "failed", "superseded", "skipped"]).optional(),

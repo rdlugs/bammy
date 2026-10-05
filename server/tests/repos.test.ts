@@ -348,6 +348,54 @@ describe("GET /api/repos/:id/config", () => {
   });
 });
 
+describe("GET /api/repos/:id/changes", () => {
+  it("lists the repository's open merge requests from the forge", async () => {
+    const repo = await prisma.repository.create({
+      data: { connectionId, provider: "gitlab", host: "gitlab.com", fullPath: "team/web", externalId: "1", defaultBranch: "main" },
+    });
+    vi.stubGlobal(
+      "fetch",
+      fetchStub([
+        {
+          url: /\/projects\/team%2Fweb\/merge_requests\?state=opened/,
+          body: [
+            {
+              iid: 4,
+              title: "Add search",
+              draft: false,
+              sha: "h4",
+              state: "opened",
+              web_url: "https://gitlab.com/team/web/-/merge_requests/4",
+              updated_at: "2026-10-01T00:00:00Z",
+              author: { username: "dev" },
+              source_branch: "search",
+              target_branch: "main",
+            },
+          ],
+        },
+      ]).fetch,
+    );
+
+    const res = await request(app).get(`/api/repos/${repo.id}/changes`).set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.changes).toEqual([
+      expect.objectContaining({ number: 4, title: "Add search", headSha: "h4", sourceBranch: "search", author: "dev" }),
+    ]);
+  });
+
+  it("404s for another user's repository", async () => {
+    const repo = await prisma.repository.create({
+      data: { connectionId, provider: "gitlab", host: "gitlab.com", fullPath: "team/web", externalId: "1", defaultBranch: "main" },
+    });
+    const other = await createUser("other@example.com");
+
+    const res = await request(app).get(`/api/repos/${repo.id}/changes`).set("Cookie", other.cookie);
+
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("GET /api/repos/:id/config with the global config", () => {
   async function repoWithGlobal(followGlobal: boolean) {
     const user = await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } });

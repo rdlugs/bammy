@@ -1,6 +1,5 @@
-import { useParams } from "react-router"
-import { AlertTriangle, Copy, ExternalLink, Loader2, RotateCw } from "lucide-react"
-import { useNavigate } from "react-router"
+import { Link, useNavigate, useParams } from "react-router"
+import { AlertTriangle, ArrowLeft, Copy, ExternalLink, Loader2, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -29,6 +28,17 @@ const OMISSION_TEXT: Record<string, string> = {
   too_large: "too large for one review pass",
   budget: "review pass limit reached",
   chunk_failed: "review pass failed",
+}
+
+function BackToReviews() {
+  return (
+    <Button asChild variant="ghost" size="sm" className="self-start">
+      <Link to="/reviews">
+        <ArrowLeft />
+        Back to reviews
+      </Link>
+    </Button>
+  )
 }
 
 function plural(count: number, word: string) {
@@ -168,7 +178,12 @@ export function ReviewDetailPage() {
     )
   }
   if (isError) {
-    return <main className="p-6 text-sm text-destructive">Review not found.</main>
+    return (
+      <main className="flex flex-1 flex-col gap-6 p-6">
+        <BackToReviews />
+        <p className="text-sm text-destructive">Review not found.</p>
+      </main>
+    )
   }
 
   const { review } = data
@@ -196,6 +211,7 @@ export function ReviewDetailPage() {
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-6">
+      <BackToReviews />
       <div className="flex flex-wrap items-start gap-4">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>

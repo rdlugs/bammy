@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import { isActive, type JobStatus, type ReviewDetail, type ReviewListItem, type ReviewStats, type Trigger, type Verdict } from "./types"
+import { isActive, type JobStatus, type OpenChange, type ReviewDetail, type ReviewListItem, type ReviewStats, type Trigger, type Verdict } from "./types"
 
 // While anything is queued or running, poll; otherwise stay quiet.
 const POLL_MS = 3000
@@ -65,12 +65,24 @@ export function useReview(id: string) {
   })
 }
 
+// A pasted link, or a change picked from a repository's open ones.
+export type CreateReviewInput = { url: string } | { repoId: string; number: number }
+
 export function useCreateReview() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (url: string) =>
-      api<{ review: ReviewListItem }>("/reviews", { method: "POST", body: JSON.stringify({ url }) }),
+    mutationFn: (input: CreateReviewInput) =>
+      api<{ review: ReviewListItem }>("/reviews", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reviews"] }),
+  })
+}
+
+// Read live from the forge, so only while a repository is picked.
+export function useOpenChanges(repoId: string | undefined) {
+  return useQuery({
+    queryKey: ["repos", repoId, "changes"],
+    queryFn: () => api<{ changes: OpenChange[] }>(`/repos/${repoId}/changes`),
+    enabled: Boolean(repoId),
   })
 }
 
