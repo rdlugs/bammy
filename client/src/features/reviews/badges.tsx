@@ -1,23 +1,47 @@
+import { MessageSquare, MousePointerClick, Webhook } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import type { JobStatus, Severity, Verdict } from "./types"
+import { STATUS_LABEL, VERDICT_LABEL } from "./options"
+import type { JobStatus, Severity, Trigger, Verdict } from "./types"
 
-const STATUS_LABEL: Record<JobStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  completed: "Completed",
-  partial: "Partial",
-  failed: "Failed",
-  superseded: "Superseded",
-  skipped: "Skipped",
-}
-
-export function StatusBadge({ status }: { status: JobStatus }) {
+// With a reason (why it failed or was skipped), the badge explains itself on hover.
+export function StatusBadge({ status, reason }: { status: JobStatus; reason?: string | null }) {
   const variant = status === "failed" ? "destructive" : status === "completed" ? "secondary" : "outline"
-  return <Badge variant={variant}>{STATUS_LABEL[status]}</Badge>
+  const badge = <Badge variant={variant}>{STATUS_LABEL[status]}</Badge>
+  if (!reason) return badge
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="cursor-help">
+          {badge}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{reason}</TooltipContent>
+    </Tooltip>
+  )
 }
 
-const VERDICT_LABEL: Record<Verdict, string> = { pass: "Pass", blocked: "Blocked", error: "Incomplete" }
+const TRIGGER = {
+  manual: { label: "Started from the dashboard", icon: MousePointerClick },
+  webhook: { label: "Started by a push or a new pull request", icon: Webhook },
+  comment: { label: "Started by a /bammy review comment", icon: MessageSquare },
+} satisfies Record<Trigger, { label: string; icon: unknown }>
+
+export function TriggerIcon({ trigger }: { trigger: Trigger }) {
+  const { label, icon: Icon } = TRIGGER[trigger]
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} aria-label={label} className="inline-flex text-muted-foreground">
+          <Icon className="size-3.5" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 
 export function VerdictBadge({ verdict }: { verdict: Verdict | null }) {
   if (!verdict) return <span className="text-muted-foreground">-</span>

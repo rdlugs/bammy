@@ -7,8 +7,21 @@ export const createReviewSchema = z.object({
 export const listReviewsQuerySchema = z.object({
   repoId: z.uuid().optional(),
   status: z.enum(["queued", "running", "completed", "partial", "failed", "superseded", "skipped"]).optional(),
-  cursor: z.uuid().optional(),
+  verdict: z.enum(["pass", "blocked", "error"]).optional(),
+  trigger: z.enum(["manual", "webhook", "comment"]).optional(),
+  number: z.coerce.number().int().min(1).optional(),
+  q: z.string().trim().max(200).optional(),
+  // Superseded runs never reached a model; they are noise unless asked for.
+  includeSuperseded: z.stringbool().default(false),
+  // "changes" collapses every run of a pull/merge request into its latest one.
+  view: z.enum(["changes", "runs"]).default("runs"),
+  page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const reviewStatsQuerySchema = z.object({
+  repoId: z.uuid().optional(),
+  days: z.coerce.number().int().min(1).max(90).default(7),
 });
 
 export const reviewIdParamSchema = z.object({ id: z.uuid() });

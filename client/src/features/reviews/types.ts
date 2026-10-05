@@ -6,6 +6,7 @@ export type Bucket = "actionable" | "outside_diff" | "nitpick" | "requirement_ga
 export type JobStatus = "queued" | "running" | "completed" | "partial" | "failed" | "superseded" | "skipped"
 export type Verdict = "pass" | "blocked" | "error"
 export type Provider = "github" | "gitlab"
+export type Trigger = "manual" | "webhook" | "comment"
 
 export const SEVERITIES: Severity[] = ["critical", "major", "minor", "info"]
 export const BUCKET_ORDER: Bucket[] = ["actionable", "requirement_gap", "outside_diff", "nitpick"]
@@ -89,7 +90,7 @@ export interface ReviewListItem {
   id: string
   number: number
   headSha: string
-  trigger: "manual" | "webhook" | "comment"
+  trigger: Trigger
   status: JobStatus
   verdict: Verdict | null
   summary: ReviewSummary | null
@@ -98,6 +99,8 @@ export interface ReviewListItem {
   startedAt: string | null
   finishedAt: string | null
   repository: { id: string; provider: Provider; host: string; fullPath: string }
+  // Only in the "changes" view: matching runs of this change, this one included.
+  runCount?: number
 }
 
 export interface Publication {
@@ -114,6 +117,15 @@ export interface ReviewDetail extends ReviewListItem {
   attempts: number
   result: ReviewResult | null
   publication: Publication | null
+}
+
+export interface ReviewStats {
+  days: number
+  runs: number
+  blocked: number
+  passed: number
+  failed: number
+  findings: Record<Severity, number>
 }
 
 export function isActive(status: JobStatus) {

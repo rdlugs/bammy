@@ -5,7 +5,6 @@ import {
   GitPullRequest,
   LayoutDashboard,
   LogOut,
-  Plug,
   Settings,
   SlidersHorizontal,
 } from "lucide-react"
@@ -40,7 +39,6 @@ const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/reviews", label: "Reviews", icon: GitPullRequest },
   { to: "/repositories", label: "Repositories", icon: FolderGit2 },
-  { to: "/connections", label: "Connections", icon: Plug },
   { to: "/configuration", label: "Configuration", icon: SlidersHorizontal },
 ]
 

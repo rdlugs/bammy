@@ -27,11 +27,16 @@ const publicConnection = {
 const INSTALL_STATE_PURPOSE = "github-install";
 
 export async function listConnections(req: Request, res: Response) {
-  const connections = await prisma.forgeConnection.findMany({
+  const rows = await prisma.forgeConnection.findMany({
     where: { userId: req.userId },
-    select: publicConnection,
+    // Only enabled repositories count as added, matching the details sheet.
+    select: { ...publicConnection, _count: { select: { repositories: { where: { enabled: true } } } } },
     orderBy: { createdAt: "asc" },
   });
+  const connections = rows.map(({ _count, ...connection }) => ({
+    ...connection,
+    repositoryCount: _count.repositories,
+  }));
   const availableApps = FORGE_PROVIDERS.filter((provider) => PROVIDERS[provider].appAvailable?.());
   res.json({ connections, availableApps });
 }
@@ -157,7 +162,7 @@ export function githubInstall(req: Request, res: Response) {
 }
 
 function backToClient(res: Response, params: Record<string, string>) {
-  res.redirect(`${env.CLIENT_ORIGIN}/connections?${new URLSearchParams(params)}`);
+  res.redirect(`${env.CLIENT_ORIGIN}/repositories?${new URLSearchParams({ tab: "installation", ...params })}`);
 }
 
 // The browser lands here from GitHub, so every outcome is a redirect back to

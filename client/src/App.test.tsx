@@ -19,14 +19,14 @@ describe("routing and auth", () => {
       url.includes("/connections")
         ? jsonResponse(200, { connections: [], availableApps: ["github"] })
         : url.includes("/reviews")
-          ? jsonResponse(200, { reviews: [], nextCursor: null })
+          ? jsonResponse(200, { reviews: [], total: 0, page: 1, limit: 10 })
           : jsonResponse(200, { user }),
     )
     renderWithProviders(<App />, { route: "/dashboard" })
 
     expect(await screen.findByText("Welcome, Ada Lovelace")).toBeInTheDocument()
     expect(await screen.findByText("Get started")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Connect GitHub or GitLab" })).toHaveAttribute("href", "/connections")
+    expect(screen.getByRole("link", { name: "Connect GitHub or GitLab" })).toHaveAttribute("href", "/repositories?tab=installation")
   })
 
   it("redirects a logged-in user away from /login", async () => {

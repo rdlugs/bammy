@@ -1,14 +1,19 @@
 import type { Request, Response } from "express";
 import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
-import type { Repository } from "../generated/prisma/client.ts";
+import type { Prisma, Repository } from "../generated/prisma/client.ts";
 import { reviewResultSchema } from "../review/core/models.ts";
 import { parseChangeUrl } from "../review/forge/url.ts";
 import { toJson } from "../review/render/json.ts";
 import { toMarkdown } from "../review/render/markdown.ts";
 import { adapterForConnection, toHttpError } from "../services/forge.ts";
 import { enqueue } from "../worker/queue.ts";
-import { createReviewSchema, listReviewsQuerySchema, reviewIdParamSchema } from "../schemas/reviews.schema.ts";
+import {
+  createReviewSchema,
+  listReviewsQuerySchema,
+  reviewIdParamSchema,
+  reviewStatsQuerySchema,
+} from "../schemas/reviews.schema.ts";
 
 const listFields = {
   id: true,
@@ -63,18 +68,125 @@ export async function createReview(req: Request, res: Response) {
   res.status(202).json({ review });
 }
 
+type ListQuery = ReturnType<typeof listReviewsQuerySchema.parse>;
+
+// "#12" (GitHub) and "!12" (GitLab) are how people write change numbers.
+const NUMBER_QUERY = /^[#!]?(\d{1,9})$/;
+
+function listWhere(userId: string, query: ListQuery): Prisma.ReviewJobWhereInput {
+  const { repoId, status, verdict, trigger, number, q, includeSuperseded } = query;
+  const where: Prisma.ReviewJobWhereInput = {
+    ...ownedBy(userId),
+    ...(repoId ? { repositoryId: repoId } : {}),
+    ...(verdict ? { verdict } : {}),
+    ...(trigger ? { trigger } : {}),
+    ...(number ? { number } : {}),
+  };
+  if (status) where.status = status;
+  else if (!includeSuperseded) where.status = { not: "superseded" };
+  if (q) {
+    const asNumber = NUMBER_QUERY.exec(q);
+    where.OR = [
+      { repository: { fullPath: { contains: q, mode: "insensitive" } } },
+      // JSON string matching has no case-insensitive mode.
+      { summary: { path: ["title"], string_contains: q } },
+      ...(asNumber ? [{ number: Number(asNumber[1]) }] : []),
+    ];
+  }
+  return where;
+}
+
 export async function listReviews(req: Request, res: Response) {
-  const { repoId, status, cursor, limit } = listReviewsQuerySchema.parse(req.query);
-  const reviews = await prisma.reviewJob.findMany({
-    where: { ...ownedBy(req.userId!), ...(repoId ? { repositoryId: repoId } : {}), ...(status ? { status } : {}) },
+  const query = listReviewsQuerySchema.parse(req.query);
+  const { page, limit } = query;
+  const where = listWhere(req.userId!, query);
+  if (query.view === "changes") {
+    res.json({ ...(await listChanges(where, page, limit)), page, limit });
+    return;
+  }
+  // Offset paging so the dashboard can show page numbers and a total; the id
+  // tiebreak keeps rows from shifting between pages when timestamps collide.
+  const [reviews, total] = await prisma.$transaction([
+    prisma.reviewJob.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+      select: listFields,
+    }),
+    prisma.reviewJob.count({ where }),
+  ]);
+  res.json({ reviews, total, page, limit });
+}
+
+// One row per pull/merge request: its latest run matching the filters, plus
+// how many matching runs it has. Filters apply before grouping, so filtering
+// by "failed" shows each change's latest failed run.
+async function listChanges(where: Prisma.ReviewJobWhereInput, page: number, limit: number) {
+  const by: ["repositoryId", "number"] = ["repositoryId", "number"];
+  const [groups, all] = await prisma.$transaction([
+    prisma.reviewJob.groupBy({
+      by,
+      where,
+      _max: { createdAt: true },
+      _count: { _all: true },
+      orderBy: [{ _max: { createdAt: "desc" } }, { repositoryId: "asc" }, { number: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    // Prisma has no count(distinct ...); the keys alone are small enough.
+    prisma.reviewJob.groupBy({ by, where, orderBy: [{ repositoryId: "asc" }, { number: "asc" }] }),
+  ]);
+  if (groups.length === 0) return { reviews: [], total: all.length };
+
+  const latest = await prisma.reviewJob.findMany({
+    where: {
+      AND: [
+        where,
+        { OR: groups.map((g) => ({ repositoryId: g.repositoryId, number: g.number, createdAt: g._max!.createdAt! })) },
+      ],
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    select: listFields,
+    select: { ...listFields, repositoryId: true },
   });
-  const hasMore = reviews.length > limit;
-  const page = reviews.slice(0, limit);
-  res.json({ reviews: page, nextCursor: hasMore ? page.at(-1)!.id : null });
+  const reviews = groups.flatMap((g) => {
+    // Two runs queued in the same instant: the id order above picks one.
+    const job = latest.find((r) => r.repositoryId === g.repositoryId && r.number === g.number);
+    if (!job) return [];
+    const { repositoryId: _, ...review } = job;
+    return [{ ...review, runCount: (g._count as { _all: number })._all }];
+  });
+  return { reviews, total: all.length };
+}
+
+const SEVERITIES = ["critical", "major", "minor", "info"] as const;
+
+export async function getReviewStats(req: Request, res: Response) {
+  const { repoId, days } = reviewStatsQuerySchema.parse(req.query);
+  const since = new Date(Date.now() - days * 86_400_000);
+  // Only the small summary digest is read, never full results.
+  const jobs = await prisma.reviewJob.findMany({
+    where: {
+      ...ownedBy(req.userId!),
+      ...(repoId ? { repositoryId: repoId } : {}),
+      createdAt: { gte: since },
+      status: { notIn: ["superseded", "skipped"] },
+    },
+    select: { status: true, verdict: true, summary: true },
+  });
+  const findings = Object.fromEntries(SEVERITIES.map((s) => [s, 0])) as Record<(typeof SEVERITIES)[number], number>;
+  for (const job of jobs) {
+    const bySeverity = (job.summary as { bySeverity?: Partial<Record<string, number>> } | null)?.bySeverity ?? {};
+    for (const s of SEVERITIES) findings[s] += bySeverity[s] ?? 0;
+  }
+  res.json({
+    days,
+    runs: jobs.length,
+    blocked: jobs.filter((j) => j.verdict === "blocked").length,
+    passed: jobs.filter((j) => j.verdict === "pass").length,
+    failed: jobs.filter((j) => j.status === "failed").length,
+    findings,
+  });
 }
 
 async function loadOwnedReview(userId: string, id: string) {

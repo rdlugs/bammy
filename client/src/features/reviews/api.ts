@@ -1,19 +1,59 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import { isActive, type ReviewDetail, type ReviewListItem } from "./types"
+import { isActive, type JobStatus, type ReviewDetail, type ReviewListItem, type ReviewStats, type Trigger, type Verdict } from "./types"
 
 // While anything is queued or running, poll; otherwise stay quiet.
 const POLL_MS = 3000
 
-export function useReviews(params: { repoId?: string; limit?: number } = {}) {
+export interface ReviewPage {
+  reviews: ReviewListItem[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface ReviewQuery {
+  repoId?: string
+  number?: number
+  status?: JobStatus
+  verdict?: Verdict
+  trigger?: Trigger
+  q?: string
+  view?: "changes" | "runs"
+  includeSuperseded?: boolean
+  page?: number
+  limit?: number
+}
+
+// Only set params go into the URL, in a fixed order so query keys and stubs
+// stay predictable.
+function reviewSearch(params: ReviewQuery) {
   const search = new URLSearchParams()
-  if (params.repoId) search.set("repoId", params.repoId)
+  for (const key of ["repoId", "number", "status", "verdict", "trigger", "q", "view"] as const) {
+    if (params[key]) search.set(key, String(params[key]))
+  }
+  if (params.includeSuperseded) search.set("includeSuperseded", "true")
+  if (params.page) search.set("page", String(params.page))
   if (params.limit) search.set("limit", String(params.limit))
-  const query = search.toString()
+  return search.toString()
+}
+
+export function useReviews(params: ReviewQuery = {}) {
+  const query = reviewSearch(params)
   return useQuery({
     queryKey: ["reviews", params],
-    queryFn: () => api<{ reviews: ReviewListItem[]; nextCursor: string | null }>(`/reviews${query ? `?${query}` : ""}`),
+    queryFn: () => api<ReviewPage>(`/reviews${query ? `?${query}` : ""}`),
+    // Keep the current page on screen while the next one loads.
+    placeholderData: keepPreviousData,
     refetchInterval: (q) => (q.state.data?.reviews.some((r) => isActive(r.status)) ? POLL_MS : false),
+  })
+}
+
+// Under the "reviews" key, so queueing or rerunning a review refreshes it too.
+export function useReviewStats() {
+  return useQuery({
+    queryKey: ["reviews", "stats"],
+    queryFn: () => api<ReviewStats>("/reviews/stats"),
   })
 }
 

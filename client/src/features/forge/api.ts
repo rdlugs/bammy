@@ -12,6 +12,8 @@ export interface Connection {
   createdAt: string
   // The Bammy user who added the connection.
   user: { name: string; email: string }
+  // Enabled repositories added from this connection.
+  repositoryCount: number
 }
 
 export type ConnectionStatus = "active" | "revoked" | "unreachable"
@@ -22,6 +24,17 @@ const STATUS_RANK: Record<ConnectionStatus, number> = { active: 0, unreachable: 
 export function statusRank(status: ConnectionStatus | undefined) {
   return status ? STATUS_RANK[status] : 3
 }
+
+export const STATUS_LABELS: Record<ConnectionStatus, string> = {
+  active: "Active",
+  revoked: "Inactive",
+  unreachable: "Unknown",
+}
+
+// In rank order, for status filters.
+export const STATUS_OPTIONS = (Object.keys(STATUS_RANK) as ConnectionStatus[])
+  .sort((a, b) => STATUS_RANK[a] - STATUS_RANK[b])
+  .map((status) => ({ value: status, label: STATUS_LABELS[status] }))
 
 export interface ConnectionDetails {
   connection: Omit<Connection, "user"> & { installationId: string | null; updatedAt: string }
@@ -133,7 +146,7 @@ export function useConnectToken(provider: Provider) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: TokenConnectInput) =>
-      api<{ connection: Connection }>(`/connections/${provider}`, { method: "POST", body: JSON.stringify(input) }),
+      api<{ connection: Omit<Connection, "repositoryCount"> }>(`/connections/${provider}`, { method: "POST", body: JSON.stringify(input) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
   })
 }
@@ -193,7 +206,10 @@ export function useAddRepos(connectionId: string) {
       return outcome
     },
     // The prefix also refreshes the picker's list.
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["repos"] })
+      queryClient.invalidateQueries({ queryKey: ["connections"], exact: true })
+    },
   })
 }
 
@@ -202,7 +218,11 @@ export function useSetRepoEnabled() {
   return useMutation({
     mutationFn: ({ repo, enabled }: { repo: ForgeRepo; enabled: boolean }) =>
       api<EnableResult>(`/repos/${repo.id}`, { method: "PATCH", body: JSON.stringify({ enabled }) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["repos"] })
+      // Exact, so the per-connection status checks are not re-run.
+      queryClient.invalidateQueries({ queryKey: ["connections"], exact: true })
+    },
   })
 }
 
@@ -214,6 +234,7 @@ export function useRemoveRepo() {
       queryClient.invalidateQueries({ queryKey: ["repos"] })
       // The connection details sheet lists its repositories.
       queryClient.invalidateQueries({ queryKey: ["connections", repo.connectionId, "details"] })
+      queryClient.invalidateQueries({ queryKey: ["connections"], exact: true })
     },
   })
 }

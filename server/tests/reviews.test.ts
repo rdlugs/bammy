@@ -1,5 +1,6 @@
 import request from "supertest";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Prisma } from "../src/generated/prisma/client.ts";
 import { app } from "../src/app.ts";
 import { encrypt } from "../src/lib/crypto.ts";
 import { prisma } from "../src/lib/prisma.ts";
@@ -120,18 +121,27 @@ describe("POST /api/reviews", () => {
 });
 
 describe("GET /api/reviews", () => {
-  it("lists newest first with a cursor and without full results", async () => {
+  it("lists newest first in pages with a total and without full results", async () => {
     for (const number of [1, 2, 3]) await completedJob(number);
 
     const first = await request(app).get("/api/reviews?limit=2").set("Cookie", cookie);
     expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ total: 3, page: 1, limit: 2 });
     expect(first.body.reviews.map((r: { number: number }) => r.number)).toEqual([3, 2]);
     expect(first.body.reviews[0].result).toBeUndefined();
     expect(first.body.reviews[0].summary).toMatchObject({ total: 4, hasBlocking: true });
 
-    const second = await request(app).get(`/api/reviews?limit=2&cursor=${first.body.nextCursor}`).set("Cookie", cookie);
+    const second = await request(app).get("/api/reviews?limit=2&page=2").set("Cookie", cookie);
+    expect(second.body).toMatchObject({ total: 3, page: 2 });
     expect(second.body.reviews.map((r: { number: number }) => r.number)).toEqual([1]);
-    expect(second.body.nextCursor).toBeNull();
+
+    const past = await request(app).get("/api/reviews?limit=2&page=3").set("Cookie", cookie);
+    expect(past.body).toMatchObject({ reviews: [], total: 3 });
+  });
+
+  it("rejects a page below 1", async () => {
+    const res = await request(app).get("/api/reviews?page=0").set("Cookie", cookie);
+    expect(res.status).toBe(400);
   });
 
   it("filters by status and hides other users' reviews", async () => {
@@ -139,7 +149,104 @@ describe("GET /api/reviews", () => {
     const other = await createUser("other@example.com");
 
     expect((await request(app).get("/api/reviews?status=queued").set("Cookie", cookie)).body.reviews).toEqual([]);
-    expect((await request(app).get("/api/reviews").set("Cookie", other.cookie)).body.reviews).toEqual([]);
+    expect((await request(app).get("/api/reviews").set("Cookie", other.cookie)).body).toMatchObject({
+      reviews: [],
+      total: 0,
+    });
+  });
+});
+
+describe("GET /api/reviews filters", () => {
+  const job = (data: Partial<Prisma.ReviewJobUncheckedCreateInput> & { number: number }) =>
+    prisma.reviewJob.create({
+      data: { repositoryId: repoId, headSha: "h", trigger: "manual", status: "completed", ...data },
+    });
+  const numbers = (res: request.Response) => res.body.reviews.map((r: { number: number }) => r.number);
+  const get = (query: string) => request(app).get(`/api/reviews?${query}`).set("Cookie", cookie);
+
+  it("filters by verdict, trigger and number", async () => {
+    await job({ number: 1, verdict: "pass", trigger: "webhook" });
+    await job({ number: 2, verdict: "blocked", trigger: "comment" });
+
+    expect(numbers(await get("verdict=pass"))).toEqual([1]);
+    expect(numbers(await get("trigger=comment"))).toEqual([2]);
+    expect(numbers(await get("number=1"))).toEqual([1]);
+  });
+
+  it("searches the repository path, the title and a change number", async () => {
+    await completedJob(12);
+    await job({ number: 3 });
+
+    expect((await get("q=TEAM/WE")).body.total).toBe(2);
+    expect(numbers(await get("q=Add%20b"))).toEqual([12]);
+    expect(numbers(await get("q=%2312"))).toEqual([12]);
+    expect(numbers(await get("q=!3"))).toEqual([3]);
+    expect((await get("q=nothing")).body.total).toBe(0);
+  });
+
+  it("hides superseded runs unless asked for", async () => {
+    await job({ number: 1, status: "superseded" });
+    await job({ number: 2 });
+
+    expect(numbers(await get(""))).toEqual([2]);
+    expect(numbers(await get("includeSuperseded=true"))).toEqual([2, 1]);
+    expect(numbers(await get("status=superseded"))).toEqual([1]);
+  });
+
+  it("groups runs by change, newest change first, with a run count", async () => {
+    await job({ number: 1, headSha: "a", createdAt: new Date("2026-01-01") });
+    await job({ number: 2, headSha: "b", createdAt: new Date("2026-01-02") });
+    await job({ number: 1, headSha: "c", status: "failed", createdAt: new Date("2026-01-03") });
+
+    const first = await get("view=changes&limit=1");
+    expect(first.body).toMatchObject({ total: 2, page: 1, limit: 1 });
+    expect(first.body.reviews).toHaveLength(1);
+    expect(first.body.reviews[0]).toMatchObject({ number: 1, headSha: "c", runCount: 2 });
+
+    const second = await get("view=changes&limit=1&page=2");
+    expect(second.body.reviews[0]).toMatchObject({ number: 2, headSha: "b", runCount: 1 });
+
+    // Filters apply to runs before grouping.
+    const completed = await get("view=changes&status=completed");
+    expect(completed.body.reviews.map((r: { headSha: string }) => r.headSha)).toEqual(["b", "a"]);
+  });
+});
+
+describe("GET /api/reviews/stats", () => {
+  it("counts recent runs, verdicts and findings for the owner only", async () => {
+    await completedJob(1);
+    await prisma.reviewJob.createMany({
+      data: [
+        { repositoryId: repoId, number: 2, headSha: "h", trigger: "manual", status: "failed", verdict: "error" },
+        { repositoryId: repoId, number: 3, headSha: "h", trigger: "manual", status: "completed", verdict: "pass" },
+        { repositoryId: repoId, number: 4, headSha: "h", trigger: "manual", status: "superseded" },
+        {
+          repositoryId: repoId,
+          number: 5,
+          headSha: "h",
+          trigger: "manual",
+          status: "completed",
+          verdict: "blocked",
+          createdAt: new Date(Date.now() - 10 * 86_400_000),
+        },
+      ],
+    });
+
+    const res = await request(app).get("/api/reviews/stats").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      days: 7,
+      runs: 3,
+      blocked: 1,
+      passed: 1,
+      failed: 1,
+      findings: { critical: 1, major: 1, minor: 2, info: 0 },
+    });
+
+    expect((await request(app).get("/api/reviews/stats?days=30").set("Cookie", cookie)).body.runs).toBe(4);
+
+    const other = await createUser("other@example.com");
+    expect((await request(app).get("/api/reviews/stats").set("Cookie", other.cookie)).body.runs).toBe(0);
   });
 });
 
