@@ -14,10 +14,27 @@ const gitlabConnection = {
   accountLogin: "dev",
   createdAt: "2026-03-14T12:00:00.000Z",
   user: { name: "Dev", email: "dev@example.com" },
+  repositoryCount: 3,
 }
 
 async function openAddConnection() {
   await userEvent.click(await screen.findByRole("button", { name: "Add connection" }))
+}
+
+async function chooseFilter(label: string, option: string) {
+  await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+  await userEvent.click(await screen.findByRole("combobox", { name: label }))
+  await userEvent.click(screen.getByRole("option", { name: option }))
+}
+
+async function clearFilters() {
+  await userEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+  await userEvent.keyboard("{Escape}")
+}
+
+async function openRowAction(account: string, action: string) {
+  await userEvent.click(await screen.findByRole("button", { name: `Actions for ${account}` }))
+  await userEvent.click(await screen.findByRole("menuitem", { name: action }))
 }
 
 async function chooseProvider(label: string) {
@@ -28,7 +45,7 @@ async function chooseProvider(label: string) {
 describe("Connections page", () => {
   it("offers one Add connection button when nothing is connected", async () => {
     mockApi({ "GET /api/connections": { connections: [], availableApps: ["github"] } })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
 
     expect(await screen.findByText("No connections yet")).toBeInTheDocument()
     await openAddConnection()
@@ -43,7 +60,7 @@ describe("Connections page", () => {
 
   it("offers every registered provider and its self-hosted option", async () => {
     mockApi({ "GET /api/connections": { connections: [], availableApps: ["github"] } })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
 
     await openAddConnection()
 
@@ -61,7 +78,7 @@ describe("Connections page", () => {
 
   it("validates the GitLab form before calling the API", async () => {
     const fetchSpy = mockApi({ "GET /api/connections": { connections: [], availableApps: [] } })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
 
     await openAddConnection()
     expect(screen.getByText("The GitHub App is not configured on this server.")).toBeInTheDocument()
@@ -79,7 +96,7 @@ describe("Connections page", () => {
       "POST /api/connections/gitlab": () =>
         jsonResponse(400, { message: "Validation failed", errors: { host: ["Enter a host such as gitlab.com"] } }),
     })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
 
     await openAddConnection()
     await chooseProvider("GitLab")
@@ -105,7 +122,7 @@ describe("Connections page", () => {
         })
       },
     })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
 
     await openAddConnection()
     await userEvent.click(screen.getByRole("checkbox", { name: "Self-hosted" }))
@@ -125,7 +142,7 @@ describe("Connections page", () => {
       "GET /api/connections/c1/status": { status: "active" },
       "GET /api/connections/c2/status": { status: "revoked" },
     })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
 
     // By title, since the "Active" column header shares the badge's text.
     const active = await screen.findByTitle("The forge accepts the stored credentials")
@@ -137,15 +154,17 @@ describe("Connections page", () => {
     const created = new Date(gitlabConnection.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })
     expect(screen.getAllByText(created)).toHaveLength(2)
     expect(screen.getAllByText("Dev")[0]).toHaveAttribute("title", "dev@example.com")
+    expect(screen.getByRole("columnheader", { name: "Repositories" })).toBeInTheDocument()
+    expect(screen.getAllByRole("cell", { name: "3" })).toHaveLength(2)
   })
 
   it("sorts the table by the clicked column", async () => {
     mockApi({
       "GET /api/connections": {
         connections: [
-          { ...gitlabConnection, id: "c1", accountLogin: "bravo", createdAt: "2026-01-01T00:00:00.000Z" },
-          { ...gitlabConnection, id: "c2", accountLogin: "alpha", createdAt: "2026-02-01T00:00:00.000Z" },
-          { ...gitlabConnection, id: "c3", accountLogin: "charlie", createdAt: "2026-03-01T00:00:00.000Z" },
+          { ...gitlabConnection, id: "c1", accountLogin: "bravo", createdAt: "2026-01-01T00:00:00.000Z", repositoryCount: 2 },
+          { ...gitlabConnection, id: "c2", accountLogin: "alpha", createdAt: "2026-02-01T00:00:00.000Z", repositoryCount: 0 },
+          { ...gitlabConnection, id: "c3", accountLogin: "charlie", createdAt: "2026-03-01T00:00:00.000Z", repositoryCount: 5 },
         ],
         availableApps: [],
       },
@@ -153,7 +172,7 @@ describe("Connections page", () => {
       "GET /api/connections/c2/status": { status: "active" },
       "GET /api/connections/c3/status": { status: "active" },
     })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
     const accounts = () => screen.getAllByRole("row").slice(1).map((row) => row.querySelector("td")?.textContent)
 
     await screen.findByText("alpha")
@@ -171,6 +190,9 @@ describe("Connections page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Account" }))
     expect(accounts()).toEqual(["bravo", "alpha", "charlie"])
     expect(screen.getByRole("columnheader", { name: "Account" })).not.toHaveAttribute("aria-sort")
+
+    await userEvent.click(screen.getByRole("button", { name: "Repositories" }))
+    expect(accounts()).toEqual(["alpha", "bravo", "charlie"])
   })
 
   it("shows a connection's details in a sheet", async () => {
@@ -209,9 +231,9 @@ describe("Connections page", () => {
     })
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
 
-    await userEvent.click(await screen.findByRole("button", { name: "Details" }))
+    await openRowAction("dev", "Details")
     const sheet = await screen.findByRole("dialog")
 
     expect(await within(sheet).findByRole("link", { name: /acme\/api$/ })).toHaveAttribute(
@@ -240,10 +262,10 @@ describe("Connections page", () => {
         return new Response(null, { status: 204 })
       },
     })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
 
     expect(await screen.findByText("GitLab token")).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: "Remove" }))
+    await openRowAction("dev", "Remove")
     let dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByRole("heading", { name: "Remove dev?" })).toBeInTheDocument()
     expect(deleted).toBe(false)
@@ -253,12 +275,111 @@ describe("Connections page", () => {
     expect(deleted).toBe(false)
     expect(screen.getByText("GitLab token")).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole("button", { name: "Remove" }))
+    await openRowAction("dev", "Remove")
     dialog = await screen.findByRole("dialog")
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove connection" }))
 
     await waitFor(() => expect(deleted).toBe(true))
     expect(await screen.findByText("No connections yet")).toBeInTheDocument()
+  })
+  it("opens the Repositories tab filtered to the connection to manage", async () => {
+    mockApi({
+      "GET /api/connections": {
+        connections: [gitlabConnection, { ...gitlabConnection, id: "c2", accountLogin: "old" }],
+        availableApps: [],
+      },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/connections/c2/status": { status: "active" },
+      "GET /api/repos": {
+        repos: [
+          addedRepo("r1", "team/web"),
+          addedRepo("r2", "old/api", { connectionId: "c2", account: { login: "old", provider: "gitlab", host: "gitlab.com" } }),
+        ],
+      },
+    })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
+
+    await openRowAction("old", "Manage repositories")
+
+    expect(await screen.findByRole("tab", { name: "Repositories", selected: true })).toBeInTheDocument()
+    expect(await screen.findByRole("link", { name: "old/api" })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "team/web" })).not.toBeInTheDocument()
+
+    const chip = screen.getByRole("button", { name: "Remove Account filter" })
+    expect(chip.parentElement).toHaveTextContent("Account: old (gitlab.com)")
+    await userEvent.click(chip)
+    expect(screen.getByRole("link", { name: "team/web" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Remove Account filter" })).not.toBeInTheDocument()
+  })
+
+  it("shows the managed account as a filter even with one connection", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: [] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": { repos: [addedRepo("r1", "team/web")] },
+    })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
+
+    await openRowAction("dev", "Manage repositories")
+
+    const chip = await screen.findByRole("button", { name: "Remove Account filter" })
+    expect(chip.parentElement).toHaveTextContent("Account: dev (gitlab.com)")
+    expect(screen.getByRole("link", { name: "team/web" })).toBeInTheDocument()
+  })
+
+  it("offers every forge kind as a filter even with one connection", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: [] },
+      "GET /api/connections/c1/status": { status: "active" },
+    })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
+    await screen.findByText("GitLab token")
+
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }))
+    await userEvent.click(await screen.findByRole("combobox", { name: "Forge" }))
+    const options = screen.getAllByRole("option").map((option) => option.textContent)
+    expect(options).toEqual(["All forges", "GitHub App", "GitHub token", "GitLab token"])
+    expect(screen.getByRole("option", { name: "GitHub App" }).querySelector("svg")).toBeInTheDocument()
+  })
+
+  it("searches and filters the connections table", async () => {
+    mockApi({
+      "GET /api/connections": {
+        connections: [
+          gitlabConnection,
+          { ...gitlabConnection, id: "c2", accountLogin: "old", host: "gitlab.example.com" },
+          { ...gitlabConnection, id: "c3", provider: "github", host: "github.com", kind: "github_app", accountLogin: "acme" },
+        ],
+        availableApps: [],
+      },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/connections/c2/status": { status: "revoked" },
+      "GET /api/connections/c3/status": { status: "active" },
+    })
+    renderWithProviders(<App />, { route: "/repositories?tab=installation" })
+    const accounts = () => screen.getAllByRole("row").slice(1).map((row) => row.querySelector("td")?.textContent)
+    await screen.findByText("acme")
+
+    const search = screen.getByRole("searchbox", { name: "Search connections" })
+    await userEvent.type(search, "gitlab.example")
+    expect(accounts()).toEqual(["old"])
+    await userEvent.type(search, "-nothing")
+    expect(screen.getByText("No connections match your filters.")).toBeInTheDocument()
+    await userEvent.clear(search)
+    expect(accounts()).toEqual(["dev", "old", "acme"])
+
+    await chooseFilter("Forge", "GitHub App")
+    expect(accounts()).toEqual(["acme"])
+    await userEvent.keyboard("{Escape}")
+    const chip = screen.getByRole("button", { name: "Remove Forge filter" })
+    expect(chip.parentElement).toHaveTextContent("Forge: GitHub App")
+    await userEvent.click(chip)
+    expect(accounts()).toEqual(["dev", "old", "acme"])
+    expect(screen.queryByRole("button", { name: "Remove Forge filter" })).not.toBeInTheDocument()
+
+    await screen.findByTitle(/rejected the stored credentials/)
+    await chooseFilter("Status", "Inactive")
+    expect(accounts()).toEqual(["old"])
   })
 })
 
@@ -276,11 +397,51 @@ const addedRepo = (id: string, fullPath: string, extra: Record<string, unknown> 
 })
 
 describe("Repositories page", () => {
-  it("points to Connections when nothing is connected", async () => {
+  it("points to Installation when nothing is connected", async () => {
+    mockApi({ "GET /api/connections": { connections: [], availableApps: ["github"] } })
+    renderWithProviders(<App />, { route: "/repositories?tab=repositories" })
+
+    expect(await screen.findByText("No forge connected")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Connect a forge" })).toHaveAttribute(
+      "href",
+      "/repositories?tab=installation",
+    )
+  })
+
+  it("opens on Installation when nothing is connected", async () => {
     mockApi({ "GET /api/connections": { connections: [], availableApps: ["github"] } })
     renderWithProviders(<App />, { route: "/repositories" })
 
-    expect(await screen.findByText("No forge connected")).toBeInTheDocument()
+    expect(await screen.findByRole("tab", { name: "Installation" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByText("No connections yet")).toBeInTheDocument()
+  })
+
+  it("has one sidebar entry and switches between its tabs", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: ["github"] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": { repos: [] },
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    expect(await screen.findByText("No repositories added")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Repositories" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("link", { name: "Repositories" })).toHaveAttribute("href", "/repositories")
+    expect(screen.queryByRole("link", { name: "Connections" })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("tab", { name: "Installation" }))
+    expect(await screen.findByText("Connected accounts")).toBeInTheDocument()
+  })
+
+  it("sends the old /connections path to Installation and keeps the GitHub return toast", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: ["github"] },
+      "GET /api/connections/c1/status": { status: "active" },
+    })
+    renderWithProviders(<App />, { route: "/connections?connected=github" })
+
+    expect(await screen.findByText("GitHub connected")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Installation" })).toHaveAttribute("aria-selected", "true")
   })
 
   it("shows an empty state without asking the forge for every repository", async () => {
@@ -539,20 +700,134 @@ describe("Repositories page", () => {
     })
     renderWithProviders(<App />, { route: "/repositories" })
 
-    const row = (await screen.findByRole("link", { name: "team/web" })).closest("tr")!
-    await userEvent.click(within(row).getByRole("button", { name: "Remove" }))
+    await openRowAction("team/web", "Remove")
     let dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByRole("heading", { name: "Remove team/web?" })).toBeInTheDocument()
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
     expect(removed).toBe(false)
 
-    await userEvent.click(within(row).getByRole("button", { name: "Remove" }))
+    await openRowAction("team/web", "Remove")
     dialog = await screen.findByRole("dialog")
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove repository" }))
 
     await waitFor(() => expect(screen.queryByRole("link", { name: "team/web" })).not.toBeInTheDocument())
     expect(removed).toBe(true)
     expect(screen.getByRole("link", { name: "team/api" })).toBeInTheDocument()
+  })
+
+  it("links a repository to its configuration from the row menu", async () => {
+    mockApi({
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: [] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": { repos: [addedRepo("r1", "team/web")] },
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+
+    await userEvent.click(await screen.findByRole("button", { name: "Actions for team/web" }))
+    expect(await screen.findByRole("menuitem", { name: "Configuration" })).toHaveAttribute(
+      "href",
+      "/configuration?repo=r1",
+    )
+  })
+
+  it("searches and filters the repositories table", async () => {
+    mockApi({
+      "GET /api/connections": {
+        connections: [
+          gitlabConnection,
+          { ...gitlabConnection, id: "c2", accountLogin: "old" },
+          { ...gitlabConnection, id: "c3", provider: "github", host: "github.com", kind: "github_app", accountLogin: "acme" },
+        ],
+        availableApps: [],
+      },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/connections/c2/status": { status: "revoked" },
+      "GET /api/connections/c3/status": { status: "active" },
+      "GET /api/repos": {
+        repos: [
+          addedRepo("r4", "acme/site", { connectionId: "c3", account: { login: "acme", provider: "github", host: "github.com" } }),
+          addedRepo("r1", "team/api", { enabled: false }),
+          addedRepo("r2", "team/web", { defaultBranch: "develop" }),
+          addedRepo("r3", "old/legacy", { connectionId: "c2", account: { login: "old", provider: "gitlab", host: "gitlab.com" } }),
+        ],
+      },
+    })
+    renderWithProviders(<App />, { route: "/repositories" })
+    const paths = () => screen.getAllByRole("link", { name: /\// }).map((link) => link.textContent)
+    await screen.findByRole("link", { name: "old/legacy" })
+
+    const search = screen.getByRole("searchbox", { name: "Search repositories" })
+    await userEvent.type(search, "develop")
+    expect(paths()).toEqual(["team/web"])
+    await userEvent.type(search, "-nothing")
+    expect(screen.getByText("No repositories match your filters.")).toBeInTheDocument()
+    await userEvent.clear(search)
+    expect(paths()).toEqual(["acme/site", "team/api", "team/web", "old/legacy"])
+
+    const forgeCell = (path: string) => screen.getByRole("link", { name: path }).closest("tr")!.querySelectorAll("td")[1]
+    expect(forgeCell("acme/site")).toHaveTextContent("GitHub App")
+    expect(forgeCell("team/api")).toHaveTextContent("GitLab token")
+    await chooseFilter("Forge", "GitHub App")
+    expect(paths()).toEqual(["acme/site"])
+    await clearFilters()
+
+    await chooseFilter("Reviews", "Enabled")
+    expect(paths()).toEqual(["acme/site", "team/web", "old/legacy"])
+    await userEvent.click(screen.getByRole("combobox", { name: "Account" }))
+    await userEvent.click(screen.getByRole("option", { name: "dev (gitlab.com)" }))
+    expect(paths()).toEqual(["team/web"])
+    await clearFilters()
+    expect(paths()).toEqual(["acme/site", "team/api", "team/web", "old/legacy"])
+
+    await waitFor(() => expect(screen.getAllByText("Inactive")).toHaveLength(1))
+    await chooseFilter("Connection status", "Inactive")
+    expect(paths()).toEqual(["old/legacy"])
+  })
+
+  describe("pagination", () => {
+    const manyRepos = Array.from({ length: 12 }, (_, i) => addedRepo(`r${i + 1}`, `team/repo-${String(i + 1).padStart(2, "0")}`))
+    const routes = {
+      "GET /api/connections": { connections: [gitlabConnection], availableApps: [] },
+      "GET /api/connections/c1/status": { status: "active" },
+      "GET /api/repos": { repos: manyRepos },
+    }
+    const repoLinks = () => screen.getAllByRole("link", { name: /^team\/repo-/ }).map((link) => link.textContent)
+
+    it("shows ten repositories per page and moves between pages", async () => {
+      mockApi(routes)
+      renderWithProviders(<App />, { route: "/repositories?tab=repositories" })
+
+      expect(await screen.findByText("Showing 1-10 of 12")).toBeInTheDocument()
+      expect(repoLinks()).toHaveLength(10)
+      expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled()
+
+      await userEvent.click(screen.getByRole("button", { name: "Next page" }))
+      expect(screen.getByText("Showing 11-12 of 12")).toBeInTheDocument()
+      expect(repoLinks()).toEqual(["team/repo-11", "team/repo-12"])
+      expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled()
+    })
+
+    it("changes how many rows each page shows", async () => {
+      mockApi(routes)
+      renderWithProviders(<App />, { route: "/repositories?tab=repositories&page=2" })
+
+      expect(await screen.findByText("Showing 11-12 of 12")).toBeInTheDocument()
+      await userEvent.click(screen.getByRole("combobox", { name: "Rows per page" }))
+      await userEvent.click(screen.getByRole("option", { name: "25" }))
+
+      expect(screen.getByText("Showing 1-12 of 12")).toBeInTheDocument()
+      expect(repoLinks()).toHaveLength(12)
+    })
+
+    it("goes back to the first page when searching", async () => {
+      mockApi(routes)
+      renderWithProviders(<App />, { route: "/repositories?tab=repositories&page=2" })
+
+      expect(await screen.findByText("Showing 11-12 of 12")).toBeInTheDocument()
+      await userEvent.type(screen.getByLabelText("Search repositories"), "repo-0")
+
+      expect(screen.getByText("Showing 1-9 of 9")).toBeInTheDocument()
+    })
   })
 })

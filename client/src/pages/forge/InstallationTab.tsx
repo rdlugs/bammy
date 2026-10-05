@@ -1,12 +1,24 @@
 import { useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useSearchParams } from "react-router"
-import { Loader2, Plug, Plus } from "lucide-react"
+import { Link, useSearchParams } from "react-router"
+import { FolderGit2, Info, Loader2, MoreHorizontal, Plug, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { z } from "zod"
 import { SearchableSelect } from "@/components/SearchableSelect"
 import { SortableHead } from "@/components/SortableHead"
+import { TablePagination } from "@/components/TablePagination"
+import {
+  ActiveFilterChips,
+  FilterPopover,
+  FilterSelect,
+  FilterToolbar,
+  NoMatchesRow,
+  SearchInput,
+  type ActiveFilter,
+} from "@/components/TableFilters"
+import { ALL, matchesQuery, selectedLabel } from "@/lib/filters"
+import { paginate, usePagination } from "@/hooks/use-pagination"
 import { useSort } from "@/hooks/use-sort"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,8 +33,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -31,6 +49,7 @@ import { TextField } from "@/features/auth/TextField"
 import { applyServerErrors } from "@/features/auth/applyServerErrors"
 import {
   statusRank,
+  STATUS_OPTIONS,
   useConnectionStatuses,
   useConnectToken,
   useConnections,
@@ -39,6 +58,7 @@ import {
   type ConnectionStatus,
   type TokenConnectInput,
 } from "@/features/forge/api"
+import { FORGE_KIND_OPTIONS, forgeKey, kindLabel } from "@/features/forge/forgeKind"
 import { ConnectionDetailsSheet } from "@/features/forge/ConnectionDetailsSheet"
 import { ConnectionStatusBadge } from "@/features/forge/ConnectionStatusBadge"
 import { PROVIDER_IDS, PROVIDERS, type TokenMethod } from "@/features/forge/providers"
@@ -70,7 +90,11 @@ function useReturnToast() {
     if (!connected && !error) return
     if (connected) toast.success("GitHub connected")
     if (error) toast.error(RETURN_MESSAGES[error] ?? "Connection failed")
-    setParams({}, { replace: true })
+    // Drop only the return markers so ?tab= survives.
+    const next = new URLSearchParams(params)
+    next.delete("connected")
+    next.delete("error")
+    setParams(next, { replace: true })
   }, [params, setParams])
 }
 
@@ -142,10 +166,7 @@ function TokenForm({
   )
 }
 
-type SortKey = "account" | "forge" | "host" | "active" | "addedBy" | "createdAt"
-function kindLabel(connection: Connection) {
-  return PROVIDERS[connection.provider].kindLabel[connection.kind] ?? connection.kind
-}
+type SortKey = "account" | "forge" | "host" | "repositories" | "active" | "addedBy" | "createdAt"
 
 function compareConnections(
   a: Connection,
@@ -160,6 +181,8 @@ function compareConnections(
       return kindLabel(a).localeCompare(kindLabel(b))
     case "host":
       return a.host.localeCompare(b.host)
+    case "repositories":
+      return a.repositoryCount - b.repositoryCount
     case "active":
       return statusRank(statuses[a.id]) - statusRank(statuses[b.id])
     case "addedBy":
@@ -173,11 +196,17 @@ function formatDate(value: string) {
   return new Date(value).toLocaleDateString(undefined, { dateStyle: "medium" })
 }
 
-function ConnectionsTable({ connections }: { connections: Connection[] }) {
-  const statuses = useConnectionStatuses(connections)
+function ConnectionsTable({
+  connections,
+  statuses,
+}: {
+  connections: Connection[]
+  statuses: Record<string, ConnectionStatus | undefined>
+}) {
   // Unsorted keeps the API order (oldest first).
   const { sort, onSort } = useSort<SortKey>()
   const [selected, setSelected] = useState<Connection | null>(null)
+  const [removing, setRemoving] = useState<Connection | null>(null)
 
   const sorted = useMemo(() => {
     if (!sort) return connections
@@ -187,6 +216,8 @@ function ConnectionsTable({ connections }: { connections: Connection[] }) {
         direction * compareConnections(a, b, sort.key, statuses) || a.accountLogin.localeCompare(b.accountLogin),
     )
   }, [connections, sort, statuses])
+  const pagination = usePagination()
+  const page = paginate(sorted, pagination.page, pagination.size)
 
   const head = { sort, onSort }
   return (
@@ -197,6 +228,7 @@ function ConnectionsTable({ connections }: { connections: Connection[] }) {
             <SortableHead label="Account" sortKey="account" {...head} />
             <SortableHead label="Forge" sortKey="forge" {...head} />
             <SortableHead label="Host" sortKey="host" {...head} />
+            <SortableHead label="Repositories" sortKey="repositories" {...head} />
             <SortableHead label="Active" sortKey="active" {...head} />
             <SortableHead label="Added by" sortKey="addedBy" {...head} />
             <SortableHead label="Created" sortKey="createdAt" {...head} />
@@ -204,7 +236,8 @@ function ConnectionsTable({ connections }: { connections: Connection[] }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sorted.map((connection) => {
+          {!sorted.length && <NoMatchesRow colSpan={8}>No connections match your filters.</NoMatchesRow>}
+          {page.rows.map((connection) => {
             const provider = PROVIDERS[connection.provider]
             return (
               <TableRow key={connection.id}>
@@ -216,6 +249,7 @@ function ConnectionsTable({ connections }: { connections: Connection[] }) {
                   </Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground">{connection.host}</TableCell>
+                <TableCell className="text-muted-foreground tabular-nums">{connection.repositoryCount}</TableCell>
                 <TableCell>
                   <ConnectionStatusBadge status={statuses[connection.id]} />
                 </TableCell>
@@ -226,29 +260,167 @@ function ConnectionsTable({ connections }: { connections: Connection[] }) {
                   {formatDate(connection.createdAt)}
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button variant="ghost" size="sm" onClick={() => setSelected(connection)}>
-                    Details
-                  </Button>
-                  <RemoveButton connection={connection} />
+                  <ConnectionActions
+                    connection={connection}
+                    onDetails={() => setSelected(connection)}
+                    onRemove={() => setRemoving(connection)}
+                  />
                 </TableCell>
               </TableRow>
             )
           })}
         </TableBody>
       </Table>
+      <TablePagination
+        page={page.page}
+        size={pagination.size}
+        total={page.total}
+        onPageChange={pagination.setPage}
+        onSizeChange={pagination.setSize}
+      />
       <ConnectionDetailsSheet connection={selected} onOpenChange={(open) => !open && setSelected(null)} />
+      <RemoveConnectionDialog connection={removing} onOpenChange={(open) => !open && setRemoving(null)} />
     </>
   )
 }
 
-function RemoveButton({ connection }: { connection: Connection }) {
-  const [open, setOpen] = useState(false)
+function ConnectionActions({
+  connection,
+  onDetails,
+  onRemove,
+}: {
+  connection: Connection
+  onDetails: () => void
+  onRemove: () => void
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-8" aria-label={`Actions for ${connection.accountLogin}`}>
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      {/* The shared menu matches its trigger's width, which is far too narrow for an icon button. */}
+      <DropdownMenuContent align="end" className="w-max whitespace-nowrap">
+        <DropdownMenuItem onSelect={onDetails}>
+          <Info />
+          Details
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to={`/repositories?tab=repositories&account=${connection.id}`}>
+            <FolderGit2 />
+            Manage repositories
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onSelect={onRemove}>
+          <Trash2 />
+          Remove
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// The search and filters sit above the card, so their state lives here and
+// the table only sorts what it is given.
+function ConnectedAccounts({ connections, onAdd }: { connections: Connection[]; onAdd: () => void }) {
+  const statuses = useConnectionStatuses(connections)
+  const { setPage } = usePagination()
+  const [query, setQuery] = useState("")
+  const [forge, setForge] = useState(ALL)
+  const [status, setStatus] = useState(ALL)
+  const filtering = forge !== ALL || status !== ALL
+
+  // A new filter or search starts over at the first page.
+  function filterBy<T>(set: (value: T) => void) {
+    return (value: T) => {
+      set(value)
+      setPage(1)
+    }
+  }
+
+  function clearFilters() {
+    setForge(ALL)
+    setStatus(ALL)
+    setPage(1)
+  }
+
+  const filtered = useMemo(
+    () =>
+      connections.filter(
+        (connection) =>
+          matchesQuery(query, connection.accountLogin, connection.host, connection.user.name, connection.user.email) &&
+          (forge === ALL || forgeKey(connection) === forge) &&
+          // Connections still being checked match no specific status.
+          (status === ALL || statuses[connection.id] === status),
+      ),
+    [connections, query, forge, status, statuses],
+  )
+
+  const activeFilters = [
+    { label: "Forge", value: selectedLabel(forge, FORGE_KIND_OPTIONS), onRemove: () => filterBy(setForge)(ALL) },
+    { label: "Status", value: selectedLabel(status, STATUS_OPTIONS), onRemove: () => filterBy(setStatus)(ALL) },
+  ].filter((filter): filter is ActiveFilter => filter.value !== null)
+
+  return (
+    <>
+      <FilterToolbar>
+        <ActiveFilterChips filters={activeFilters} />
+        <FilterPopover active={filtering} onClear={clearFilters}>
+          <FilterSelect
+            id="connection-forge"
+            label="Forge"
+            allLabel="All forges"
+            value={forge}
+            onValueChange={filterBy(setForge)}
+            options={FORGE_KIND_OPTIONS}
+          />
+          <FilterSelect
+            id="connection-status"
+            label="Status"
+            allLabel="All statuses"
+            value={status}
+            onValueChange={filterBy(setStatus)}
+            options={STATUS_OPTIONS}
+          />
+        </FilterPopover>
+        <SearchInput label="Search connections" value={query} onChange={filterBy(setQuery)} />
+      </FilterToolbar>
+      <Card>
+        <CardHeader>
+          <CardTitle>Connected accounts</CardTitle>
+          <CardAction>
+            <Button size="sm" onClick={onAdd}>
+              <Plus />
+              Add connection
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <ConnectionsTable connections={filtered} statuses={statuses} />
+        </CardContent>
+      </Card>
+    </>
+  )
+}
+
+// Rendered once beside the table rather than inside the row menu, which
+// unmounts its items (and any dialog in them) as soon as it closes.
+function RemoveConnectionDialog({
+  connection,
+  onOpenChange,
+}: {
+  connection: Connection | null
+  onOpenChange: (open: boolean) => void
+}) {
   const remove = useDeleteConnection()
 
   async function onRemove() {
+    if (!connection) return
     try {
       await remove.mutateAsync(connection.id)
-      setOpen(false)
+      onOpenChange(false)
       toast.success("Connection removed")
     } catch {
       toast.error("Could not remove the connection")
@@ -256,31 +428,30 @@ function RemoveButton({ connection }: { connection: Connection }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="sm">
-          Remove
-        </Button>
-      </DialogTrigger>
+    <Dialog open={connection !== null} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Remove {connection.accountLogin}?</DialogTitle>
-          <DialogDescription>
-            Bammy will stop reviewing its repositories and remove their webhooks. Their review history is deleted
-            too. This cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button type="button" variant="outline">
-              Cancel
-            </Button>
-          </DialogClose>
-          <Button variant="destructive" onClick={onRemove} disabled={remove.isPending}>
-            {remove.isPending && <Loader2 className="animate-spin" />}
-            Remove connection
-          </Button>
-        </DialogFooter>
+        {connection && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Remove {connection.accountLogin}?</DialogTitle>
+              <DialogDescription>
+                Bammy will stop reviewing its repositories and remove their webhooks. Their review history is deleted
+                too. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button type="button" variant="outline">
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button variant="destructive" onClick={onRemove} disabled={remove.isPending}>
+                {remove.isPending && <Loader2 className="animate-spin" />}
+                Remove connection
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -368,7 +539,7 @@ function AddConnectionSheet({
   )
 }
 
-export function ConnectionsPage() {
+export function InstallationTab() {
   useReturnToast()
   const { data, isPending } = useConnections()
   const [adding, setAdding] = useState(false)
@@ -379,7 +550,7 @@ export function ConnectionsPage() {
 
   if (!data?.connections.length) {
     return (
-      <main className="flex flex-1 flex-col p-6">
+      <div className="flex flex-1 flex-col">
         <Empty className="flex-1 border border-dashed">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -396,27 +567,14 @@ export function ConnectionsPage() {
           </EmptyContent>
         </Empty>
         {sheet}
-      </main>
+      </div>
     )
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Connected accounts</CardTitle>
-          <CardAction>
-            <Button size="sm" onClick={() => setAdding(true)}>
-              <Plus />
-              Add connection
-            </Button>
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          <ConnectionsTable connections={data.connections} />
-        </CardContent>
-      </Card>
+    <div className="flex flex-1 flex-col gap-4">
+      <ConnectedAccounts connections={data.connections} onAdd={() => setAdding(true)} />
       {sheet}
-    </main>
+    </div>
   )
 }

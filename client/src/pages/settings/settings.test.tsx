@@ -34,7 +34,7 @@ function calls(fetchSpy: ReturnType<typeof mockApi>, method: string, path: strin
 describe("Settings page", () => {
   it("is reachable from the user menu", async () => {
     mockApi({ "GET /api/reviews": { reviews: [], total: 0 } })
-    renderWithProviders(<App />, { route: "/connections" })
+    renderWithProviders(<App />, { route: "/repositories" })
 
     await userEvent.click(await screen.findByRole("button", { name: new RegExp(testUser.name) }))
     await userEvent.click(await screen.findByRole("menuitem", { name: "Settings" }))

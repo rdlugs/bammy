@@ -158,6 +158,15 @@ describe("GET /api/connections", () => {
       ],
     });
 
+    const mine = await prisma.forgeConnection.findFirstOrThrow({ where: { userId } });
+    const repo = { connectionId: mine.id, provider: "gitlab", host: "gitlab.com", defaultBranch: "main" } as const;
+    await prisma.repository.createMany({
+      data: [
+        { ...repo, externalId: "1", fullPath: "me/on", enabled: true },
+        { ...repo, externalId: "2", fullPath: "me/off", enabled: false },
+      ],
+    });
+
     const res = await request(app).get("/api/connections").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
@@ -166,6 +175,7 @@ describe("GET /api/connections", () => {
     expect(res.body.connections[0]).toMatchObject({
       accountLogin: "me",
       user: { name: "Dev", email: "dev@example.com" },
+      repositoryCount: 1,
     });
     expect(res.body.connections[0].encryptedToken).toBeUndefined();
   });
@@ -340,7 +350,7 @@ describe("GitHub App installation", () => {
       .set("Cookie", cookie);
 
     expect(res.status).toBe(302);
-    expect(res.headers.location).toBe(`${env.CLIENT_ORIGIN}/connections?connected=github`);
+    expect(res.headers.location).toBe(`${env.CLIENT_ORIGIN}/repositories?tab=installation&connected=github`);
     expect(await prisma.forgeConnection.findFirst({ where: { userId } })).toMatchObject({
       provider: "github",
       kind: "github_app",

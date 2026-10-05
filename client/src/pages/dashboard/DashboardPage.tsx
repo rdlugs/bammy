@@ -37,7 +37,7 @@ export function DashboardPage() {
           <CardContent>
             <ol className="flex flex-col gap-2">
               <Step done={connected}>
-                <Link to="/connections" className="hover:underline">
+                <Link to="/repositories?tab=installation" className="hover:underline">
                   Connect GitHub or GitLab
                 </Link>
               </Step>
