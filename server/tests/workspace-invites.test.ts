@@ -1,0 +1,240 @@
+import request from "supertest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { app } from "../src/app.ts";
+import { env } from "../src/config/env.ts";
+import { mailer } from "../src/lib/mailer.ts";
+import { prisma } from "../src/lib/prisma.ts";
+import { consumeInvite } from "../src/services/invites.ts";
+import { addMember, createTeam, createUser } from "./helpers/users.ts";
+
+type Created = Awaited<ReturnType<typeof createUser>>;
+let owner: Created;
+let teamId: string;
+const originalMode = env.REGISTRATION_MODE;
+
+beforeEach(async () => {
+  await prisma.invite.deleteMany();
+  await prisma.workspace.deleteMany();
+  await prisma.user.deleteMany();
+  owner = await createUser("owner@example.com");
+  teamId = (await createTeam(owner.user.id, "Acme")).id;
+});
+
+afterEach(() => {
+  env.REGISTRATION_MODE = originalMode;
+  vi.restoreAllMocks();
+});
+
+afterAll(async () => {
+  await prisma.$disconnect();
+});
+
+async function invite(body: Record<string, unknown> = {}, who: Created = owner) {
+  const res = await request(app).post(`/api/workspaces/${teamId}/invites`).set("Cookie", who.cookie).send(body);
+  return { res, token: String(res.body.link ?? "").split("/invite/")[1]! };
+}
+
+const accept = (token: string, who: Created) =>
+  request(app).post(`/api/auth/invites/${token}/accept`).set("Cookie", who.cookie);
+
+describe("creating team invites", () => {
+  it("is for admins and owners only", async () => {
+    const member = await createUser("member@example.com");
+    await addMember(teamId, member.user.id, "member");
+
+    expect((await invite({}, member)).res.status).toBe(403);
+    expect((await invite({ role: "admin" })).res.status).toBe(201);
+  });
+
+  it("cannot hand out ownership", async () => {
+    expect((await invite({ role: "owner" })).res.status).toBe(400);
+  });
+
+  it("emails a workspace-specific message when SMTP is configured", async () => {
+    vi.spyOn(mailer, "configured").mockReturnValue(true);
+    const send = vi.spyOn(mailer, "send").mockResolvedValue();
+
+    const { res } = await invite({ email: "grace@example.com" });
+
+    expect(res.body.emailed).toBe(true);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: "grace@example.com", subject: "Join Acme on Bammy" }));
+  });
+
+  it("refuses to invite someone who is already a member", async () => {
+    const { res } = await invite({ email: "owner@example.com" });
+    expect(res.status).toBe(409);
+  });
+
+  it("lists and revokes the team's pending invites, separately from instance invites", async () => {
+    await invite({ email: "grace@example.com" });
+    const list = await request(app).get(`/api/workspaces/${teamId}/invites`).set("Cookie", owner.cookie);
+    expect(list.body.invites).toEqual([expect.objectContaining({ email: "grace@example.com", role: "member" })]);
+
+    const admin = await createUser("admin@example.com", "admin");
+    const instance = await request(app).get("/api/admin/invites").set("Cookie", admin.cookie);
+    expect(instance.body.invites).toEqual([]);
+
+    const revoked = await request(app)
+      .delete(`/api/workspaces/${teamId}/invites/${list.body.invites[0].id}`)
+      .set("Cookie", owner.cookie);
+    expect(revoked.status).toBe(204);
+  });
+});
+
+describe("resending team invites", () => {
+  // An email invite created with SMTP on, returning its id, token and the
+  // cleared send spy.
+  async function emailInvite() {
+    vi.spyOn(mailer, "configured").mockReturnValue(true);
+    const send = vi.spyOn(mailer, "send").mockResolvedValue();
+    const { res, token } = await invite({ email: "grace@example.com" });
+    send.mockClear();
+    return { id: res.body.invite.id as string, token, send };
+  }
+
+  const resend = (inviteId: string, who: Created = owner, workspace = teamId) =>
+    request(app).post(`/api/workspaces/${workspace}/invites/${inviteId}/resend`).set("Cookie", who.cookie);
+  const show = (token: string) => request(app).get(`/api/auth/invites/${token}`);
+
+  it("emails a new team link, retires the old one and renews the expiry", async () => {
+    const { id, token, send } = await emailInvite();
+    await prisma.invite.update({ where: { id }, data: { expiresAt: new Date(Date.now() + 60_000) } });
+
+    const res = await resend(id);
+
+    expect(res.status).toBe(200);
+    expect(res.body.invite).toMatchObject({ id, email: "grace@example.com", role: "member" });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: "grace@example.com", subject: "Join Acme on Bammy" }));
+    const newToken = /\/invite\/([\w-]+)/.exec(send.mock.calls[0]![0].text)![1]!;
+    expect((await show(token)).status).toBe(404);
+    expect((await show(newToken)).body.invite).toMatchObject({ workspace: { name: "Acme" } });
+    const after = await prisma.invite.findUniqueOrThrow({ where: { id } });
+    expect(after.expiresAt.getTime()).toBeGreaterThan(Date.now() + 6 * 86_400_000);
+  });
+
+  it("refuses an open link, and refuses when email is not set up", async () => {
+    const open = await invite();
+    vi.spyOn(mailer, "configured").mockReturnValue(true);
+    expect((await resend(open.res.body.invite.id)).status).toBe(400);
+
+    const { id, token } = await emailInvite();
+    vi.spyOn(mailer, "configured").mockReturnValue(false);
+    expect((await resend(id)).status).toBe(409);
+    expect((await show(token)).status).toBe(200);
+  });
+
+  it("is for admins and owners only", async () => {
+    const { id } = await emailInvite();
+    const member = await createUser("member@example.com");
+    await addMember(teamId, member.user.id, "member");
+
+    expect((await resend(id, member)).status).toBe(403);
+  });
+
+  it("cannot reach another team's invite or an instance invite", async () => {
+    const { id } = await emailInvite();
+    const other = await createTeam(owner.user.id, "Other");
+    const admin = await createUser("admin@example.com", "admin");
+    const instance = await request(app)
+      .post("/api/admin/invites")
+      .set("Cookie", admin.cookie)
+      .send({ email: "new@example.com" });
+
+    expect((await resend(id, owner, other.id)).status).toBe(404);
+    expect((await resend(instance.body.invite.id)).status).toBe(404);
+  });
+});
+
+describe("accepting team invites", () => {
+  it("shows the workspace on the invite page", async () => {
+    const { token } = await invite();
+    const res = await request(app).get(`/api/auth/invites/${token}`);
+
+    expect(res.body.invite).toMatchObject({ role: "member", workspace: { name: "Acme" }, invitedBy: { name: "Dev" } });
+  });
+
+  it("adds a signed-in user with the invited role, once", async () => {
+    const grace = await createUser("grace@example.com");
+    const { token } = await invite({ role: "admin" });
+
+    const res = await accept(token, grace);
+    expect(res.status).toBe(201);
+    expect(res.body.workspace).toEqual({ id: teamId, name: "Acme", personal: false, role: "admin" });
+
+    const again = await accept(token, await createUser("other@example.com"));
+    expect(again.status).toBe(404);
+  });
+
+  it("rejects an invite meant for another email", async () => {
+    const grace = await createUser("grace@example.com");
+    const { token } = await invite({ email: "someone@example.com" });
+
+    expect((await accept(token, grace)).status).toBe(400);
+  });
+
+  it("rejects a user who is already a member, without spending the invite", async () => {
+    const { token } = await invite();
+
+    expect((await accept(token, owner)).status).toBe(409);
+    expect(await prisma.invite.count({ where: { acceptedAt: null } })).toBe(1);
+  });
+
+  it("refuses instance invites on the accept route", async () => {
+    const admin = await createUser("admin@example.com", "admin");
+    const created = await request(app).post("/api/admin/invites").set("Cookie", admin.cookie).send({});
+    const token = created.body.link.split("/invite/")[1];
+
+    expect((await accept(token, owner)).status).toBe(400);
+  });
+});
+
+// The lookup and the consume are separate statements, so the invite can
+// change in between; consuming re-checks what the lookup saw.
+describe("consuming an invite that changed since it was looked up", () => {
+  it("fails once a resend has rotated the token", async () => {
+    await invite();
+    const looked = await prisma.invite.findFirstOrThrow();
+    await prisma.invite.update({ where: { id: looked.id }, data: { tokenHash: "rotated" } });
+
+    await expect(prisma.$transaction((tx) => consumeInvite(tx, looked))).rejects.toMatchObject({ status: 400 });
+    expect(await prisma.invite.count({ where: { acceptedAt: null } })).toBe(1);
+  });
+
+  it("fails once the invite has expired", async () => {
+    await invite();
+    const looked = await prisma.invite.findFirstOrThrow();
+    await prisma.invite.update({ where: { id: looked.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    await expect(prisma.$transaction((tx) => consumeInvite(tx, looked))).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("registering from a team invite", () => {
+  const newUser = {
+    name: "Grace",
+    email: "grace@example.com",
+    password: "supersecret123",
+    confirmPassword: "supersecret123",
+  };
+
+  it("creates the account in invite mode and joins the team", async () => {
+    env.REGISTRATION_MODE = "invite";
+    const { token } = await invite({ email: "grace@example.com" });
+
+    const res = await request(app).post("/api/auth/register").send({ ...newUser, inviteToken: token });
+
+    expect(res.status).toBe(201);
+    expect(res.body.workspaces).toEqual([
+      expect.objectContaining({ personal: true, role: "owner" }),
+      { id: teamId, name: "Acme", personal: false, role: "member" },
+    ]);
+  });
+
+  it("joins the team in open mode too", async () => {
+    const { token } = await invite();
+
+    const res = await request(app).post("/api/auth/register").send({ ...newUser, inviteToken: token });
+
+    expect(res.body.workspaces).toHaveLength(2);
+  });
+});

@@ -1,5 +1,4 @@
 import type { Request, Response } from "express";
-import { Prisma } from "../generated/prisma/client.ts";
 import { env } from "../config/env.ts";
 import { decrypt, encrypt } from "../lib/crypto.ts";
 import { HttpError } from "../lib/httpError.ts";
@@ -20,9 +19,10 @@ import {
   saveApiKeySchema,
   updateProfileSchema,
 } from "../schemas/settings.schema.ts";
+import { assertAnotherAdminRemains } from "../services/admins.ts";
+import { assertEmailAvailable, emailTaken, isUniqueViolation } from "../services/users.ts";
+import { releaseWorkspaces } from "../services/workspaces.ts";
 import { clearAuthCookie, publicUser } from "./auth.controller.ts";
-
-const EMAIL_TAKEN = "An account with this email already exists";
 
 const SERVER_KEYS: Record<ProviderName, boolean> = {
   anthropic: Boolean(env.ANTHROPIC_API_KEY),
@@ -61,10 +61,7 @@ export async function updateProfile(req: Request, res: Response) {
   const data = updateProfileSchema.parse(req.body);
 
   if (data.email) {
-    const owner = await prisma.user.findUnique({ where: { email: data.email }, select: { id: true } });
-    if (owner && owner.id !== req.userId) {
-      throw new HttpError(409, EMAIL_TAKEN, { email: [EMAIL_TAKEN] });
-    }
+    await assertEmailAvailable(prisma, data.email, req.userId!);
   }
 
   try {
@@ -72,8 +69,8 @@ export async function updateProfile(req: Request, res: Response) {
     res.json({ user });
   } catch (error) {
     // Another account claimed the email between the check and the update.
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new HttpError(409, EMAIL_TAKEN, { email: [EMAIL_TAKEN] });
+    if (isUniqueViolation(error)) {
+      throw emailTaken();
     }
     throw error;
   }
@@ -90,7 +87,7 @@ export async function changePassword(req: Request, res: Response) {
 }
 
 export async function listApiKeys(req: Request, res: Response) {
-  const stored = await prisma.llmCredential.findMany({ where: { userId: req.userId } });
+  const stored = await prisma.llmCredential.findMany({ where: { workspaceId: req.workspaceId } });
   const byProvider = new Map(stored.map((credential) => [credential.provider, credential]));
   res.json({ keys: PROVIDERS.map((provider) => publicKey(provider, byProvider.get(provider))) });
 }
@@ -100,7 +97,7 @@ export async function listApiKeys(req: Request, res: Response) {
 export async function apiKeyStatus(req: Request, res: Response) {
   const { provider } = apiKeyParamsSchema.parse(req.params);
   const credential = await prisma.llmCredential.findUnique({
-    where: { userId_provider: { userId: req.userId!, provider } },
+    where: { workspaceId_provider: { workspaceId: req.workspaceId!, provider } },
   });
   if (!credential) {
     throw new HttpError(404, "No key stored for this provider");
@@ -125,7 +122,7 @@ export async function apiKeyStatus(req: Request, res: Response) {
 export async function apiKeyModels(req: Request, res: Response) {
   const { provider } = apiKeyParamsSchema.parse(req.params);
   const credential = await prisma.llmCredential.findUnique({
-    where: { userId_provider: { userId: req.userId!, provider } },
+    where: { workspaceId_provider: { workspaceId: req.workspaceId!, provider } },
   });
   if (!credential) {
     throw new HttpError(404, "No key stored for this provider");
@@ -152,11 +149,11 @@ export async function saveApiKey(req: Request, res: Response) {
 
   const baseUrl = input.baseUrl ? normalizeBaseUrl(input.baseUrl) : undefined;
   await verifyLlmConnection(provider, apiKey, baseUrl);
-  const userId = req.userId!;
+  const workspaceId = req.workspaceId!;
   const encryptedKey = apiKey ? encrypt(apiKey) : null;
   const credential = await prisma.llmCredential.upsert({
-    where: { userId_provider: { userId, provider } },
-    create: { userId, provider, encryptedKey, baseUrl },
+    where: { workspaceId_provider: { workspaceId, provider } },
+    create: { workspaceId, provider, encryptedKey, baseUrl },
     update: { encryptedKey, baseUrl: baseUrl ?? null },
   });
   res.json({ key: publicKey(provider, credential) });
@@ -164,18 +161,26 @@ export async function saveApiKey(req: Request, res: Response) {
 
 export async function deleteApiKey(req: Request, res: Response) {
   const { provider } = apiKeyParamsSchema.parse(req.params);
-  const { count } = await prisma.llmCredential.deleteMany({ where: { userId: req.userId, provider } });
+  const { count } = await prisma.llmCredential.deleteMany({ where: { workspaceId: req.workspaceId, provider } });
   if (count === 0) {
     throw new HttpError(404, "No key stored for this provider");
   }
   res.status(204).end();
 }
 
-// Connections, repositories, review jobs and keys all cascade from the user row.
+// The personal workspace (connections, repositories, reviews, keys) cascades
+// from the user row. The last admin can only leave once nobody else is left to
+// administer, and team workspaces they own need another owner first.
 export async function deleteAccount(req: Request, res: Response) {
   const { password } = deleteAccountSchema.parse(req.body);
-  await requirePassword(req.userId!, password, "password");
-  await prisma.user.delete({ where: { id: req.userId } });
+  const user = await requirePassword(req.userId!, password, "password");
+  await prisma.$transaction(async (tx) => {
+    if (user.role === "admin" && (await tx.user.count()) > 1) {
+      await assertAnotherAdminRemains(tx, user.id);
+    }
+    await releaseWorkspaces(tx, user.id, { promoteSuccessor: false });
+    await tx.user.delete({ where: { id: user.id } });
+  });
   clearAuthCookie(res);
   res.status(204).end();
 }

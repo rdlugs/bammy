@@ -6,6 +6,8 @@ export const registerSchema = z
     email: z.string().trim().toLowerCase().email("Invalid email address"),
     password: z.string().min(8, "Password must be at least 8 characters").max(128),
     confirmPassword: z.string(),
+    // From an invite link; required when REGISTRATION_MODE is "invite".
+    inviteToken: z.string().min(1).max(200).optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",
@@ -15,4 +17,8 @@ export const registerSchema = z
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email("Invalid email address"),
   password: z.string().min(1, "Password is required"),
+});
+
+export const inviteTokenParamsSchema = z.object({
+  token: z.string().min(1).max(200),
 });

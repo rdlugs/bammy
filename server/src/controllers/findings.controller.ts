@@ -34,8 +34,8 @@ const listFields = {
   repository: { select: { id: true, provider: true, host: true, fullPath: true } },
 } as const;
 
-function ownedBy(userId: string) {
-  return { repository: { connection: { userId } } };
+function ownedBy(workspaceId: string) {
+  return { repository: { connection: { workspaceId } } };
 }
 
 type ListQuery = ReturnType<typeof listFindingsQuerySchema.parse>;
@@ -62,7 +62,7 @@ const NUMBER_QUERY = /^[#!]?(\d{1,9})$/;
 export async function listFindings(req: Request, res: Response) {
   const { repoId, state, severity, category, kind, q, sort, dir, page, limit } = listFindingsQuerySchema.parse(req.query);
   const where: Prisma.FindingWhereInput = {
-    ...ownedBy(req.userId!),
+    ...ownedBy(req.workspaceId!),
     ...(repoId ? { repositoryId: repoId } : {}),
     ...(state ? { state } : {}),
     ...(severity ? { severity } : {}),
@@ -96,7 +96,7 @@ export async function listFindings(req: Request, res: Response) {
 export async function getFindingStats(req: Request, res: Response) {
   const { repoId, days } = findingStatsQuerySchema.parse(req.query);
   const since = new Date(Date.now() - days * 86_400_000);
-  const scope = { ...ownedBy(req.userId!), ...(repoId ? { repositoryId: repoId } : {}) };
+  const scope = { ...ownedBy(req.workspaceId!), ...(repoId ? { repositoryId: repoId } : {}) };
   const [open, recent, staleOpen, resolvedRecently, found, falsePositives] = await prisma.$transaction([
     prisma.finding.groupBy({
       by: ["severity"],
@@ -151,7 +151,7 @@ export async function getFindingStats(req: Request, res: Response) {
 export async function getFinding(req: Request, res: Response) {
   const { id } = findingIdParamSchema.parse(req.params);
   const row = await prisma.finding.findFirst({
-    where: { id, ...ownedBy(req.userId!) },
+    where: { id, ...ownedBy(req.workspaceId!) },
     select: { ...listFields, fingerprint: true, lastJob: { select: { result: true } } },
   });
   if (!row) {
@@ -170,7 +170,7 @@ export async function getFinding(req: Request, res: Response) {
 export async function updateFinding(req: Request, res: Response) {
   const { id } = findingIdParamSchema.parse(req.params);
   const input = updateFindingSchema.parse(req.body);
-  const existing = await prisma.finding.findFirst({ where: { id, ...ownedBy(req.userId!) }, select: { id: true } });
+  const existing = await prisma.finding.findFirst({ where: { id, ...ownedBy(req.workspaceId!) }, select: { id: true } });
   if (!existing) {
     throw new HttpError(404, "Finding not found");
   }

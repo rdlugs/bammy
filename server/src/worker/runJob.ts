@@ -32,7 +32,7 @@ export interface RunJobDeps {
   adapterFor: (connection: ForgeConnection) => Forge;
   generateFor: (keys: ApiKeys, endpoint?: Endpoint, baseUrls?: ProviderBaseUrls) => Generate;
   credentialsFor: (
-    userId: string,
+    workspaceId: string,
   ) => Promise<{ keys: ApiKeys; baseUrls: ProviderBaseUrls; connections: StoredLlmConnections }>;
   // Absent means every read goes to the forge, as with review.disableCache.
   cache?: ForgeCache;
@@ -111,7 +111,7 @@ async function walkthroughIssues(forge: Forge, changeSet: ChangeSet, config: Con
 export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Promise<void> {
   const repo = await prisma.repository.findUnique({
     where: { id: job.repositoryId },
-    include: { connection: { include: { user: { select: { reviewSettings: true } } } } },
+    include: { connection: { include: { workspace: { select: { reviewSettings: true } } } } },
   });
   if (!repo) {
     throw new Error("The repository is no longer connected");
@@ -119,7 +119,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
 
   const forge = deps.adapterFor(repo.connection);
   const saved = {
-    globalSettings: repo.connection.user.reviewSettings,
+    globalSettings: repo.connection.workspace.reviewSettings,
     repoSettings: repo.settings,
     followGlobal: repo.followGlobal,
   };
@@ -156,7 +156,7 @@ export async function runJob(job: ReviewJob, deps: RunJobDeps = defaultDeps): Pr
     return;
   }
 
-  const { keys, baseUrls, connections } = await deps.credentialsFor(repo.connection.userId);
+  const { keys, baseUrls, connections } = await deps.credentialsFor(repo.connection.workspaceId);
   const { connection, baseUrl, endpointKey } = config.llm;
   let endpoint: Endpoint | undefined;
   if (connection) {

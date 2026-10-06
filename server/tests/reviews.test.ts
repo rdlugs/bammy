@@ -20,12 +20,13 @@ const mrRoute = (sha = "abc123") => ({
 });
 
 beforeEach(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
   const created = await createUser();
   cookie = created.cookie;
   const connection = await prisma.forgeConnection.create({
     data: {
-      userId: created.user.id,
+      workspaceId: created.workspace.id,
       provider: "gitlab",
       host: "gitlab.com",
       kind: "token",

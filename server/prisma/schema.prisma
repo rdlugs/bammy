@@ -9,21 +9,115 @@ datasource db {
   extensions = [citext]
 }
 
-model User {
-  id             String   @id @default(uuid()) @db.Uuid
-  name           String
-  email          String   @unique @db.Citext
-  passwordHash   String   @map("password_hash")
-  // Global review config: a ConfigOverride applied to every repository that
-  // follows it (and beneath the overrides of those that do not).
-  reviewSettings Json     @default("{}") @map("review_settings")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+// Instance-wide role. Admins manage who can use this Bammy install; it grants
+// no access to other users' repositories or reviews.
+enum InstanceRole {
+  admin
+  member
 
-  connections    ForgeConnection[]
-  llmCredentials LlmCredential[]
+  @@map("instance_role")
+}
+
+model User {
+  id              String       @id @default(uuid()) @db.Uuid
+  name            String
+  email           String       @unique @db.Citext
+  passwordHash    String       @map("password_hash")
+  role            InstanceRole @default(member)
+  // Set while the user has a profile picture; also its cache-busting version.
+  avatarUpdatedAt DateTime?    @map("avatar_updated_at") @db.Timestamptz
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  avatar             UserAvatar?
+  personalWorkspace  Workspace?        @relation("PersonalWorkspace")
+  memberships        Membership[]
+  connectionsCreated ForgeConnection[]
+  invitesSent        Invite[]
 
   @@map("users")
+}
+
+// Kept apart from users so listing users never loads image bytes. The browser
+// uploads an already cropped and downsized image.
+model UserAvatar {
+  userId    String   @id @map("user_id") @db.Uuid
+  data      Bytes
+  mimeType  String   @map("mime_type")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_avatars")
+}
+
+// Owns connections (and through them repositories, reviews and findings), LLM
+// credentials and the global review config. Every user has a personal one, so
+// a solo user never sees the difference.
+model Workspace {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  // Set only on a user's personal workspace: at most one each, deleted with them.
+  personalOwnerId String?  @unique @map("personal_owner_id") @db.Uuid
+  // Global review config: a ConfigOverride applied to every repository that
+  // follows it (and beneath the overrides of those that do not).
+  reviewSettings  Json     @default("{}") @map("review_settings")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  personalOwner  User?             @relation("PersonalWorkspace", fields: [personalOwnerId], references: [id], onDelete: Cascade)
+  memberships    Membership[]
+  connections    ForgeConnection[]
+  llmCredentials LlmCredential[]
+  invites        Invite[]
+
+  @@map("workspaces")
+}
+
+// Declared most privileged first.
+enum WorkspaceRole {
+  owner
+  admin
+  member
+
+  @@map("workspace_role")
+}
+
+model Membership {
+  id          String        @id @default(uuid()) @db.Uuid
+  userId      String        @map("user_id") @db.Uuid
+  workspaceId String        @map("workspace_id") @db.Uuid
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+  @@map("memberships")
+}
+
+// A one-time link to register, or with a workspace, to join it (registering
+// first if needed). Only a hash of the token is stored, so a database read does
+// not yield usable links.
+model Invite {
+  id          String         @id @default(uuid()) @db.Uuid
+  tokenHash   String         @unique @map("token_hash")
+  // When set, only this address can use the invite.
+  email       String?        @db.Citext
+  workspaceId String?        @map("workspace_id") @db.Uuid
+  // The role granted on joining; set exactly when workspaceId is.
+  role        WorkspaceRole?
+  invitedById String?        @map("invited_by_id") @db.Uuid
+  expiresAt   DateTime       @map("expires_at") @db.Timestamptz
+  acceptedAt  DateTime?      @map("accepted_at") @db.Timestamptz
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  invitedBy User?      @relation(fields: [invitedById], references: [id], onDelete: SetNull)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("invites")
 }
 
 enum ForgeProvider {
@@ -102,7 +196,9 @@ enum IgnoreReason {
 
 model ForgeConnection {
   id             String         @id @default(uuid()) @db.Uuid
-  userId         String         @map("user_id") @db.Uuid
+  workspaceId    String         @map("workspace_id") @db.Uuid
+  // Who connected it, for display; the workspace owns it.
+  createdById    String?        @map("created_by_id") @db.Uuid
   provider       ForgeProvider
   host           String
   kind           ConnectionKind
@@ -112,10 +208,11 @@ model ForgeConnection {
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
   repositories Repository[]
 
-  @@index([userId])
+  @@index([workspaceId])
   @@map("forge_connections")
 }
 
@@ -129,7 +226,7 @@ model Repository {
   defaultBranch          String        @map("default_branch")
   enabled                Boolean       @default(false)
   settings               Json          @default("{}")
-  // When set, `settings` is ignored and only the owner's global config applies.
+  // When set, `settings` is ignored and only the workspace's global config applies.
   followGlobal           Boolean       @default(true) @map("follow_global")
   // GitLab project hook Bammy registered, and the secret GitLab sends with it.
   webhookId              String?       @map("webhook_id")
@@ -200,29 +297,29 @@ model PostedFinding {
 // a run still reports it, resolved once a run that read its file does not);
 // "ignored" is only ever set by the user and survives later runs.
 model Finding {
-  id           String       @id @default(uuid()) @db.Uuid
-  repositoryId String       @map("repository_id") @db.Uuid
+  id           String          @id @default(uuid()) @db.Uuid
+  repositoryId String          @map("repository_id") @db.Uuid
   number       Int
   fingerprint  String
-  state        FindingState @default(open)
+  state        FindingState    @default(open)
   // Snapshot from the latest run that reported it, so lists never load results.
   title        String
   file         String
-  startLine    Int          @map("start_line")
+  startLine    Int             @map("start_line")
   severity     FindingSeverity
   category     String
   kind         String
-  changeTitle  String       @map("change_title")
+  changeTitle  String          @map("change_title")
   // Forge login of whoever opened the change; unknown for backfilled rows.
   author       String?
-  lastJobId    String?      @map("last_job_id") @db.Uuid
-  firstSeenAt  DateTime     @default(now()) @map("first_seen_at") @db.Timestamptz
-  lastSeenAt   DateTime     @default(now()) @map("last_seen_at") @db.Timestamptz
-  resolvedAt   DateTime?    @map("resolved_at") @db.Timestamptz
-  ignoredAt    DateTime?    @map("ignored_at") @db.Timestamptz
+  lastJobId    String?         @map("last_job_id") @db.Uuid
+  firstSeenAt  DateTime        @default(now()) @map("first_seen_at") @db.Timestamptz
+  lastSeenAt   DateTime        @default(now()) @map("last_seen_at") @db.Timestamptz
+  resolvedAt   DateTime?       @map("resolved_at") @db.Timestamptz
+  ignoredAt    DateTime?       @map("ignored_at") @db.Timestamptz
   // Set together with ignoredAt and cleared on reopen.
-  ignoreReason IgnoreReason? @map("ignore_reason")
-  ignoreNote   String?       @map("ignore_note")
+  ignoreReason IgnoreReason?   @map("ignore_reason")
+  ignoreNote   String?         @map("ignore_note")
 
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   lastJob    ReviewJob? @relation(fields: [lastJobId], references: [id], onDelete: SetNull)
@@ -234,15 +331,15 @@ model Finding {
 
 model LlmCredential {
   id           String   @id @default(uuid()) @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
   provider     String
   encryptedKey String?  @map("encrypted_key")
   baseUrl      String?  @map("base_url")
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, provider])
+  @@unique([workspaceId, provider])
   @@map("llm_credentials")
 }

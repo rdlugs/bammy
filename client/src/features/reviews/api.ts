@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { api } from "@/lib/api"
+import { api, workspaceHeaders } from "@/lib/api"
 import { isActive, type JobStatus, type OpenChange, type ReviewDetail, type ReviewListItem, type ReviewStats, type Trigger, type Verdict } from "./types"
 
 // While anything is queued or running, poll; otherwise stay quiet.
@@ -95,7 +95,7 @@ export function useRerunReview() {
 }
 
 export async function fetchReviewMarkdown(id: string): Promise<string> {
-  const res = await fetch(`/api/reviews/${id}/markdown`, { credentials: "include" })
+  const res = await fetch(`/api/reviews/${id}/markdown`, { credentials: "include", headers: workspaceHeaders() })
   if (!res.ok) throw new Error("Could not load the markdown")
   return res.text()
 }

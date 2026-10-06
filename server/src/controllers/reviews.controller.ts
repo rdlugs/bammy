@@ -32,8 +32,8 @@ const listFields = {
   repository: { select: { id: true, provider: true, host: true, fullPath: true } },
 } as const;
 
-function ownedBy(userId: string) {
-  return { repository: { connection: { userId } } };
+function ownedBy(workspaceId: string) {
+  return { repository: { connection: { workspaceId } } };
 }
 
 type RepoWithConnection = Repository & { connection: Parameters<typeof adapterForConnection>[0] };
@@ -61,7 +61,7 @@ export async function createReview(req: Request, res: Response) {
   if (req.body && typeof req.body === "object" && "repoId" in req.body) {
     const { repoId, number } = createReviewByRepoSchema.parse(req.body);
     const repo = await prisma.repository.findFirst({
-      where: { id: repoId, connection: { userId: req.userId } },
+      where: { id: repoId, connection: { workspaceId: req.workspaceId } },
       include: { connection: true },
     });
     if (!repo) {
@@ -79,7 +79,7 @@ export async function createReview(req: Request, res: Response) {
 
   // Forge paths are case-insensitive; compare the way the forge would.
   const candidates = await prisma.repository.findMany({
-    where: { provider: parsed.provider, host: parsed.host, connection: { userId: req.userId } },
+    where: { provider: parsed.provider, host: parsed.host, connection: { workspaceId: req.workspaceId } },
     include: { connection: true },
   });
   const repo = candidates.find((r) => r.fullPath.toLowerCase() === parsed.project.toLowerCase());
@@ -94,10 +94,10 @@ type ListQuery = ReturnType<typeof listReviewsQuerySchema.parse>;
 // "#12" (GitHub) and "!12" (GitLab) are how people write change numbers.
 const NUMBER_QUERY = /^[#!]?(\d{1,9})$/;
 
-function listWhere(userId: string, query: ListQuery): Prisma.ReviewJobWhereInput {
+function listWhere(workspaceId: string, query: ListQuery): Prisma.ReviewJobWhereInput {
   const { repoId, status, verdict, trigger, number, q, includeSuperseded } = query;
   const where: Prisma.ReviewJobWhereInput = {
-    ...ownedBy(userId),
+    ...ownedBy(workspaceId),
     ...(repoId ? { repositoryId: repoId } : {}),
     ...(verdict ? { verdict } : {}),
     ...(trigger ? { trigger } : {}),
@@ -120,7 +120,7 @@ function listWhere(userId: string, query: ListQuery): Prisma.ReviewJobWhereInput
 export async function listReviews(req: Request, res: Response) {
   const query = listReviewsQuerySchema.parse(req.query);
   const { page, limit } = query;
-  const where = listWhere(req.userId!, query);
+  const where = listWhere(req.workspaceId!, query);
   if (query.view === "changes") {
     res.json({ ...(await listChanges(where, page, limit)), page, limit });
     return;
@@ -186,7 +186,7 @@ export async function getReviewStats(req: Request, res: Response) {
   // Only small columns are read, never full results.
   const jobs = await prisma.reviewJob.findMany({
     where: {
-      ...ownedBy(req.userId!),
+      ...ownedBy(req.workspaceId!),
       ...(repoId ? { repositoryId: repoId } : {}),
       createdAt: { gte: since },
       status: { notIn: ["superseded", "skipped", "cancelled"] },
@@ -224,9 +224,9 @@ export async function getReviewStats(req: Request, res: Response) {
   });
 }
 
-async function loadOwnedReview(userId: string, id: string) {
+async function loadOwnedReview(workspaceId: string, id: string) {
   const review = await prisma.reviewJob.findFirst({
-    where: { id, ...ownedBy(userId) },
+    where: { id, ...ownedBy(workspaceId) },
     select: { ...listFields, baseSha: true, attempts: true, result: true, publication: true, resolvedConfig: true },
   });
   if (!review) {
@@ -244,14 +244,14 @@ function parseResult(raw: unknown) {
 
 export async function getReview(req: Request, res: Response) {
   const { id } = reviewIdParamSchema.parse(req.params);
-  const { result: raw, ...review } = await loadOwnedReview(req.userId!, id);
+  const { result: raw, ...review } = await loadOwnedReview(req.workspaceId!, id);
   const result = raw === null ? null : parseResult(raw);
   res.json({ review: { ...review, result: result ? toJson(result) : raw } });
 }
 
 export async function getReviewMarkdown(req: Request, res: Response) {
   const { id } = reviewIdParamSchema.parse(req.params);
-  const review = await loadOwnedReview(req.userId!, id);
+  const review = await loadOwnedReview(req.workspaceId!, id);
   const result = review.result === null ? null : parseResult(review.result);
   if (!result) {
     throw new HttpError(409, review.result === null ? "This review has no result yet" : "This result can no longer be rendered");
@@ -280,7 +280,7 @@ export async function getReviewMarkdown(req: Request, res: Response) {
 export async function rerunReview(req: Request, res: Response) {
   const { id } = reviewIdParamSchema.parse(req.params);
   const existing = await prisma.reviewJob.findFirst({
-    where: { id, ...ownedBy(req.userId!) },
+    where: { id, ...ownedBy(req.workspaceId!) },
     include: { repository: { include: { connection: true } } },
   });
   if (!existing) {

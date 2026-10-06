@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import type { User } from "@/features/auth/auth-context"
 
 const ME_QUERY_KEY = ["auth", "me"]
@@ -41,5 +41,35 @@ export function useDeleteAccount() {
       queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "auth" })
       queryClient.setQueryData(ME_QUERY_KEY, null)
     },
+  })
+}
+
+// The picture goes up as the raw request body, so this skips api(), which
+// always sends JSON.
+async function sendAvatar(method: "PUT" | "DELETE", body?: Blob): Promise<User> {
+  const res = await fetch("/api/settings/avatar", {
+    method,
+    body,
+    credentials: "include",
+    headers: body ? { "Content-Type": body.type } : undefined,
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) throw new ApiError(res.status, json.message ?? "Something went wrong", json.errors)
+  return json.user
+}
+
+export function useUploadAvatar() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (image: Blob) => sendAvatar("PUT", image),
+    onSuccess: (user) => queryClient.setQueryData(ME_QUERY_KEY, user),
+  })
+}
+
+export function useRemoveAvatar() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => sendAvatar("DELETE"),
+    onSuccess: (user) => queryClient.setQueryData(ME_QUERY_KEY, user),
   })
 }

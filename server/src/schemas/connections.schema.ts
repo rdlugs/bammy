@@ -53,6 +53,11 @@ export const githubConnectSchema = z.object({
   token: z.string().trim().min(1, "Token is required"),
 });
 
+export const githubInstallSchema = z.object({
+  // Absent means the personal workspace.
+  workspace: z.string().optional(),
+});
+
 export const githubCallbackSchema = z.object({
   installation_id: z.string().regex(/^\d+$/).optional(),
   setup_action: z.string().optional(),

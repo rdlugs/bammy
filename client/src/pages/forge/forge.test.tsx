@@ -13,7 +13,7 @@ const gitlabConnection = {
   kind: "token",
   accountLogin: "dev",
   createdAt: "2026-03-14T12:00:00.000Z",
-  user: { name: "Dev", email: "dev@example.com" },
+  createdBy: { name: "Dev", email: "dev@example.com" },
   repositoryCount: 3,
 }
 
@@ -118,7 +118,7 @@ describe("Connections page", () => {
       "POST /api/connections/github": (init?: RequestInit) => {
         body = JSON.parse(String(init?.body))
         return jsonResponse(201, {
-          connection: { id: "c2", provider: "github", host: "ghe.acme.com", kind: "token", accountLogin: "dev", createdAt: "", user: { name: "Dev", email: "dev@example.com" } },
+          connection: { id: "c2", provider: "github", host: "ghe.acme.com", kind: "token", accountLogin: "dev", createdAt: "", createdBy: { name: "Dev", email: "dev@example.com" } },
         })
       },
     })

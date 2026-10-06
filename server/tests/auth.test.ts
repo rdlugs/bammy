@@ -1,8 +1,11 @@
 import request from "supertest";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { app } from "../src/app.ts";
+import { env } from "../src/config/env.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { AUTH_COOKIE } from "../src/lib/jwt.ts";
+import { createInvite } from "../src/services/invites.ts";
+import { createUser } from "./helpers/users.ts";
 
 const validUser = {
   name: "Ada Lovelace",
@@ -17,6 +20,7 @@ function authCookie(res: request.Response) {
 }
 
 beforeEach(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
 });
 
@@ -118,5 +122,106 @@ describe("GET /api/auth/me and POST /api/auth/logout", () => {
       .get("/api/auth/me")
       .set("Cookie", `${AUTH_COOKIE}=not.a.valid.token`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe("registration modes and invites", () => {
+  const originalMode = env.REGISTRATION_MODE;
+
+  beforeEach(async () => {
+    await prisma.invite.deleteMany();
+  });
+
+  afterEach(() => {
+    env.REGISTRATION_MODE = originalMode;
+  });
+
+  async function inviteToken(email?: string) {
+    const { user } = await createUser("admin@example.com", "admin");
+    const { link } = await createInvite({ email, invitedById: user.id, inviterName: user.name });
+    return link.split("/invite/")[1]!;
+  }
+
+  it("makes the first account an admin, even when registration is closed", async () => {
+    env.REGISTRATION_MODE = "closed";
+
+    const res = await request(app).post("/api/auth/register").send(validUser);
+
+    expect(res.status).toBe(201);
+    expect(res.body.user.role).toBe("admin");
+  });
+
+  it("makes later accounts members in open mode", async () => {
+    await createUser("admin@example.com", "admin");
+
+    const res = await request(app).post("/api/auth/register").send(validUser);
+
+    expect(res.status).toBe(201);
+    expect(res.body.user.role).toBe("member");
+  });
+
+  it("refuses new accounts when registration is closed", async () => {
+    env.REGISTRATION_MODE = "closed";
+    await createUser("admin@example.com", "admin");
+
+    const res = await request(app).post("/api/auth/register").send(validUser);
+
+    expect(res.status).toBe(403);
+    expect(await prisma.user.count({ where: { email: validUser.email } })).toBe(0);
+  });
+
+  it("requires a valid invite in invite mode, and spends it once", async () => {
+    env.REGISTRATION_MODE = "invite";
+    const token = await inviteToken();
+
+    const without = await request(app).post("/api/auth/register").send(validUser);
+    expect(without.status).toBe(403);
+
+    const bogus = await request(app).post("/api/auth/register").send({ ...validUser, inviteToken: "nope" });
+    expect(bogus.status).toBe(400);
+
+    const ok = await request(app).post("/api/auth/register").send({ ...validUser, inviteToken: token });
+    expect(ok.status).toBe(201);
+
+    const reused = await request(app)
+      .post("/api/auth/register")
+      .send({ ...validUser, email: "grace@example.com", inviteToken: token });
+    expect(reused.status).toBe(400);
+  });
+
+  it("rejects an invite meant for another email without spending it", async () => {
+    env.REGISTRATION_MODE = "invite";
+    const token = await inviteToken("grace@example.com");
+
+    const res = await request(app).post("/api/auth/register").send({ ...validUser, inviteToken: token });
+
+    expect(res.status).toBe(400);
+    expect(res.body.errors.email).toBeDefined();
+    expect(await prisma.invite.count({ where: { acceptedAt: null } })).toBe(1);
+  });
+
+  it("rejects an expired invite", async () => {
+    env.REGISTRATION_MODE = "invite";
+    const token = await inviteToken();
+    await prisma.invite.updateMany({ data: { expiresAt: new Date(Date.now() - 1000) } });
+
+    const res = await request(app).post("/api/auth/register").send({ ...validUser, inviteToken: token });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("reports the mode and shows a valid invite", async () => {
+    env.REGISTRATION_MODE = "invite";
+    const token = await inviteToken("grace@example.com");
+
+    const mode = await request(app).get("/api/auth/registration");
+    expect(mode.body).toEqual({ mode: "invite", firstUser: false });
+
+    const shown = await request(app).get(`/api/auth/invites/${token}`);
+    expect(shown.status).toBe(200);
+    expect(shown.body.invite).toMatchObject({ email: "grace@example.com", invitedBy: { name: "Dev" } });
+
+    const missing = await request(app).get("/api/auth/invites/unknown");
+    expect(missing.status).toBe(404);
   });
 });

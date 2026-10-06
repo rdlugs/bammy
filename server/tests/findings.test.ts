@@ -8,13 +8,13 @@ import { sampleResult } from "./helpers/result.ts";
 import { createUser } from "./helpers/users.ts";
 
 let cookie: string;
-let userId: string;
+let workspaceId: string;
 let repoId: string;
 let base: ReviewResult;
 
 async function createRepo(owner: string, fullPath = "team/web") {
   const connection = await prisma.forgeConnection.create({
-    data: { userId: owner, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "dev" },
+    data: { workspaceId: owner, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "dev" },
   });
   const repo = await prisma.repository.create({
     data: {
@@ -49,11 +49,12 @@ const rows = () => prisma.finding.findMany({ where: { repositoryId: repoId }, or
 const byTitle = async (title: string) => (await rows()).find((row) => row.title === title)!;
 
 beforeEach(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
   const created = await createUser();
   cookie = created.cookie;
-  userId = created.user.id;
-  repoId = await createRepo(userId);
+  workspaceId = created.workspace.id;
+  repoId = await createRepo(workspaceId);
   base ??= await sampleResult();
 });
 
@@ -142,7 +143,7 @@ describe("GET /api/findings", () => {
 
   it("never shows another user's findings", async () => {
     const other = await createUser("other@example.com");
-    const otherRepo = await createRepo(other.user.id, "other/app");
+    const otherRepo = await createRepo(other.workspace.id, "other/app");
     await sync(base, { repositoryId: otherRepo });
     const res = await request(app).get("/api/findings").set("Cookie", cookie);
     expect(res.body.total).toBe(0);
@@ -180,7 +181,7 @@ describe("GET /api/findings sorting", () => {
     expect(numbers[0]).toBe(3);
     expect(numbers.at(-1)).toBe(9);
 
-    const second = await createRepo(userId, "team/api");
+    const second = await createRepo(workspaceId, "team/api");
     await sync(base, { repositoryId: second });
     const paths = (await list("sort=repository&dir=asc&limit=100")).map((f) => f.repository.fullPath);
     expect(paths[0]).toBe("team/api");
@@ -228,7 +229,7 @@ describe("GET /api/findings/:id", () => {
 
   it("404s on another user's finding", async () => {
     const other = await createUser("other@example.com");
-    const otherRepo = await createRepo(other.user.id, "other/app");
+    const otherRepo = await createRepo(other.workspace.id, "other/app");
     await sync(base, { repositoryId: otherRepo });
     const theirs = await prisma.finding.findFirstOrThrow({ where: { repositoryId: otherRepo } });
     const res = await request(app).get(`/api/findings/${theirs.id}`).set("Cookie", cookie);
@@ -356,7 +357,7 @@ describe("PATCH /api/findings/:id", () => {
 
   it("404s on another user's finding", async () => {
     const other = await createUser("other@example.com");
-    const otherRepo = await createRepo(other.user.id, "other/app");
+    const otherRepo = await createRepo(other.workspace.id, "other/app");
     await sync(base, { repositoryId: otherRepo });
     const theirs = await prisma.finding.findFirstOrThrow({ where: { repositoryId: otherRepo } });
     const res = await request(app).patch(`/api/findings/${theirs.id}`).set("Cookie", cookie).send({ state: "ignored" });

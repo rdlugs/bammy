@@ -74,12 +74,12 @@ export async function enqueueFromWebhook(input: EnqueueInput): Promise<WebhookEn
   return { queued: true, job: await enqueue(input) };
 }
 
-// Claims the oldest queued job whose owner is under the per-user running
-// limit. SKIP LOCKED lets several workers poll the same table without ever
-// handing one job to two of them. Two workers claiming for the same user at
-// the same instant can exceed the limit by one; it is a fairness bound, not a
-// hard quota.
-export async function claimNext(userConcurrency = Number.MAX_SAFE_INTEGER): Promise<ReviewJob | null> {
+// Claims the oldest queued job whose workspace is under the per-workspace
+// running limit. SKIP LOCKED lets several workers poll the same table without
+// ever handing one job to two of them. Two workers claiming for the same
+// workspace at the same instant can exceed the limit by one; it is a fairness
+// bound, not a hard quota.
+export async function claimNext(workspaceConcurrency = Number.MAX_SAFE_INTEGER): Promise<ReviewJob | null> {
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     UPDATE review_jobs
     SET status = 'running', locked_at = now(), started_at = now(), attempts = attempts + 1
@@ -92,8 +92,8 @@ export async function claimNext(userConcurrency = Number.MAX_SAFE_INTEGER): Prom
           SELECT count(*) FROM review_jobs running
           JOIN repositories rr ON rr.id = running.repository_id
           JOIN forge_connections rc ON rc.id = rr.connection_id
-          WHERE running.status = 'running' AND rc.user_id = c.user_id
-        ) < ${userConcurrency}
+          WHERE running.status = 'running' AND rc.workspace_id = c.workspace_id
+        ) < ${workspaceConcurrency}
       ORDER BY j.created_at
       FOR UPDATE OF j SKIP LOCKED
       LIMIT 1
@@ -158,10 +158,10 @@ export async function cancelQueuedForClosedChange(
 ): Promise<number> {
   const owner = await prisma.forgeConnection.findUnique({
     where: { id: repo.connectionId },
-    select: { user: { select: { reviewSettings: true } } },
+    select: { workspace: { select: { reviewSettings: true } } },
   });
   const config = loadDashboardConfig({
-    globalSettings: owner?.user.reviewSettings,
+    globalSettings: owner?.workspace.reviewSettings,
     repoSettings: repo.settings,
     followGlobal: repo.followGlobal,
   });

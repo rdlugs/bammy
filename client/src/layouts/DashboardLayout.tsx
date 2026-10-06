@@ -10,11 +10,15 @@ import {
   LogOut,
   Settings,
   SlidersHorizontal,
+  UserCog,
+  Users,
+  UsersRound,
 } from "lucide-react"
 import { toast } from "sonner"
 import { DensityToggle } from "@/components/density-toggle"
 import { ModeToggle } from "@/components/mode-toggle"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { UserAvatar } from "@/components/UserAvatar"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,10 +38,15 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { useAuth } from "@/features/auth/useAuth"
+import { WorkspaceSwitcher } from "@/features/workspaces/WorkspaceSwitcher"
 
 const NAV = [
   { to: "/home", label: "Home", icon: House },
@@ -48,24 +57,90 @@ const NAV = [
   { to: "/llm-connections", label: "LLM Connections", icon: KeyRound },
 ]
 
+type NavGroupDef = { label: string; icon: typeof House; items: typeof NAV }
+
+// Each item has its own audience (see userManagementItems); the API enforces
+// the same rules.
+const USER_MANAGEMENT_NAV: NavGroupDef = {
+  label: "User Management",
+  icon: UserCog,
+  items: [
+    { to: "/admin/users", label: "Users", icon: Users },
+    { to: "/workspace", label: "Teams", icon: UsersRound },
+  ],
+}
+
+// Users is for instance admins; Teams manages the current team, so it only
+// exists in a team workspace (a personal one has no members).
+function userManagementItems(isAdmin: boolean, inTeam: boolean) {
+  return USER_MANAGEMENT_NAV.items.filter((item) => (item.to === "/admin/users" ? isAdmin : inTeam))
+}
+
 // Where you are, for the top bar; each page renders its own h1.
 function breadcrumb(pathname: string): { label: string; to?: string }[] {
   if (pathname.startsWith("/reviews/")) return [{ label: "Reviews", to: "/reviews" }, { label: "Review" }]
   if (pathname.startsWith("/settings")) return [{ label: "Settings" }]
+  const managed = USER_MANAGEMENT_NAV.items.find((item) => pathname.startsWith(item.to))
+  // The group has no page of its own, so it is plain text rather than a link.
+  if (managed) return [{ label: USER_MANAGEMENT_NAV.label }, { label: managed.label }]
   return [{ label: NAV.find((item) => pathname.startsWith(item.to))?.label ?? "Home" }]
 }
 
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]!.toUpperCase())
-    .join("")
+function NavItems({ items, pathname }: { items: typeof NAV; pathname: string }) {
+  return (
+    <SidebarMenu>
+      {items.map((item) => (
+        <SidebarMenuItem key={item.to}>
+          <SidebarMenuButton asChild isActive={pathname.startsWith(item.to)} tooltip={item.label}>
+            <NavLink to={item.to}>
+              <item.icon />
+              <span>{item.label}</span>
+            </NavLink>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ))}
+    </SidebarMenu>
+  )
+}
+
+// Starts open on one of its pages. Collapsed to icons the sidebar hides
+// sub-items, so the parent carries the active highlight instead.
+function NavGroup({ group, pathname }: { group: NavGroupDef; pathname: string }) {
+  const { state } = useSidebar()
+  const active = group.items.some((item) => pathname.startsWith(item.to))
+  return (
+    <SidebarMenu>
+      <Collapsible asChild defaultOpen={active} className="group/collapsible">
+        <SidebarMenuItem>
+          <CollapsibleTrigger asChild>
+            <SidebarMenuButton tooltip={group.label} isActive={active && state === "collapsed"}>
+              <group.icon />
+              <span>{group.label}</span>
+              <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+            </SidebarMenuButton>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <SidebarMenuSub>
+              {group.items.map((item) => (
+                <SidebarMenuSubItem key={item.to}>
+                  <SidebarMenuSubButton asChild isActive={pathname.startsWith(item.to)}>
+                    <NavLink to={item.to}>
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </NavLink>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              ))}
+            </SidebarMenuSub>
+          </CollapsibleContent>
+        </SidebarMenuItem>
+      </Collapsible>
+    </SidebarMenu>
+  )
 }
 
 export function DashboardLayout() {
-  const { user, logout } = useAuth()
+  const { user, workspace, logout } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
 
@@ -81,34 +156,20 @@ export function DashboardLayout() {
   if (!user) {
     return null
   }
+  const managementItems = userManagementItems(user.role === "admin", workspace !== null && !workspace.personal)
 
   return (
     <SidebarProvider>
       <Sidebar collapsible="icon">
         <SidebarHeader>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton size="lg">
-                <img src="/bammy.svg" alt="" className="size-8 shrink-0 rounded-lg" />
-                <span className="truncate font-medium">Bammy</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+          <WorkspaceSwitcher />
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
-            <SidebarMenu>
-              {NAV.map((item) => (
-                <SidebarMenuItem key={item.to}>
-                  <SidebarMenuButton asChild isActive={pathname.startsWith(item.to)} tooltip={item.label}>
-                    <NavLink to={item.to}>
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
+            <NavItems items={NAV} pathname={pathname} />
+            {managementItems.length > 0 && (
+              <NavGroup group={{ ...USER_MANAGEMENT_NAV, items: managementItems }} pathname={pathname} />
+            )}
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
@@ -120,9 +181,7 @@ export function DashboardLayout() {
                     size="lg"
                     className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                   >
-                    <Avatar className="size-8 rounded-lg">
-                      <AvatarFallback className="rounded-lg">{initials(user.name)}</AvatarFallback>
-                    </Avatar>
+                    <UserAvatar user={user} className="size-8 rounded-lg after:rounded-lg" fallbackClassName="rounded-lg" />
                     <div className="grid flex-1 text-left text-sm leading-tight">
                       <span className="truncate font-medium">{user.name}</span>
                       <span className="truncate text-xs text-muted-foreground">{user.email}</span>
@@ -183,7 +242,8 @@ export function DashboardLayout() {
             <ModeToggle />
           </div>
         </header>
-        <Outlet />
+        {/* Remounting on a switch resets page state along with the cleared cache. */}
+        <Outlet key={workspace?.id} />
       </SidebarInset>
     </SidebarProvider>
   )

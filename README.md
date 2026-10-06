@@ -37,7 +37,7 @@ dashboard tracks reviews and findings across runs.
 - [Highlights](#highlights)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
-- [Getting started](#getting-started): [runtime environment](#docker-runtime-environment), [first review](#run-your-first-review), [troubleshooting](#troubleshooting)
+- [Getting started](#getting-started): [runtime environment](#docker-runtime-environment), [users and invites](#users-and-invites), [workspaces and teams](#workspaces-and-teams), [first review](#run-your-first-review), [troubleshooting](#troubleshooting)
 - [Forge connections](#forge-connections), [publishing](#publishing-to-the-forge), [automatic reviews](#automatic-reviews)
 - [Review configuration](#review-configuration): [LLM connections](#llm-connections-and-custom-endpoints), [Ollama](#ollama), [`.bammy.yaml`](#bammyyaml-reference)
 - [API](#api)
@@ -59,6 +59,8 @@ dashboard tracks reviews and findings across runs.
 - **Findings across runs:** a later run never posts the same finding twice.
   Ignore findings as false positives, intentional, or fix later, and track the
   false-positive rate on the dashboard.
+- **Teams:** share connections, repositories, reviews and model keys in team
+  workspaces, with owner, admin and member roles and one-time invite links.
 
 ## Quick start
 
@@ -75,7 +77,7 @@ Open http://localhost:5173, register, then follow
 
 ## How it works
 
-The `worker` container runs review jobs: it fetches the PR/MR, resolves the review configuration, sends the diff to the configured model in one or more passes (plus an optional walkthrough), validates the findings and stores the result on the job. Model keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`, unless the repository owner has stored their own. The worker polls the `review_jobs` table (claimed with `FOR UPDATE SKIP LOCKED`, so several workers can run side by side); tune it with `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_LOCK_TIMEOUT_MS` and `WORKER_MAX_ATTEMPTS`.
+The `worker` container runs review jobs: it fetches the PR/MR, resolves the review configuration, sends the diff to the configured model in one or more passes (plus an optional walkthrough), validates the findings and stores the result on the job. Model keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`, unless the repository's workspace has stored its own. The worker polls the `review_jobs` table (claimed with `FOR UPDATE SKIP LOCKED`, so several workers can run side by side); tune it with `WORKER_POLL_INTERVAL_MS`, `WORKER_CONCURRENCY`, `WORKER_LOCK_TIMEOUT_MS` and `WORKER_MAX_ATTEMPTS`.
 
 ## Getting started
 
@@ -131,9 +133,54 @@ commands, disable watchers, build/serve the frontend, or provide HTTPS. The clie
 still runs Vite's development server. Production deployment infrastructure is
 deferred; do not expose this Compose setup publicly.
 
+### Users and invites
+
+The first account registered on an instance becomes its **admin**, and so does
+the oldest account on an install that predates roles. Admins see **Users** in the
+sidebar, where they can promote or demote admins, remove users and create invite
+links. An instance always keeps at least one admin. A user's personal-workspace
+connections, repositories and reviews stay private to them; data in a team
+workspace is shared with that team's members. Being an admin does not by itself
+grant access to either.
+
+`REGISTRATION_MODE` in `.env` controls who can create an account:
+
+| Value | Who can register |
+| ----- | ---------------- |
+| `open` (default) | Anyone who can reach the client |
+| `invite` | Only people with an invite link. A team invite also works here, admitting the new account and placing it in that team |
+| `closed` | No new accounts; admins can still create invites, but they cannot register anyone until the mode allows it. Existing signed-in users can still accept a team invite to join a workspace |
+
+An invite link works once and expires after 7 days. Adding an email limits the
+link to that address. When `SMTP_URL` (for example
+`smtp://user:pass@smtp.example.com:587`) and `MAIL_FROM` are set, the link is
+also emailed; otherwise copy it from the dialog, which shows it only once.
+Resending an emailed invite sends a new link and renews its expiry; the old link
+stops working.
+
+### Workspaces and teams
+
+Every account has a private **personal workspace**. Anyone can also create a
+**team workspace** from the switcher in the sidebar; its forge connections,
+repositories, reviews, findings, global review config and LLM keys belong to the
+team rather than to one person. The dashboard remembers the workspace you last
+used.
+
+| Role | Can |
+| ---- | --- |
+| `member` | View the team's data, request and rerun reviews, triage findings, leave the team |
+| `admin` | Everything a member can, plus manage connections, repositories, review config and LLM keys, add and remove members, and invite people |
+| `owner` | Everything an admin can, plus grant or revoke ownership, rename and delete the team |
+
+A team always keeps at least one owner, so the last owner has to promote someone
+else before leaving or deleting their account. The **Team** page (`/workspace`)
+lists members, pending invites and settings. Admins can add someone who already
+has an account directly (which shows them which emails are registered on the
+instance) or invite anyone else with a team invite link.
+
 ### Run your first review
 
-1. Open the client URL and register an account.
+1. Open the client URL and register an account. The first account is the admin.
 2. In **LLM Connections**, add and verify a model provider key, or configure
    [Ollama](#ollama). External providers may charge for model usage.
 3. In **Configuration**, select that connection and a model available to it.
@@ -216,7 +263,7 @@ Turn the first three off with `output.post_inline`, `output.post_summary` and `o
 - Automatic reviews are skipped when the title contains a phrase in `triggers.ignore_titles` (ignoring case), the author or whoever pushed is in `triggers.skip_authors`, the change carries a label in `triggers.skip_labels` (exact and case-sensitive), or the source or target branch name contains an entry of `triggers.skip_source_branches` / `triggers.skip_target_branches`. A manual review or `/bammy review` is never skipped by these lists.
 - All of this is checked by the worker with the full configuration, so a skipped review shows in the dashboard with the reason.
 - Older settings keep their meaning: `triggers.on_push: false` reads as `review: manual` and `triggers.drafts: true` as `review: all`, unless the same layer sets `review`.
-- Each user has at most `WORKER_USER_CONCURRENCY` reviews running at once, and a repository holds at most 10 queued.
+- Each workspace has at most `WORKER_USER_CONCURRENCY` reviews running at once (the name predates workspaces), and a repository holds at most 10 queued.
 - With `triggers.abort_on_close` (the default), closing or merging a PR/MR cancels its queued reviews, and a running review stops: the worker checks the change before it starts, every 15 seconds while it runs (aborting model calls in flight) and before publishing. A cancelled review publishes nothing and closes its pending commit status as `error`. The webhook decides on queued reviews from the dashboard settings; the worker uses the full configuration, repository file included.
 
 The worker keeps a small in-memory cache of what a commit fixes: the repository config file at the base revision and the change's diff for a given base and head. Reruns of the same head skip those forge calls; titles, descriptions, labels and state are always read fresh. `review.disable_cache` turns it off. Set in the dashboard it covers every read; set in `.bammy.yaml` the diff is fetched again once the file has been read.
@@ -315,15 +362,24 @@ language_instructions:
 <details>
 <summary>Endpoint reference</summary>
 
+Endpoints that act on workspace data (connections, repositories, reviews,
+findings, global config and LLM keys) read the workspace id from the
+`x-bammy-workspace` header. Without it they use the caller's personal workspace,
+so scripts written before workspaces keep working. Routes under
+`/api/workspaces/:id` name the workspace in the path instead.
+
 | Method | Path                 | Description |
 | ------ | -------------------- | ----------- |
-| POST   | `/api/auth/register` | `{ name, email, password, confirmPassword }`, sets the auth cookie |
+| POST   | `/api/auth/register` | `{ name, email, password, confirmPassword, inviteToken? }`, sets the auth cookie; `inviteToken` is required when `REGISTRATION_MODE=invite` |
+| GET    | `/api/auth/registration` | `{ mode, firstUser }`, so the register page can say whether it is usable |
+| GET    | `/api/auth/invites/:token` | The invite's email, inviter and expiry, or 404 when invalid, used or expired |
+| POST   | `/api/auth/invites/:token/accept` | Signed in: joins the team the invite is for and returns that workspace |
 | POST   | `/api/auth/login`    | `{ email, password }`, sets the auth cookie |
 | POST   | `/api/auth/logout`   | Clears the auth cookie |
 | GET    | `/api/auth/me`       | Current user, or 401 |
-| GET    | `/api/connections`   | The caller's forge connections, and whether GitHub is configured |
+| GET    | `/api/connections`   | The workspace's forge connections, and whether GitHub is configured |
 | POST   | `/api/connections/gitlab` | `{ host?, token }`, validates the token against GitLab and stores it encrypted |
-| GET    | `/api/connections/github/install` | Redirects to the GitHub App's install page |
+| GET    | `/api/connections/github/install?workspace=` | Redirects to the GitHub App's install page; the installation is added to that workspace |
 | GET    | `/api/connections/github/callback` | GitHub's return URL after installing the app |
 | DELETE | `/api/connections/:id` | Removes a connection and its repositories |
 | GET    | `/api/repos?connectionId=` | Repositories the connection can see, with their enabled flag |
@@ -331,17 +387,40 @@ language_instructions:
 | PATCH  | `/api/repos/:id`     | `{ enabled?, settings?, followGlobal? }`; `settings` replaces the saved review overrides, `followGlobal` makes the repository ignore them and use only the global config |
 | GET    | `/api/repos/:id/config` | The effective review config for the default branch, where each value came from, and any repository-file warnings |
 | POST   | `/api/reviews`       | `{ url }` of a pull or merge request on an enabled repository; queues a review of its current head |
-| GET    | `/api/reviews?repoId=&status=&page=&limit=` | The caller's reviews, newest first, with a summary but not the full result; returns `{ reviews, total, page, limit }` (`limit` 1-100, default 20) |
+| GET    | `/api/reviews?repoId=&status=&page=&limit=` | The workspace's reviews, newest first, with a summary but not the full result; returns `{ reviews, total, page, limit }` (`limit` 1-100, default 20) |
 | GET    | `/api/reviews/:id`   | One review with its full result |
 | GET    | `/api/reviews/:id/markdown` | The review as the markdown document that is posted to the forge |
 | POST   | `/api/reviews/:id/rerun` | Queues a fresh review of the PR's latest head |
 | POST   | `/api/webhooks/github` | GitHub App webhook (signed with `GITHUB_WEBHOOK_SECRET`) |
 | POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Bammy registers per repository (token checked per repository) |
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
-| GET    | `/api/config/global` | The caller's global review config, and what it resolves to with each value's source |
-| PUT    | `/api/config/global` | `{ settings }`, replaces the global review config; `{}` resets it |
+| GET    | `/api/config/global` | The workspace's global review config, and what it resolves to with each value's source |
+| PUT    | `/api/config/global` | Workspace admins: `{ settings }`, replaces the global review config; `{}` resets it |
+| PUT    | `/api/settings/avatar` | Raw PNG, JPEG or WebP body (512 KB at most; the dashboard uploads a 256px JPEG); sets the caller's profile picture |
+| DELETE | `/api/settings/avatar` | Removes the caller's profile picture, so their initials show again |
+| GET    | `/api/users/:id/avatar` | A user's profile picture, for any signed-in user; 404 when they have none |
+| GET    | `/api/admin/users`   | Admin only: every user with their role |
+| PATCH  | `/api/admin/users/:id` | Admin only: `{ role: "admin" \| "member" }`; refuses to remove the last admin |
+| DELETE | `/api/admin/users/:id` | Admin only: deletes another user and everything they own |
+| GET    | `/api/admin/invites` | Admin only: pending invites |
+| POST   | `/api/admin/invites` | Admin only: `{ email? }`; returns `{ invite, link, emailed }`, the link is shown only here |
+| POST   | `/api/admin/invites/:id/resend` | Admin only: emails a new link for an email invite and renews its expiry; needs SMTP |
+| DELETE | `/api/admin/invites/:id` | Admin only: revokes a pending invite |
+| GET    | `/api/workspaces`    | The caller's workspaces with their role in each |
+| POST   | `/api/workspaces`    | `{ name }`, creates a team workspace owned by the caller |
+| PATCH  | `/api/workspaces/:id` | Owners: `{ name }`, renames a team |
+| DELETE | `/api/workspaces/:id` | Owners: deletes a team and everything in it, removing Bammy's forge hooks first |
+| GET    | `/api/workspaces/:id/members` | Members with their role and join date |
+| POST   | `/api/workspaces/:id/members` | Team admins: `{ email, role? }`, adds an existing account as `admin` or `member` |
+| GET    | `/api/workspaces/:id/member-candidates` | Team admins: accounts not yet in the team, for the add-member picker |
+| PATCH  | `/api/workspaces/:id/members/:userId` | Team admins: `{ role }`; only owners grant or revoke `owner`, and the last owner cannot be demoted |
+| DELETE | `/api/workspaces/:id/members/:userId` | Team admins remove a member; any member may remove themselves to leave |
+| GET    | `/api/workspaces/:id/invites` | Team admins: pending team invites |
+| POST   | `/api/workspaces/:id/invites` | Team admins: `{ email?, role? }`; returns `{ invite, link, emailed }` like an instance invite |
+| POST   | `/api/workspaces/:id/invites/:inviteId/resend` | Team admins: emails a new link for an email invite and renews its expiry |
+| DELETE | `/api/workspaces/:id/invites/:inviteId` | Team admins: revokes a pending team invite |
 
-Register and login are rate limited (20 requests per 15 minutes per IP).
+Register, login, the registration mode and invite lookups are rate limited (20 requests per 15 minutes per IP).
 
 </details>
 

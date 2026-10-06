@@ -10,6 +10,11 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     });
     return;
   }
+  // body-parser's own error for a body over a route's limit.
+  if (err instanceof Error && "type" in err && err.type === "entity.too.large") {
+    res.status(413).json({ message: "The upload is too large" });
+    return;
+  }
   if (err instanceof HttpError) {
     res.status(err.status).json(err.errors ? { message: err.message, errors: err.errors } : { message: err.message });
     return;

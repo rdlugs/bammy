@@ -2,8 +2,10 @@ import { Navigate, Route, Routes, useLocation } from "react-router"
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute"
 import { PublicOnlyRoute } from "@/features/auth/PublicOnlyRoute"
 import { DashboardLayout } from "@/layouts/DashboardLayout"
+import { AdminUsersPage } from "@/pages/admin/AdminUsersPage"
 import { ConfigurationPage } from "@/pages/config/ConfigurationPage"
 import { HomePage } from "@/pages/home/HomePage"
+import { InvitePage } from "@/pages/invite/InvitePage"
 import { FindingsPage } from "@/pages/findings/FindingsPage"
 import { LlmConnectionsPage } from "@/pages/llm-connections/LlmConnectionsPage"
 import { LoginPage } from "@/pages/auth/LoginPage"
@@ -12,6 +14,7 @@ import { RepositoriesPage } from "@/pages/forge/RepositoriesPage"
 import { ReviewDetailPage } from "@/pages/reviews/ReviewDetailPage"
 import { ReviewsPage } from "@/pages/reviews/ReviewsPage"
 import { SettingsPage } from "@/pages/settings/SettingsPage"
+import { WorkspacePage } from "@/pages/workspace/WorkspacePage"
 
 // Connections now live on the Repositories page. Keep the old path working for
 // bookmarks and GitHub returns already in flight, passing ?connected=/?error= on.
@@ -28,6 +31,8 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
       </Route>
+      {/* Reachable signed in or out: it explains what to do in either case. */}
+      <Route path="/invite/:token" element={<InvitePage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<DashboardLayout />}>
           <Route path="/home" element={<HomePage />} />
@@ -41,6 +46,8 @@ export function App() {
           <Route path="/configuration" element={<ConfigurationPage />} />
           <Route path="/llm-connections" element={<LlmConnectionsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/workspace" element={<WorkspacePage />} />
+          <Route path="/admin/users" element={<AdminUsersPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/home" replace />} />

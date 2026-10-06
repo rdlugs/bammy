@@ -8,11 +8,11 @@ import { fetchStub } from "./helpers/fetchStub.ts";
 import { createUser } from "./helpers/users.ts";
 
 const SECRET = "webhook-secret";
-let userId: string;
+let workspaceId: string;
 
-async function githubRepo(owner = userId, enabled = true) {
+async function githubRepo(owner = workspaceId, enabled = true) {
   const connection = await prisma.forgeConnection.create({
-    data: { userId: owner, provider: "github", host: "github.com", kind: "github_app", installationId: "55", accountLogin: "acme" },
+    data: { workspaceId: owner, provider: "github", host: "github.com", kind: "github_app", installationId: "55", accountLogin: "acme" },
   });
   return prisma.repository.create({
     data: {
@@ -30,7 +30,7 @@ async function githubRepo(owner = userId, enabled = true) {
 async function gitlabRepo() {
   const connection = await prisma.forgeConnection.create({
     data: {
-      userId,
+      workspaceId,
       provider: "gitlab",
       host: "gitlab.com",
       kind: "token",
@@ -56,7 +56,7 @@ async function gitlabRepo() {
 async function githubTokenRepo(enabled = true) {
   const connection = await prisma.forgeConnection.create({
     data: {
-      userId,
+      workspaceId,
       provider: "github",
       host: "ghe.acme.com",
       kind: "token",
@@ -99,8 +99,9 @@ const prEvent = (action: string, sha = "sha1") => ({
 });
 
 beforeEach(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
-  ({ user: { id: userId } } = await createUser());
+  ({ workspace: { id: workspaceId } } = await createUser());
 });
 
 afterEach(() => {
@@ -172,7 +173,7 @@ describe("POST /api/webhooks/github", () => {
   });
 
   it("ignores repositories that are not enabled and events it does not handle", async () => {
-    await githubRepo(userId, false);
+    await githubRepo(workspaceId, false);
     expect((await sendGithub("pull_request", prEvent("opened"))).body.outcome).toBe("not_enabled");
     expect((await sendGithub("pull_request", prEvent("labeled"))).body.outcome).toBe("ignored");
     expect((await sendGithub("push", {})).body.outcome).toBe("ignored");
@@ -203,7 +204,7 @@ describe("POST /api/webhooks/github", () => {
   it("reviews a shared installation's PR once, for the earliest enabled repository", async () => {
     const first = await githubRepo();
     const other = await createUser("other@example.com");
-    await githubRepo(other.user.id);
+    await githubRepo(other.workspace.id);
 
     await sendGithub("pull_request", prEvent("opened"));
 

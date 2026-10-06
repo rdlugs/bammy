@@ -8,11 +8,12 @@ import {
   rerunReview,
 } from "../controllers/reviews.controller.ts";
 import { requireAuth } from "../middleware/requireAuth.ts";
+import { requireWorkspace } from "../middleware/requireWorkspace.ts";
 import { userLimiter } from "../middleware/apiLimiter.ts";
 
 export const reviewsRouter = Router();
 
-reviewsRouter.use(userLimiter, requireAuth);
+reviewsRouter.use(userLimiter, requireAuth, requireWorkspace);
 reviewsRouter.get("/", listReviews);
 reviewsRouter.post("/", createReview);
 // Before "/:id", which would reject "stats" as a malformed id.

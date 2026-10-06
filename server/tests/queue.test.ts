@@ -5,13 +5,12 @@ import { claimNext, complete, enqueue, enqueueFromWebhook, fail, recoverStale } 
 let repositoryId: string;
 
 beforeEach(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
-  const user = await prisma.user.create({
-    data: { name: "Queue Test", email: "queue@example.com", passwordHash: "x" },
-  });
+  const workspace = await prisma.workspace.create({ data: { name: "Queue Test" } });
   const connection = await prisma.forgeConnection.create({
     data: {
-      userId: user.id,
+      workspaceId: workspace.id,
       provider: "github",
       host: "github.com",
       kind: "github_app",
@@ -156,11 +155,11 @@ describe("recoverStale", () => {
   });
 });
 
-describe("per-user concurrency", () => {
-  it("skips a user at their running limit and serves the next user", async () => {
-    const other = await prisma.user.create({ data: { name: "O", email: "o@example.com", passwordHash: "x" } });
+describe("per-workspace concurrency", () => {
+  it("skips a workspace at its running limit and serves the next workspace", async () => {
+    const other = await prisma.workspace.create({ data: { name: "O" } });
     const conn = await prisma.forgeConnection.create({
-      data: { userId: other.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "o" },
+      data: { workspaceId: other.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "o" },
     });
     const otherRepo = await prisma.repository.create({
       data: { connectionId: conn.id, provider: "gitlab", host: "gitlab.com", fullPath: "o/r", externalId: "2", defaultBranch: "main" },
@@ -170,8 +169,22 @@ describe("per-user concurrency", () => {
     const theirs = await enqueue({ repositoryId: otherRepo.id, number: 1, headSha: "c", trigger: "manual" });
 
     expect((await claimNext(1))?.number).toBe(1);
-    // The first user is at their limit of one, so their second job waits.
+    // The first workspace is at its limit of one, so its second job waits.
     expect((await claimNext(1))?.id).toBe(theirs.id);
+    expect(await claimNext(1)).toBeNull();
+  });
+  it("counts every connection in a workspace against the same limit", async () => {
+    const { workspaceId } = await prisma.forgeConnection.findFirstOrThrow();
+    const second = await prisma.forgeConnection.create({
+      data: { workspaceId, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "teammate" },
+    });
+    const secondRepo = await prisma.repository.create({
+      data: { connectionId: second.id, provider: "gitlab", host: "gitlab.com", fullPath: "t/r", externalId: "3", defaultBranch: "main" },
+    });
+    await job("a", 1);
+    await enqueue({ repositoryId: secondRepo.id, number: 1, headSha: "b", trigger: "manual" });
+
+    expect(await claimNext(1)).not.toBeNull();
     expect(await claimNext(1)).toBeNull();
   });
 });

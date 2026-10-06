@@ -11,8 +11,8 @@ export function adapterForConnection(connection: ForgeConnection): Forge {
   return providerFor(connection.provider).adapterFor(connection);
 }
 
-export async function loadOwnedConnection(userId: string, id: string): Promise<ForgeConnection> {
-  const connection = await prisma.forgeConnection.findFirst({ where: { id, userId } });
+export async function loadWorkspaceConnection(workspaceId: string, id: string): Promise<ForgeConnection> {
+  const connection = await prisma.forgeConnection.findFirst({ where: { id, workspaceId } });
   if (!connection) {
     throw new HttpError(404, "Connection not found");
   }

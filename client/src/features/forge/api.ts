@@ -10,8 +10,8 @@ export interface Connection {
   kind: "github_app" | "token"
   accountLogin: string
   createdAt: string
-  // The Bammy user who added the connection.
-  user: { name: string; email: string }
+  // The Bammy user who added the connection; null once their account is gone.
+  createdBy: { name: string; email: string } | null
   // Enabled repositories added from this connection.
   repositoryCount: number
 }

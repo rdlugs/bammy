@@ -8,11 +8,12 @@ import { prisma } from "../lib/prisma.ts";
 import { ForgeError } from "../review/forge/http.ts";
 import { FORGE_PROVIDERS, forgeName } from "../review/forge/providers.ts";
 import { hostOrigin } from "../review/forge/types.ts";
-import { loadOwnedConnection } from "../services/forge.ts";
+import { loadWorkspaceConnection } from "../services/forge.ts";
 import { getGitHubApp, githubInstallUrl } from "../services/githubApp.ts";
 import { isForgeProvider, PROVIDERS, providerFor } from "../services/providers/index.ts";
 import { removeWebhook } from "../services/webhooks.ts";
-import { githubCallbackSchema } from "../schemas/connections.schema.ts";
+import { loadMembership, requireRole } from "../services/workspaces.ts";
+import { githubCallbackSchema, githubInstallSchema } from "../schemas/connections.schema.ts";
 
 const publicConnection = {
   id: true,
@@ -21,14 +22,14 @@ const publicConnection = {
   kind: true,
   accountLogin: true,
   createdAt: true,
-  user: { select: { name: true, email: true } },
+  createdBy: { select: { name: true, email: true } },
 } as const;
 
 const INSTALL_STATE_PURPOSE = "github-install";
 
 export async function listConnections(req: Request, res: Response) {
   const rows = await prisma.forgeConnection.findMany({
-    where: { userId: req.userId },
+    where: { workspaceId: req.workspaceId },
     // Only enabled repositories count as added, matching the details sheet.
     select: { ...publicConnection, _count: { select: { repositories: { where: { enabled: true } } } } },
     orderBy: { createdAt: "asc" },
@@ -46,7 +47,7 @@ const RECENT_REVIEWS = 5;
 // Everything the details sheet shows, from the database only; credential
 // health is the separate (slower) status check.
 export async function getConnection(req: Request, res: Response) {
-  const connection = await loadOwnedConnection(req.userId!, String(req.params.id));
+  const connection = await loadWorkspaceConnection(req.workspaceId!, String(req.params.id));
   const provider = providerFor(connection.provider);
   const reviewScope = { repository: { connectionId: connection.id } };
 
@@ -99,7 +100,7 @@ export async function getConnection(req: Request, res: Response) {
 // Asks the forge whether the stored credentials still work. Always 200: a
 // refused or unreachable forge is the answer, not a failure of this request.
 export async function connectionStatus(req: Request, res: Response) {
-  const connection = await loadOwnedConnection(req.userId!, String(req.params.id));
+  const connection = await loadWorkspaceConnection(req.workspaceId!, String(req.params.id));
   let status: "active" | "revoked" | "unreachable";
   try {
     await providerFor(connection.provider).checkCredentials(connection);
@@ -135,25 +136,32 @@ export async function connectWithToken(req: Request, res: Response) {
     throw new HttpError(502, `Could not reach ${name} at ${host}`);
   }
 
-  const userId = req.userId!;
+  const workspaceId = req.workspaceId!;
   const existing = await prisma.forgeConnection.findFirst({
-    where: { userId, provider, kind: "token", host, accountLogin: login },
+    where: { workspaceId, provider, kind: "token", host, accountLogin: login },
   });
   const data = { encryptedToken: encrypt(token) };
   const connection = existing
     ? await prisma.forgeConnection.update({ where: { id: existing.id }, data, select: publicConnection })
     : await prisma.forgeConnection.create({
-        data: { ...data, userId, provider, host, kind: "token", accountLogin: login },
+        data: { ...data, workspaceId, createdById: req.userId, provider, host, kind: "token", accountLogin: login },
         select: publicConnection,
       });
 
   res.status(existing ? 200 : 201).json({ connection });
 }
 
-export function githubInstall(req: Request, res: Response) {
-  const state = jwt.sign({ sub: req.userId, purpose: INSTALL_STATE_PURPOSE }, env.JWT_SECRET, {
-    expiresIn: "10m",
-  });
+// A browser navigation, so the workspace comes as ?workspace= rather than the
+// header. It travels to the callback inside the signed state.
+export async function githubInstall(req: Request, res: Response) {
+  const { workspace } = githubInstallSchema.parse(req.query);
+  const access = await loadMembership(req.userId!, workspace);
+  requireRole(access.role, "admin");
+  const state = jwt.sign(
+    { sub: req.userId, workspaceId: access.workspaceId, purpose: INSTALL_STATE_PURPOSE },
+    env.JWT_SECRET,
+    { expiresIn: "10m" },
+  );
   const url = githubInstallUrl(state);
   if (!url) {
     throw new HttpError(503, "GitHub is not configured on this server");
@@ -175,15 +183,24 @@ export async function githubCallback(req: Request, res: Response) {
   }
   const { installation_id: installationId, setup_action: setupAction, state, code } = parsed.data;
 
-  // The state ties the round trip to the logged-in user who started it.
+  // The state ties the round trip to the logged-in user who started it, and
+  // the workspace they started it for.
   let stateUser: unknown;
+  let stateWorkspace: unknown;
   try {
     const payload = jwt.verify(state, env.JWT_SECRET);
-    stateUser = typeof payload === "object" && payload.purpose === INSTALL_STATE_PURPOSE && payload.sub;
+    if (typeof payload === "object" && payload.purpose === INSTALL_STATE_PURPOSE) {
+      ({ sub: stateUser, workspaceId: stateWorkspace } = payload);
+    }
   } catch {
     stateUser = null;
   }
-  if (!stateUser || stateUser !== req.userId) {
+  if (!stateUser || stateUser !== req.userId || typeof stateWorkspace !== "string") {
+    return backToClient(res, { error: "github_install_failed" });
+  }
+  // Rights may have changed during the round trip to GitHub.
+  const access = await loadMembership(req.userId, stateWorkspace).catch(() => null);
+  if (!access || access.role === "member") {
     return backToClient(res, { error: "github_install_failed" });
   }
   if (setupAction === "request" || !installationId) {
@@ -199,16 +216,16 @@ export async function githubCallback(req: Request, res: Response) {
       return backToClient(res, { error: "github_install_forbidden" });
     }
     const installation = await app.installation(installationId);
-    const userId = req.userId!;
+    const workspaceId = access.workspaceId;
     const existing = await prisma.forgeConnection.findFirst({
-      where: { userId, provider: "github", installationId },
+      where: { workspaceId, provider: "github", installationId },
     });
     const data = { accountLogin: installation.account.login, host: env.GITHUB_HOST };
     if (existing) {
       await prisma.forgeConnection.update({ where: { id: existing.id }, data });
     } else {
       await prisma.forgeConnection.create({
-        data: { ...data, userId, provider: "github", kind: "github_app", installationId },
+        data: { ...data, workspaceId, createdById: req.userId, provider: "github", kind: "github_app", installationId },
       });
     }
   } catch (err) {
@@ -220,7 +237,7 @@ export async function githubCallback(req: Request, res: Response) {
 
 export async function deleteConnection(req: Request, res: Response) {
   const connection = await prisma.forgeConnection.findFirst({
-    where: { id: String(req.params.id), userId: req.userId },
+    where: { id: String(req.params.id), workspaceId: req.workspaceId },
     include: { repositories: true },
   });
   if (!connection) {
