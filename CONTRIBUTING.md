@@ -1,8 +1,8 @@
-# Contributing to Bammy
+# Contributing to Sentryward
 
-Bammy is an alpha project. Start with a focused bug report or feature proposal
+Sentryward is an alpha project. Start with a focused bug report or feature proposal
 before substantial changes. For questions and ideas, start a
-[discussion](https://github.com/rdlugs/bammy/discussions) explaining what you
+[discussion](https://github.com/rdlugs/sentryward/discussions) explaining what you
 tried and what you need. Follow the [code of conduct](CODE_OF_CONDUCT.md).
 Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 
@@ -35,7 +35,7 @@ docker compose exec -T client npm run lint
 docker compose exec -T client npm run build
 ```
 
-Server tests apply existing migrations to the separate `bammy_test` database.
+Server tests apply existing migrations to the separate `sentryward_test` database.
 Never point `TEST_DATABASE_URL` at a database containing data you need to keep.
 Client tests use jsdom. Add focused regression coverage for behavior changes;
 use existing fetch and model stubs rather than real external services.

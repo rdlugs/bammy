@@ -35,7 +35,7 @@ export async function ensureWebhook(repo: Repository, connection: ForgeConnectio
   }
 }
 
-// Best effort: a hook left behind only delivers events Bammy then ignores.
+// Best effort: a hook left behind only delivers events Sentryward then ignores.
 export async function removeWebhook(repo: Repository, connection: ForgeConnection): Promise<void> {
   if (providerFor(connection.provider).appWebhook?.(connection) || !repo.webhookId) return;
   const hookId = repo.webhookId;

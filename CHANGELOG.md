@@ -1,10 +1,10 @@
 # Changelog
 
-All notable changes to Bammy are documented in this file.
+All notable changes to Sentryward are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-While Bammy is pre-1.0, minor versions may include breaking changes.
+While Sentryward is pre-1.0, minor versions may include breaking changes.
 
 ## [Unreleased]
 
@@ -31,9 +31,22 @@ While Bammy is pre-1.0, minor versions may include breaking changes.
 
 ### Changed
 
+- **Bammy is now Sentryward**, with a new logo. Every identifier changed with the
+  name and there are no fallbacks:
+  - the repository config file is `.sentryward.yaml` (or `.sentryward.yml`);
+    rename any `.bammy.yaml`.
+  - the comment command is `/sentryward review`.
+  - the commit status is `sentryward/review`; update branch protection rules
+    that required `bammy/review`.
+  - hidden comment markers are `<!-- sentryward:... -->`, so the first review of
+    a PR reviewed before the rename posts a fresh summary and inline comments
+    instead of editing the old ones.
+  - the session cookie is `sentryward_token`, so everyone signs in again once.
+  - the Docker Compose project and default Postgres user/database are
+    `sentryward`, so a local install starts with a new, empty database volume.
 - Existing connections, LLM keys and global review configs move into each user's
   new personal workspace, so nothing changes for single-user installs.
-- API requests choose a workspace with the `x-bammy-workspace` header. Without
+- API requests choose a workspace with the `x-sentryward-workspace` header. Without
   it they act on the caller's personal workspace, so existing scripts keep
   working. The GitHub App install link takes `?workspace=` instead.
 - `WORKER_USER_CONCURRENCY` now limits running reviews per workspace rather than
@@ -81,11 +94,11 @@ First public alpha.
   and stale-lock recovery.
 - GitHub (via a GitHub App) and GitLab (including self-hosted) forge connections.
 - Publishing to the forge: inline comments with suggestions, a single summary
-  comment with agent prompts, and a `bammy/review` commit status, each step
+  comment with agent prompts, and a `sentryward/review` commit status, each step
   independent.
 - Review triggers: manual review by URL or from a picker of open changes, re-runs,
-  webhooks, and `/bammy review` comments.
-- Layered review configuration: trigger overrides, `.bammy.yaml` from the base
+  webhooks, and `/sentryward review` comments.
+- Layered review configuration: trigger overrides, `.sentryward.yaml` from the base
   revision, dashboard repository settings, profiles, and defaults, with per-field
   source tracking.
 - Model providers Anthropic, OpenAI, and Google, plus custom endpoints and Ollama.
@@ -120,6 +133,6 @@ boundaries.
 - The Docker Compose setup is for development, not public production hosting.
 - Registration is open, with no invitation gate.
 
-[Unreleased]: https://github.com/rdlugs/bammy/compare/v0.1.0-alpha.2...HEAD
-[0.1.0-alpha.2]: https://github.com/rdlugs/bammy/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
-[0.1.0-alpha.1]: https://github.com/rdlugs/bammy/releases/tag/v0.1.0-alpha.1
+[Unreleased]: https://github.com/rdlugs/sentryward/compare/v0.1.0-alpha.2...HEAD
+[0.1.0-alpha.2]: https://github.com/rdlugs/sentryward/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
+[0.1.0-alpha.1]: https://github.com/rdlugs/sentryward/releases/tag/v0.1.0-alpha.1

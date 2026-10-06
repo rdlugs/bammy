@@ -76,7 +76,7 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
   },
   postInline: { label: "Post inline comments", description: "Comment on the lines each finding refers to." },
   postSummary: { label: "Post summary comment", description: "Post the review summary as a comment on the change." },
-  postCheck: { label: "Post commit status", description: "Report the verdict as the bammy/review status." },
+  postCheck: { label: "Post commit status", description: "Report the verdict as the sentryward/review status." },
   reviewStats: {
     label: "Show review details",
     description: "Add a line under the summary with the commit, models and how much was reviewed.",
@@ -127,7 +127,7 @@ const FLAG_INFO: Record<FlagName, { label: string; description: ReactNode }> = {
     label: "Allow review command",
     description: (
       <>
-        Commenting <code>/bammy review</code> requests a review.
+        Commenting <code>/sentryward review</code> requests a review.
       </>
     ),
   },
@@ -1024,7 +1024,7 @@ export function ConfigFields(props: {
             label="High level summary instructions"
             value={form.summaryInstructions}
             onChange={(summaryInstructions) => props.onChange({ ...form, summaryInstructions })}
-            description="By default, Bammy generates release notes in the description. Use this to customize the summary content and format."
+            description="By default, Sentryward generates release notes in the description. Use this to customize the summary content and format."
             emptyHint={
               isRepo && inheritedSummaryInstructions
                 ? emptyHint("output.highLevelSummaryInstructions", inheritedSummaryInstructions)
@@ -1046,7 +1046,7 @@ export function ConfigFields(props: {
       <>
         <Section
           title="Code reviews"
-          description="When Bammy reviews a pull or merge request, and writes its summary, on its own."
+          description="When Sentryward reviews a pull or merge request, and writes its summary, on its own."
         >
           <div className="grid gap-4 @md/field-group:grid-cols-2">
             {choiceField("review")}
@@ -1057,7 +1057,7 @@ export function ConfigFields(props: {
         <FieldSeparator />
         <Section
           title="Skip rules"
-          description="Automatic reviews skip a PR/MR that matches any rule. Manual reviews and /bammy review always run."
+          description="Automatic reviews skip a PR/MR that matches any rule. Manual reviews and /sentryward review always run."
         >
           <div className="grid gap-x-4 gap-y-5 @md/field-group:grid-cols-2">
             {listField("ignoreTitles")}
@@ -1139,7 +1139,7 @@ export function ConfigFields(props: {
                   <CardHeader>
                     <CardTitle>Preview</CardTitle>
                     <CardDescription>
-                      What Bammy would post on a sample change with these settings, including unsaved edits.
+                      What Sentryward would post on a sample change with these settings, including unsaved edits.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

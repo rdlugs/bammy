@@ -4,7 +4,7 @@ import { atLeast } from "../lib/workspaceRoles.ts";
 import { prisma } from "../lib/prisma.ts";
 import type { Prisma, WorkspaceRole } from "../generated/prisma/client.ts";
 
-export const WORKSPACE_HEADER = "x-bammy-workspace";
+export const WORKSPACE_HEADER = "x-sentryward-workspace";
 
 const uuid = z.uuid();
 

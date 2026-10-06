@@ -17,7 +17,7 @@ export interface ConfigLayers {
   global?: DashboardOverride;
   // Saved in the dashboard, validated on write.
   repoSettings?: DashboardOverride;
-  // `.bammy.yaml` from the base revision, already parsed.
+  // `.sentryward.yaml` from the base revision, already parsed.
   repoFile?: ConfigOverride;
   // A one-off override from whatever started the review.
   trigger?: ConfigOverride;

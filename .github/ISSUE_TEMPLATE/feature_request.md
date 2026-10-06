@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Propose an improvement to Bammy
+about: Propose an improvement to Sentryward
 title: ""
 labels: ""
 assignees: ""

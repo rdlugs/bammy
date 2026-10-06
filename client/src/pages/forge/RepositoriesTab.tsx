@@ -400,7 +400,7 @@ function RemoveRepoDialog({ repo, onOpenChange }: { repo: ForgeRepo | null; onOp
             <DialogHeader>
               <DialogTitle>Remove {repo.fullPath}?</DialogTitle>
               <DialogDescription>
-                Bammy will stop reviewing it and remove its webhook. Its review history is deleted too. This cannot be
+                Sentryward will stop reviewing it and remove its webhook. Its review history is deleted too. This cannot be
                 undone.
               </DialogDescription>
             </DialogHeader>
@@ -476,7 +476,7 @@ export function RepositoriesTab() {
               <FolderGit2 />
             </EmptyMedia>
             <EmptyTitle>No repositories added</EmptyTitle>
-            <EmptyDescription>Choose which repositories Bammy should review.</EmptyDescription>
+            <EmptyDescription>Choose which repositories Sentryward should review.</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
             <Button onClick={() => setAdding(true)}>

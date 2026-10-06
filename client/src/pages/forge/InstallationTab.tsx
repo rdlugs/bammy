@@ -447,7 +447,7 @@ function RemoveConnectionDialog({
             <DialogHeader>
               <DialogTitle>Remove {connection.accountLogin}?</DialogTitle>
               <DialogDescription>
-                Bammy will stop reviewing its repositories and remove their webhooks. Their review history is deleted
+                Sentryward will stop reviewing its repositories and remove their webhooks. Their review history is deleted
                 too. This cannot be undone.
               </DialogDescription>
             </DialogHeader>

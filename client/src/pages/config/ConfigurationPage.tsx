@@ -112,13 +112,13 @@ export function ConfigurationPage() {
           {!selected ? (
             <>
               The global config applies to every repository. Repositories that do not follow it layer their own
-              overrides on top, and a <code>.bammy.yaml</code> in a repository still wins over both.
+              overrides on top, and a <code>.sentryward.yaml</code> in a repository still wins over both.
             </>
           ) : selected.followGlobal ? (
             "Only the global config applies. Overrides are kept for when you stop following it."
           ) : (
             <>
-              Overrides saved here sit on top of the global config and below a <code>.bammy.yaml</code> in the
+              Overrides saved here sit on top of the global config and below a <code>.sentryward.yaml</code> in the
               repository.
             </>
           )}

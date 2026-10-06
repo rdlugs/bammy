@@ -110,7 +110,7 @@ export function ReviewsPage() {
     <PageShell>
       <PageHeader
         title="Reviews"
-        description="Every review Bammy has run on your pull and merge requests."
+        description="Every review Sentryward has run on your pull and merge requests."
       />
       <ReviewStatsStrip />
       <FilterToolbar>

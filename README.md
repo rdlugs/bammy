@@ -1,16 +1,17 @@
-<p align="center">
-  <img src="client/public/bammy.svg" alt="Bammy logo" width="112" height="112">
-</p>
-
-<h1 align="center">Bammy</h1>
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="client/public/sentryward-logo-dark.png">
+    <img src="client/public/sentryward-logo-light.png" alt="Sentryward" width="360">
+  </picture>
+</h1>
 
 <p align="center">
   <b>Self-hosted AI code review for GitHub pull requests and GitLab merge requests.</b>
 </p>
 
 <p align="center">
-  <a href="https://github.com/rdlugs/bammy/actions/workflows/ci.yml"><img src="https://github.com/rdlugs/bammy/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/rdlugs/bammy/releases"><img src="https://img.shields.io/github/v/release/rdlugs/bammy?include_prereleases&label=release" alt="Latest release"></a>
+  <a href="https://github.com/rdlugs/sentryward/actions/workflows/ci.yml"><img src="https://github.com/rdlugs/sentryward/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/rdlugs/sentryward/releases"><img src="https://img.shields.io/github/v/release/rdlugs/sentryward?include_prereleases&label=release" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -19,16 +20,16 @@
   <a href="#how-it-works">How it works</a> ·
   <a href="#review-configuration">Configuration</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
-  <a href="https://github.com/rdlugs/bammy/discussions">Discussions</a>
+  <a href="https://github.com/rdlugs/sentryward/discussions">Discussions</a>
 </p>
 
-Bammy is an AI code reviewer for GitHub pull requests and GitLab merge requests.
+Sentryward is an AI code reviewer for GitHub pull requests and GitLab merge requests.
 Connect repositories, choose a model provider or Ollama, and run manual or
 automatic reviews with inline findings, walkthroughs, and commit statuses. The
 dashboard tracks reviews and findings across runs.
 
 > [!WARNING]
-> **Bammy is alpha software.** Features and configuration may evolve. AI findings
+> **Sentryward is alpha software.** Features and configuration may evolve. AI findings
 > need human verification and can miss problems or report false positives. The
 > included Docker setup is for development, not public production hosting.
 
@@ -39,7 +40,7 @@ dashboard tracks reviews and findings across runs.
 - [How it works](#how-it-works)
 - [Getting started](#getting-started): [runtime environment](#docker-runtime-environment), [users and invites](#users-and-invites), [workspaces and teams](#workspaces-and-teams), [first review](#run-your-first-review), [troubleshooting](#troubleshooting)
 - [Forge connections](#forge-connections), [publishing](#publishing-to-the-forge), [automatic reviews](#automatic-reviews)
-- [Review configuration](#review-configuration): [LLM connections](#llm-connections-and-custom-endpoints), [Ollama](#ollama), [`.bammy.yaml`](#bammyyaml-reference)
+- [Review configuration](#review-configuration): [LLM connections](#llm-connections-and-custom-endpoints), [Ollama](#ollama), [`.sentryward.yaml`](#sentrywardyaml-reference)
 - [API](#api)
 - [Development](#development)
 - [Contributing and license](#contributing-and-license)
@@ -51,11 +52,11 @@ dashboard tracks reviews and findings across runs.
   [Ollama](#ollama) model.
 - **GitHub and GitLab:** a GitHub App, plus GitLab.com or self-hosted GitLab.
 - **Reviews where you work:** inline findings with suggestions, one summary
-  comment, and a `bammy/review` commit status.
+  comment, and a `sentryward/review` commit status.
 - **Manual or automatic:** submit a PR/MR URL, review on webhooks, or comment
-  `/bammy review`.
+  `/sentryward review`.
 - **Per-repository config:** dashboard settings, overridable by a
-  [`.bammy.yaml`](#review-configuration) in the repository.
+  [`.sentryward.yaml`](#review-configuration) in the repository.
 - **Findings across runs:** a later run never posts the same finding twice.
   Ignore findings as false positives, intentional, or fix later, and track the
   false-positive rate on the dashboard.
@@ -65,7 +66,7 @@ dashboard tracks reviews and findings across runs.
 ## Quick start
 
 ```sh
-git clone https://github.com/rdlugs/bammy.git && cd bammy
+git clone https://github.com/rdlugs/sentryward.git && cd sentryward
 cp .env.example .env
 # set JWT_SECRET and ENCRYPTION_KEY in .env, each with: openssl rand -hex 32
 docker compose up --build
@@ -217,7 +218,7 @@ review or evidence of model accuracy.
 - **A model endpoint is unreachable:** inside Docker, `localhost` refers to the
   container. Use `host.docker.internal` for a service on the host and check its
   listen address and firewall.
-- **Database tests cannot find `bammy_test`:** the Postgres init script runs only
+- **Database tests cannot find `sentryward_test`:** the Postgres init script runs only
   when the database volume is first initialized. An older volume may need an
   operator-created test database. Do not delete a volume containing needed data.
 - **A review is failed or partial:** inspect its detail page and redacted
@@ -232,20 +233,20 @@ review or evidence of model accuracy.
 
 **GitHub**: create a GitHub App (Settings, Developer settings, GitHub Apps) and put its details in `.env`:
 
-- Setup URL: `http://localhost:5173/api/connections/github/callback`, with **Request user authorization (OAuth) during installation** checked. Bammy uses that OAuth code to confirm the installing user can actually access the installation.
+- Setup URL: `http://localhost:5173/api/connections/github/callback`, with **Request user authorization (OAuth) during installation** checked. Sentryward uses that OAuth code to confirm the installing user can actually access the installation.
 - Repository permissions: Pull requests (read and write), Contents (read), Commit statuses (read and write), Issues (read), Metadata (read). Issues is used for linked and related issues in the walkthrough; without it those parts are skipped with a warning.
 - Copy the App ID, slug, client ID, a client secret and a generated private key into the `GITHUB_APP_*` variables.
 - Webhook: URL `<API_PUBLIC_URL>/api/webhooks/github`, a secret in `GITHUB_WEBHOOK_SECRET`, and the events **Pull request**, **Issue comment** and **Installation**.
 
-GitLab automatic reviews need a project webhook, which Bammy registers when a repository is enabled at `API_PUBLIC_URL`. That takes **Maintainer** access; with only Developer access the repository is enabled for manual reviews and the dashboard says why automatic ones are off. GitLab must be able to reach `API_PUBLIC_URL`; for local development use a tunnel.
+GitLab automatic reviews need a project webhook, which Sentryward registers when a repository is enabled at `API_PUBLIC_URL`. That takes **Maintainer** access; with only Developer access the repository is enabled for manual reviews and the dashboard says why automatic ones are off. GitLab must be able to reach `API_PUBLIC_URL`; for local development use a tunnel.
 
 In production, self-hosted forge hosts must use https and resolve to public addresses.
 
 ## Publishing to the forge
 
-When a review starts, Bammy posts a "reviewing" summary comment and sets a pending `bammy/review` commit status. When it finishes it publishes, each step independently:
+When a review starts, Sentryward posts a "reviewing" summary comment and sets a pending `sentryward/review` commit status. When it finishes it publishes, each step independently:
 
-- **Inline comments** for actionable findings only (GitHub: one review posted as `COMMENT`, never approve or request changes; GitLab: one discussion per finding). Suggestions use each forge's suggestion syntax. Each comment carries a hidden fingerprint, so a later run never posts the same finding twice, even if Bammy's own records are lost.
+- **Inline comments** for actionable findings only (GitHub: one review posted as `COMMENT`, never approve or request changes; GitLab: one discussion per finding). Suggestions use each forge's suggestion syntax. Each comment carries a hidden fingerprint, so a later run never posts the same finding twice, even if Sentryward's own records are lost.
 - **The summary comment**, edited in place: the markdown served by `GET /api/reviews/:id/markdown`. One comment carries both what the change does (the walkthrough, when `output.walkthrough` is on) and what the review found. It ends with a line naming the commit, models and coverage, which `output.review_stats` turns off. With `output.post_summary` off, the walkthrough is posted as a comment of its own. `output.summary_location` is accepted but ignored, and a walkthrough block an earlier version wrote into the description is removed on the next review.
 - **The walkthrough's optional parts**, each with its own switch: the review effort estimate (`output.estimate_effort`), a Mermaid sequence diagram of the main flow (`output.sequence_diagrams`), an assessment of how well the change addresses the issues it closes (`output.assess_linked_issues`; "fixes #12" style references on GitHub, GitLab's own closing issues on GitLab) and possibly related issues found by searching the tracker for the title's keywords (`output.related_issues`). Only issues the forge returned are ever shown.
 - **The high-level summary** (`output.high_level_summary`): release notes by default, or whatever `output.high_level_summary_instructions` asks for. `output.high_level_summary_placement` puts it in the PR/MR description (the default, between hidden markers at the end, replaced on each run and never read back as the author's text) or in the walkthrough.
@@ -257,23 +258,23 @@ Turn the first three off with `output.post_inline`, `output.post_summary` and `o
 ## Automatic reviews
 
 - A PR/MR is reviewed when it opens, reopens, leaves draft or receives new commits. A commit that was already queued or reviewed is never reviewed again, so redelivered webhooks are harmless, and a newer push supersedes a review still waiting in the queue.
-- Comment `/bammy review` on a PR/MR to ask for a review of its current head. Only people who can push (GitHub owners, members and collaborators; GitLab Developer or above) can.
-- `triggers.review` picks what is reviewed automatically when it opens, reopens or leaves draft: `manual` (nothing), `published` (the default, drafts skipped) or `all`. `triggers.review_on_push` decides whether new commits are reviewed again, and `triggers.command` turns `/bammy review` off.
+- Comment `/sentryward review` on a PR/MR to ask for a review of its current head. Only people who can push (GitHub owners, members and collaborators; GitLab Developer or above) can.
+- `triggers.review` picks what is reviewed automatically when it opens, reopens or leaves draft: `manual` (nothing), `published` (the default, drafts skipped) or `all`. `triggers.review_on_push` decides whether new commits are reviewed again, and `triggers.command` turns `/sentryward review` off.
 - `triggers.summary` limits the walkthrough in automatic reviews: `published` (the default) or `manual`, which leaves it to requested reviews.
-- Automatic reviews are skipped when the title contains a phrase in `triggers.ignore_titles` (ignoring case), the author or whoever pushed is in `triggers.skip_authors`, the change carries a label in `triggers.skip_labels` (exact and case-sensitive), or the source or target branch name contains an entry of `triggers.skip_source_branches` / `triggers.skip_target_branches`. A manual review or `/bammy review` is never skipped by these lists.
+- Automatic reviews are skipped when the title contains a phrase in `triggers.ignore_titles` (ignoring case), the author or whoever pushed is in `triggers.skip_authors`, the change carries a label in `triggers.skip_labels` (exact and case-sensitive), or the source or target branch name contains an entry of `triggers.skip_source_branches` / `triggers.skip_target_branches`. A manual review or `/sentryward review` is never skipped by these lists.
 - All of this is checked by the worker with the full configuration, so a skipped review shows in the dashboard with the reason.
 - Older settings keep their meaning: `triggers.on_push: false` reads as `review: manual` and `triggers.drafts: true` as `review: all`, unless the same layer sets `review`.
 - Each workspace has at most `WORKER_USER_CONCURRENCY` reviews running at once (the name predates workspaces), and a repository holds at most 10 queued.
 - With `triggers.abort_on_close` (the default), closing or merging a PR/MR cancels its queued reviews, and a running review stops: the worker checks the change before it starts, every 15 seconds while it runs (aborting model calls in flight) and before publishing. A cancelled review publishes nothing and closes its pending commit status as `error`. The webhook decides on queued reviews from the dashboard settings; the worker uses the full configuration, repository file included.
 
-The worker keeps a small in-memory cache of what a commit fixes: the repository config file at the base revision and the change's diff for a given base and head. Reruns of the same head skip those forge calls; titles, descriptions, labels and state are always read fresh. `review.disable_cache` turns it off. Set in the dashboard it covers every read; set in `.bammy.yaml` the diff is fetched again once the file has been read.
+The worker keeps a small in-memory cache of what a commit fixes: the repository config file at the base revision and the change's diff for a given base and head. Reruns of the same head skip those forge calls; titles, descriptions, labels and state are always read fresh. `review.disable_cache` turns it off. Set in the dashboard it covers every read; set in `.sentryward.yaml` the diff is fetched again once the file has been read.
 
 ## Review configuration
 
 Settings resolve in this order, highest first:
 
 1. Overrides from whatever triggered the review
-2. `.bammy.yaml` (or `.bammy.yml`; the first found wins, they are not merged) in the repository, read from the PR's **base** revision so a change cannot loosen its own review
+2. `.sentryward.yaml` (or `.sentryward.yml`; the first found wins, they are not merged) in the repository, read from the PR's **base** revision so a change cannot loosen its own review
 3. Repository settings saved in the dashboard (ignored while the repository follows the global config, which is the default for new repositories)
 4. The global config saved on the Configuration page, shared by all of a user's repositories
 5. The selected profile: `balanced` (default), `fast`, `strict`, `security`
@@ -295,7 +296,7 @@ The worker runs in a container, where `localhost` is the container itself; `host
 
 Add Ollama under LLM Connections and enter its OpenAI-compatible base URL. For Ollama running on the Docker host, use `http://host.docker.internal:11434/v1`. The API key is optional. Select the Ollama connection in Configuration > LLM and use the `ollama/<model>` form, for example `ollama/qwen3`.
 
-### `.bammy.yaml` reference
+### `.sentryward.yaml` reference
 
 Every key is optional. Values shown are examples, not all defaults.
 
@@ -303,7 +304,7 @@ Every key is optional. Values shown are examples, not all defaults.
 <summary>Full example</summary>
 
 ```yaml
-# .bammy.yaml - every key is optional
+# .sentryward.yaml - every key is optional
 profile: balanced
 llm:
   model: anthropic/claude-sonnet-5-5   # provider/model: anthropic, openai or google
@@ -342,7 +343,7 @@ triggers:
   review: published         # manual | published | all (drafts too)
   review_on_push: true      # review new commits pushed to an open PR/MR
   summary: published        # manual | published: walkthrough in automatic reviews
-  command: true             # allow "/bammy review" in a comment
+  command: true             # allow "/sentryward review" in a comment
   abort_on_close: true      # stop a review when its PR/MR is closed or merged
   ignore_titles: ["WIP"]    # title contains, ignoring case
   skip_authors: ["dependabot[bot]"]
@@ -364,7 +365,7 @@ language_instructions:
 
 Endpoints that act on workspace data (connections, repositories, reviews,
 findings, global config and LLM keys) read the workspace id from the
-`x-bammy-workspace` header. Without it they use the caller's personal workspace,
+`x-sentryward-workspace` header. Without it they use the caller's personal workspace,
 so scripts written before workspaces keep working. Routes under
 `/api/workspaces/:id` name the workspace in the path instead.
 
@@ -392,7 +393,7 @@ so scripts written before workspaces keep working. Routes under
 | GET    | `/api/reviews/:id/markdown` | The review as the markdown document that is posted to the forge |
 | POST   | `/api/reviews/:id/rerun` | Queues a fresh review of the PR's latest head |
 | POST   | `/api/webhooks/github` | GitHub App webhook (signed with `GITHUB_WEBHOOK_SECRET`) |
-| POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Bammy registers per repository (token checked per repository) |
+| POST   | `/api/webhooks/gitlab/:repoId` | GitLab project hook Sentryward registers per repository (token checked per repository) |
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
 | GET    | `/api/config/global` | The workspace's global review config, and what it resolves to with each value's source |
 | PUT    | `/api/config/global` | Workspace admins: `{ settings }`, replaces the global review config; `{}` resets it |
@@ -409,7 +410,7 @@ so scripts written before workspaces keep working. Routes under
 | GET    | `/api/workspaces`    | The caller's workspaces with their role in each |
 | POST   | `/api/workspaces`    | `{ name }`, creates a team workspace owned by the caller |
 | PATCH  | `/api/workspaces/:id` | Owners: `{ name }`, renames a team |
-| DELETE | `/api/workspaces/:id` | Owners: deletes a team and everything in it, removing Bammy's forge hooks first |
+| DELETE | `/api/workspaces/:id` | Owners: deletes a team and everything in it, removing Sentryward's forge hooks first |
 | GET    | `/api/workspaces/:id/members` | Members with their role and join date |
 | POST   | `/api/workspaces/:id/members` | Team admins: `{ email, role? }`, adds an existing account as `admin` or `member` |
 | GET    | `/api/workspaces/:id/member-candidates` | Team admins: accounts not yet in the team, for the add-member picker |
@@ -446,7 +447,7 @@ Register, login, the registration mode and invite lookups are rate limited (20 r
 ### Tests
 
 ```sh
-docker compose exec server npm test   # API tests against the bammy_test database
+docker compose exec server npm test   # API tests against the sentryward_test database
 docker compose exec client npm test   # React component and routing tests
 ```
 
@@ -472,8 +473,8 @@ docker/   Postgres init script (creates the test database)
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [code of conduct](CODE_OF_CONDUCT.md), and look for
-[good first issues](https://github.com/rdlugs/bammy/labels/good%20first%20issue).
-Questions and ideas go to [Discussions](https://github.com/rdlugs/bammy/discussions).
+[good first issues](https://github.com/rdlugs/sentryward/labels/good%20first%20issue).
+Questions and ideas go to [Discussions](https://github.com/rdlugs/sentryward/discussions).
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md),
 which also covers deployment boundaries and how credentials are stored.
 Release notes are in the [changelog](CHANGELOG.md).

@@ -318,14 +318,14 @@ describe("GET /api/repos/:id/config", () => {
       },
     });
     const { fetch, calls } = fetchStub([
-      { url: /\/repository\/files\/\.bammy\.yaml\/raw\?ref=trunk$/, body: "profile: security\noutput:\n  post_check: false\n" },
+      { url: /\/repository\/files\/\.sentryward\.yaml\/raw\?ref=trunk$/, body: "profile: security\noutput:\n  post_check: false\n" },
     ]);
     vi.stubGlobal("fetch", fetch);
 
     const res = await request(app).get(`/api/repos/${repo.id}/config`).set("Cookie", cookie);
 
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ ref: "trunk", repoFile: ".bammy.yaml", warnings: [] });
+    expect(res.body).toMatchObject({ ref: "trunk", repoFile: ".sentryward.yaml", warnings: [] });
     expect(res.body.config.profile).toBe("security");
     expect(res.body.config.review.maxFindings).toBe(10);
     expect(res.body.config.output.postCheck).toBe(false);
@@ -534,7 +534,7 @@ describe("GitLab webhooks follow the enabled switch", () => {
     const hookCall = calls.find((c) => c.method === "POST")!;
     const hook = JSON.parse(hookCall.body!);
     expect(hook).toMatchObject({
-      url: `https://bammy.example.com/api/webhooks/gitlab/${enabled.body.repo.id}`,
+      url: `https://sentryward.example.com/api/webhooks/gitlab/${enabled.body.repo.id}`,
       merge_requests_events: true,
       note_events: true,
       push_events: false,
@@ -600,7 +600,7 @@ describe("GitHub token connections get their own repository hook", () => {
 
     expect(enabled.body.webhook).toEqual({ active: true });
     const hook = JSON.parse(calls.find((c) => c.method === "POST")!.body!);
-    expect(hook.config.url).toBe(`https://bammy.example.com/api/webhooks/github/${enabled.body.repo.id}`);
+    expect(hook.config.url).toBe(`https://sentryward.example.com/api/webhooks/github/${enabled.body.repo.id}`);
     const stored = await prisma.repository.findUniqueOrThrow({ where: { id: enabled.body.repo.id } });
     expect(stored.webhookId).toBe("616");
     expect(decrypt(stored.encryptedWebhookSecret!)).toBe(hook.config.secret);

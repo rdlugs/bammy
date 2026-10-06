@@ -9,6 +9,6 @@ export async function assertAnotherAdminRemains(tx: Prisma.TransactionClient, us
     SELECT id FROM users WHERE role = 'admin' ORDER BY id FOR UPDATE
   `;
   if (admins.some((admin) => admin.id === userId) && admins.length === 1) {
-    throw new HttpError(409, "Bammy needs at least one admin; make someone else an admin first");
+    throw new HttpError(409, "Sentryward needs at least one admin; make someone else an admin first");
   }
 }

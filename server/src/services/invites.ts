@@ -71,10 +71,10 @@ async function sendInviteEmail(input: {
   const { to, link, inviterName, workspace } = input;
   await mailer.send({
     to,
-    subject: workspace ? `Join ${workspace.name} on Bammy` : "You're invited to Bammy",
+    subject: workspace ? `Join ${workspace.name} on Sentryward` : "You're invited to Sentryward",
     text: workspace
-      ? `${inviterName} invited you to the ${workspace.name} workspace on Bammy.\n\nJoin: ${link}\n\nThis link expires in 7 days.`
-      : `${inviterName} invited you to Bammy.\n\nCreate your account: ${link}\n\nThis link expires in 7 days.`,
+      ? `${inviterName} invited you to the ${workspace.name} workspace on Sentryward.\n\nJoin: ${link}\n\nThis link expires in 7 days.`
+      : `${inviterName} invited you to Sentryward.\n\nCreate your account: ${link}\n\nThis link expires in 7 days.`,
   });
 }
 

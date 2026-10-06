@@ -36,10 +36,10 @@ async function admitRegistration(
   }
   if (invite) assertInviteEmail(invite, email);
   if (env.REGISTRATION_MODE === "closed") {
-    throw new HttpError(403, "Registration is closed on this Bammy instance");
+    throw new HttpError(403, "Registration is closed on this Sentryward instance");
   }
   if (env.REGISTRATION_MODE === "invite" && !invite) {
-    throw new HttpError(403, "An invite is required to register on this Bammy instance");
+    throw new HttpError(403, "An invite is required to register on this Sentryward instance");
   }
   return invite;
 }

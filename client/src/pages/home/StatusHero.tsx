@@ -16,7 +16,7 @@ function heroState(connections: number, enabledRepos: number, manualOnly: boolea
   if (connections === 0) {
     return {
       title: "Connect a Git provider",
-      text: "Connect GitHub or GitLab so Bammy can review your pull requests.",
+      text: "Connect GitHub or GitLab so Sentryward can review your pull requests.",
       action: { label: "Connect a provider", to: "/repositories?tab=installation" },
     }
   }
@@ -30,7 +30,7 @@ function heroState(connections: number, enabledRepos: number, manualOnly: boolea
   if (manualOnly) {
     return {
       title: "Automatic reviews are off",
-      text: "Only reviews you request run: comment /bammy review on a pull request or start one here.",
+      text: "Only reviews you request run: comment /sentryward review on a pull request or start one here.",
       action: { label: "Configure reviews", to: "/configuration" },
     }
   }

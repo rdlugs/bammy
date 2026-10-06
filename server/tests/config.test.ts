@@ -187,7 +187,7 @@ describe("legacy trigger settings", () => {
 describe("parseRepoFile", () => {
   it("maps snake_case YAML onto the schema, leaving language names alone", () => {
     const { override, warnings } = parseRepoFile(
-      ".bammy.yaml",
+      ".sentryward.yaml",
       [
         "profile: strict",
         "review:",
@@ -212,7 +212,7 @@ describe("parseRepoFile", () => {
   });
 
   it("reads the triggers section", () => {
-    const { override, warnings } = parseRepoFile(".bammy.yaml", "triggers:\n  on_push: false\n  drafts: true\n");
+    const { override, warnings } = parseRepoFile(".sentryward.yaml", "triggers:\n  on_push: false\n  drafts: true\n");
     expect(warnings).toEqual([]);
     expect(override).toEqual({ triggers: { onPush: false, drafts: true } });
   });
@@ -237,7 +237,7 @@ describe("parseRepoFile", () => {
       "  agent_prompt_all: true",
       "",
     ].join("\n");
-    const { override, warnings } = parseRepoFile(".bammy.yaml", yaml);
+    const { override, warnings } = parseRepoFile(".sentryward.yaml", yaml);
     expect(warnings).toEqual([]);
     expect(override).toEqual({
       triggers: {
@@ -262,21 +262,21 @@ describe("parseRepoFile", () => {
   });
 
     it("treats an empty file as no overrides", () => {
-    expect(parseRepoFile(".bammy.yaml", "# nothing yet\n")).toEqual({ override: {}, warnings: [] });
+    expect(parseRepoFile(".sentryward.yaml", "# nothing yet\n")).toEqual({ override: {}, warnings: [] });
   });
 
   it("ignores the whole file and names an unknown setting in snake_case", () => {
     const { override, warnings } = parseRepoFile(
-      ".bammy.yaml",
+      ".sentryward.yaml",
       "review:\n  max_findings: 5\n  severity_flor: major\n",
     );
     expect(override).toBeUndefined();
-    expect(warnings).toEqual([".bammy.yaml was ignored: review: unknown setting severity_flor"]);
+    expect(warnings).toEqual([".sentryward.yaml was ignored: review: unknown setting severity_flor"]);
   });
 
   it("refuses credentials and endpoints, which the schema does not have", () => {
     const { override, warnings } = parseRepoFile(
-      ".bammy.yaml",
+      ".sentryward.yaml",
       "llm:\n  api_base: https://evil.example\n  api_keys:\n    anthropic: sk\n",
     );
     expect(override).toBeUndefined();
@@ -285,7 +285,7 @@ describe("parseRepoFile", () => {
 
   it("refuses the endpoint and key choice, which only the dashboard may set", () => {
     const { override, warnings } = parseRepoFile(
-      ".bammy.yaml",
+      ".sentryward.yaml",
       "llm:\n  base_url: https://evil.example\n  endpoint_key: openai\n",
     );
     expect(override).toBeUndefined();
@@ -293,22 +293,22 @@ describe("parseRepoFile", () => {
   });
 
   it("reports an invalid value with its path", () => {
-    const { warnings } = parseRepoFile(".bammy.yaml", "review:\n  block_on: blocker\n");
-    expect(warnings[0]).toMatch(/^\.bammy\.yaml was ignored: review\.block_on: /);
+    const { warnings } = parseRepoFile(".sentryward.yaml", "review:\n  block_on: blocker\n");
+    expect(warnings[0]).toMatch(/^\.sentryward\.yaml was ignored: review\.block_on: /);
   });
 
   it("reports unparseable YAML", () => {
-    const { override, warnings } = parseRepoFile(".bammy.yaml", "review: [unclosed\n");
+    const { override, warnings } = parseRepoFile(".sentryward.yaml", "review: [unclosed\n");
     expect(override).toBeUndefined();
     expect(warnings[0]).toMatch(/could not be parsed/);
   });
 
   it("rejects a non-mapping document", () => {
-    expect(parseRepoFile(".bammy.yaml", "- a\n- b\n").warnings[0]).toMatch(/must be a mapping/);
+    expect(parseRepoFile(".sentryward.yaml", "- a\n- b\n").warnings[0]).toMatch(/must be a mapping/);
   });
 
   it("rejects an oversized file without parsing it", () => {
-    const { warnings } = parseRepoFile(".bammy.yaml", `instructions: "${"x".repeat(70 * 1024)}"`);
+    const { warnings } = parseRepoFile(".sentryward.yaml", `instructions: "${"x".repeat(70 * 1024)}"`);
     expect(warnings[0]).toMatch(/larger than 64 KB/);
   });
 });
@@ -328,19 +328,19 @@ function fakeAdapter(files: Record<string, string>) {
 describe("loadReviewConfig", () => {
   it("reads the repository file from the given (base) revision only", async () => {
     const { adapter, reads } = fakeAdapter({
-      "base:.bammy.yaml": "review:\n  block_on: major\n",
-      "head:.bammy.yaml": "review:\n  block_on: info\n",
+      "base:.sentryward.yaml": "review:\n  block_on: major\n",
+      "head:.sentryward.yaml": "review:\n  block_on: info\n",
     });
 
     const loaded = await loadReviewConfig({ adapter, project: "acme/web", ref: "base" });
 
     expect(loaded.config.review.blockOn).toBe("major");
-    expect(loaded.repoFile).toBe(".bammy.yaml");
-    expect(reads).toEqual(["base:.bammy.yaml"]);
+    expect(loaded.repoFile).toBe(".sentryward.yaml");
+    expect(reads).toEqual(["base:.sentryward.yaml"]);
   });
 
   it("ignores a file that only exists on the head", async () => {
-    const { adapter } = fakeAdapter({ "head:.bammy.yaml": "review:\n  block_on: info\n" });
+    const { adapter } = fakeAdapter({ "head:.sentryward.yaml": "review:\n  block_on: info\n" });
 
     const loaded = await loadReviewConfig({ adapter, project: "acme/web", ref: "base" });
 
@@ -348,18 +348,18 @@ describe("loadReviewConfig", () => {
     expect(loaded.repoFile).toBeNull();
   });
 
-  it("falls back to .bammy.yml and never merges the two", async () => {
-    const { adapter, reads } = fakeAdapter({ "base:.bammy.yml": "profile: fast\n" });
+  it("falls back to .sentryward.yml and never merges the two", async () => {
+    const { adapter, reads } = fakeAdapter({ "base:.sentryward.yml": "profile: fast\n" });
 
     const loaded = await loadReviewConfig({ adapter, project: "acme/web", ref: "base" });
 
-    expect(loaded.repoFile).toBe(".bammy.yml");
+    expect(loaded.repoFile).toBe(".sentryward.yml");
     expect(loaded.config.profile).toBe("fast");
-    expect(reads).toEqual(["base:.bammy.yaml", "base:.bammy.yml"]);
+    expect(reads).toEqual(["base:.sentryward.yaml", "base:.sentryward.yml"]);
   });
 
   it("keeps reviewing with a warning when the file is invalid", async () => {
-    const { adapter } = fakeAdapter({ "base:.bammy.yaml": "review:\n  nope: 1\n" });
+    const { adapter } = fakeAdapter({ "base:.sentryward.yaml": "review:\n  nope: 1\n" });
 
     const loaded = await loadReviewConfig({
       adapter,
@@ -369,7 +369,7 @@ describe("loadReviewConfig", () => {
     });
 
     expect(loaded.config.review.maxFindings).toBe(7);
-    expect(loaded.warnings).toEqual([".bammy.yaml was ignored: review: unknown setting nope"]);
+    expect(loaded.warnings).toEqual([".sentryward.yaml was ignored: review: unknown setting nope"]);
   });
 
   it("ignores saved settings that no longer validate", async () => {

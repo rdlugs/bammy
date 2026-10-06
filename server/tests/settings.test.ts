@@ -415,7 +415,7 @@ describe("DELETE /api/settings/account", () => {
     const res = await request(app).delete("/api/settings/account").set("Cookie", cookie).send({ password: PASSWORD });
 
     expect(res.status).toBe(204);
-    expect(res.headers["set-cookie"]?.[0]).toMatch(/bammy_token=;/);
+    expect(res.headers["set-cookie"]?.[0]).toMatch(/sentryward_token=;/);
     expect(await prisma.user.count({ where: { id: userId } })).toBe(0);
     expect(await prisma.llmCredential.count({ where: { workspaceId } })).toBe(0);
     expect(await prisma.forgeConnection.count({ where: { workspaceId } })).toBe(0);

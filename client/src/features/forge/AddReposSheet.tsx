@@ -31,7 +31,7 @@ export function AddReposSheet({ connections, open, onOpenChange }: Props) {
       <SheetContent className="data-[side=right]:sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>Add repositories</SheetTitle>
-          <SheetDescription>Choose which repositories Bammy should review.</SheetDescription>
+          <SheetDescription>Choose which repositories Sentryward should review.</SheetDescription>
         </SheetHeader>
         {/* Mounted only while open, so the account and selection start fresh each time. */}
         {open && <AccountPicker connections={connections} onDone={() => onOpenChange(false)} />}

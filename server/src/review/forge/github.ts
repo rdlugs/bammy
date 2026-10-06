@@ -24,7 +24,7 @@ import {
 export interface GitHubAdapterOptions {
   host: string;
   token: () => Promise<string>;
-  // The login Bammy posts as (an app's is "<slug>[bot]"), used to find its own
+  // The login Sentryward posts as (an app's is "<slug>[bot]"), used to find its own
   // comments again.
   selfLogin?: string;
   // App installations have no user; their account comes from the installation.
@@ -295,7 +295,7 @@ export class GitHubAdapter implements ForgeAdapter, ForgePublisher, ForgeHooks {
     return Boolean(this.options.selfLogin) && comment.user?.login === this.options.selfLogin;
   }
 
-  // One review carries every inline comment, posted as COMMENT: Bammy never
+  // One review carries every inline comment, posted as COMMENT: Sentryward never
   // approves or requests changes. If GitHub rejects the batch (one bad anchor
   // fails the whole request), each comment is retried on its own so one
   // problem does not lose the rest.

@@ -33,9 +33,9 @@ export interface ProviderDefinition {
   // Whether this server has an app install flow configured for the forge.
   appAvailable?(): boolean;
   // The webhook state when this connection's events arrive through an app, or
-  // null when Bammy registers a hook on each repository instead.
+  // null when Sentryward registers a hook on each repository instead.
   appWebhook?(connection: ForgeConnection): WebhookState | null;
-  // A hook Bammy registered on one repository.
+  // A hook Sentryward registered on one repository.
   repoWebhook: {
     verify(header: HeaderReader, raw: Buffer, secret: string): boolean;
     handle(repo: RepoWithConnection, header: HeaderReader, raw: Buffer): Promise<WebhookOutcome>;

@@ -1,7 +1,7 @@
 {
-  "name": "bammy-server",
+  "name": "sentryward-server",
   "version": "0.1.0-alpha.2",
-  "description": "Bammy API",
+  "description": "Sentryward API",
   "directories": {
     "test": "tests"
   },

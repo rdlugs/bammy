@@ -16,7 +16,7 @@ export function InvitePage() {
   const accept = useAcceptInvite(token)
 
   const team = invite?.workspace ?? null
-  let title = "You're invited to Bammy"
+  let title = "You're invited to Sentryward"
   let description: string
   if (isLoading) {
     description = "Checking your invite…"

@@ -17,13 +17,13 @@ describe("ForgeMarkdown", () => {
   it("renders GitHub-flavoured markdown and raw details, and hides HTML comments", () => {
     const { container } = render(
       <ForgeMarkdown provider="github">
-        {"## Title\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n<details>\n<summary>More</summary>\n\nInside\n\n</details>\n\n<!-- bammy:summary -->\n"}
+        {"## Title\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n<details>\n<summary>More</summary>\n\nInside\n\n</details>\n\n<!-- sentryward:summary -->\n"}
       </ForgeMarkdown>,
     )
     expect(screen.getByRole("heading", { name: "Title" })).toBeInTheDocument()
     expect(screen.getByRole("table")).toBeInTheDocument()
     expect(container.querySelector("details summary")).toHaveTextContent("More")
-    expect(container).not.toHaveTextContent("bammy:summary")
+    expect(container).not.toHaveTextContent("sentryward:summary")
   })
 
   it("draws a suggestion block as the forge's suggested change, with the replaced lines", () => {

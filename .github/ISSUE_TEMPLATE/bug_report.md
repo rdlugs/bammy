@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a reproducible problem in Bammy
+about: Report a reproducible problem in Sentryward
 title: ""
 labels: ""
 assignees: ""
@@ -21,7 +21,7 @@ Describe what happened and what you expected.
 
 ## Environment
 
-- Bammy commit or version:
+- Sentryward commit or version:
 - OS and Docker/Compose versions:
 - Forge and model provider (no credentials):
 - NODE_ENV and relevant non-secret settings:

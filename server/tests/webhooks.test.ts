@@ -213,7 +213,7 @@ describe("POST /api/webhooks/github", () => {
     expect(jobs[0]!.repositoryId).toBe(first.id);
   });
 
-  const commentEvent = (association: string, body = "Looks odd.\n/bammy review please") => ({
+  const commentEvent = (association: string, body = "Looks odd.\n/sentryward review please") => ({
     action: "created",
     installation: { id: 55 },
     repository: { id: 900 },
@@ -221,7 +221,7 @@ describe("POST /api/webhooks/github", () => {
     comment: { body, author_association: association },
   });
 
-  it("queues a review for /bammy review from a collaborator at the current head", async () => {
+  it("queues a review for /sentryward review from a collaborator at the current head", async () => {
     await githubRepo();
     vi.stubGlobal(
       "fetch",
@@ -373,7 +373,7 @@ describe("POST /api/webhooks/gitlab/:repoId", () => {
     ]);
   });
 
-  const noteEvent = { object_kind: "note", user: { id: 5 }, object_attributes: { noteable_type: "MergeRequest", note: "/bammy review" }, merge_request: { iid: 7, last_commit: { id: "glsha" } } };
+  const noteEvent = { object_kind: "note", user: { id: 5 }, object_attributes: { noteable_type: "MergeRequest", note: "/sentryward review" }, merge_request: { iid: 7, last_commit: { id: "glsha" } } };
 
   it("accepts the command from a developer and refuses a reporter", async () => {
     const repo = await gitlabRepo();

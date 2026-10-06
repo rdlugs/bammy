@@ -9,8 +9,8 @@ export function AuthLayout({ children }: { children: ReactNode }) {
       </div>
       <div className="flex w-full max-w-md flex-col gap-6">
         <div className="flex items-center gap-2.5 self-center text-lg font-semibold tracking-tight">
-          <img src="/bammy.svg" alt="" className="size-8 rounded-lg" />
-          Bammy
+          <img src="/sentryward-192.png" alt="" className="size-8" />
+          Sentryward
         </div>
         {children}
       </div>

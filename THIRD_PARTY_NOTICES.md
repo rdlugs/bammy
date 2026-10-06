@@ -1,6 +1,6 @@
 # Third-party notices
 
-Bammy's original code and branding assets are covered by [MIT](LICENSE).
+Sentryward's original code and branding assets are covered by [MIT](LICENSE).
 Third-party code, fonts, and icons retain their own licenses. Dependency license
 files are distributed in the installed packages; preserve them when redistributing
 those packages or their assets.
@@ -11,7 +11,7 @@ those packages or their assets.
   when distributing its icons.
 - The Geist font supplied by `@fontsource-variable/geist` is under the SIL Open
   Font License 1.1. Preserve its license when distributing the font; it is not
-  relicensed under Bammy's MIT license.
+  relicensed under Sentryward's MIT license.
 - [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html)
   provides the code of conduct and its attribution links.
 

@@ -35,7 +35,7 @@ describe("walkthrough settings", () => {
     expect(review.disableCache).toBe(false);
 
     const file = parseRepoFile(
-      ".bammy.yaml",
+      ".sentryward.yaml",
       "output:\n  sequence_diagrams: false\n  high_level_summary_placement: walkthrough\n  high_level_summary_instructions: Bullets only\ntriggers:\n  abort_on_close: false\nreview:\n  disable_cache: true\n",
     );
     expect(file.warnings).toEqual([]);
@@ -92,7 +92,7 @@ describe("ForgeCache", () => {
 });
 
 describe("description summary block", () => {
-  const block = "<!-- bammy:summary:start -->\nnotes\n<!-- bammy:summary:end -->";
+  const block = "<!-- sentryward:summary:start -->\nnotes\n<!-- sentryward:summary:end -->";
 
   it("writes, replaces, keeps and removes the block", () => {
     const written = withDescriptionSummary("Closes #1", block);
@@ -108,7 +108,7 @@ describe("description summary block", () => {
   });
 
   it("still clears the old walkthrough block", () => {
-    const legacy = "Text\n\n<!-- bammy:walkthrough:start -->\nold\n<!-- bammy:walkthrough:end -->";
+    const legacy = "Text\n\n<!-- sentryward:walkthrough:start -->\nold\n<!-- sentryward:walkthrough:end -->";
     expect(withDescriptionSummary(legacy, null)).toBe("Text");
     expect(withDescriptionSummary("Text", null)).toBe("Text");
   });

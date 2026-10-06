@@ -24,7 +24,7 @@ export const result: ReviewResult = {
   schemaVersion: 1,
   status: "completed",
   errors: [],
-  warnings: [".bammy.yaml was ignored: review: unknown setting nope"],
+  warnings: [".sentryward.yaml was ignored: review: unknown setting nope"],
   change: {
     provider: "github",
     host: "github.com",

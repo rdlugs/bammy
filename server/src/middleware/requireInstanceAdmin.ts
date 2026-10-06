@@ -10,7 +10,7 @@ export async function requireInstanceAdmin(req: Request, _res: Response, next: N
     throw new HttpError(401, "Not authenticated");
   }
   if (user.role !== "admin") {
-    throw new HttpError(403, "Only Bammy admins can do this");
+    throw new HttpError(403, "Only Sentryward admins can do this");
   }
   next();
 }

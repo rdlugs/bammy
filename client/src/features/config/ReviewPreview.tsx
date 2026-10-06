@@ -27,7 +27,7 @@ import { ForgeMarkdown } from "./ForgeMarkdown"
 // What a review posts with the settings in the form, drawn as the PR/MR page
 // it lands on. The content is not mocked here: the server runs the real
 // pipeline and renderers on a sample change (server/src/review/preview), so
-// every word matches what Bammy would post.
+// every word matches what Sentryward would post.
 
 type Inline = PreviewPublication["inline"][number]
 type Status = NonNullable<PreviewPublication["status"]>
@@ -153,14 +153,14 @@ function StatusRow(props: { provider: ForgeProvider; status: Status }) {
       <Icon className={cn("size-4 shrink-0", state === "success" ? "text-green-600" : "text-destructive")} />
       {github ? (
         <>
-          <code className="text-xs font-semibold">bammy/review</code>
+          <code className="text-xs font-semibold">sentryward/review</code>
           <span className="text-muted-foreground">
             {STATUS_TEXT.github[state]}: {props.status.description}
           </span>
         </>
       ) : (
         <span className="text-muted-foreground">
-          External status <code className="text-xs font-semibold text-foreground">bammy/review</code>{" "}
+          External status <code className="text-xs font-semibold text-foreground">sentryward/review</code>{" "}
           {STATUS_TEXT.gitlab[state]}: {props.status.description}
         </span>
       )}
@@ -240,20 +240,20 @@ function ForgePage({ preview, view }: { preview: PreviewPublication; view: View 
       <div className="flex flex-col gap-3">
         <PageHeader preview={preview} />
         {!example ? (
-          <NothingPosted>Bammy posts no inline comments on the diff.</NothingPosted>
+          <NothingPosted>Sentryward posts no inline comments on the diff.</NothingPosted>
         ) : (
           <>
             <Note
               provider={provider}
               label="Inline comments"
-              author="bammy"
+              author="sentryward"
               bot
               action={github ? "reviewed" : "started a thread on the diff"}
             >
               <InlineThread provider={provider} comment={example} />
             </Note>
             <p className="text-xs text-muted-foreground">
-              One example. Bammy posts a thread like this for each finding on the diff.
+              One example. Sentryward posts a thread like this for each finding on the diff.
             </p>
           </>
         )}
@@ -267,20 +267,20 @@ function ForgePage({ preview, view }: { preview: PreviewPublication; view: View 
       <PageHeader preview={preview} />
       {/* GitLab shows the status in the merge request widget, above the activity. */}
       {!github && preview.status && <StatusRow provider={provider} status={preview.status} />}
-      {/* The author's text, with the high-level summary when Bammy writes it there. */}
+      {/* The author's text, with the high-level summary when Sentryward writes it there. */}
       {pr.description && (
         <Note provider={provider} label="Description" author={pr.author} action={github ? "opened this pull request" : "created this merge request"}>
           <ForgeMarkdown provider={provider}>{pr.description}</ForgeMarkdown>
         </Note>
       )}
-      {nothing && <NothingPosted>Bammy posts no summary to the change. Reviews still show up in the dashboard.</NothingPosted>}
+      {nothing && <NothingPosted>Sentryward posts no summary to the change. Reviews still show up in the dashboard.</NothingPosted>}
       {preview.summaryComment && (
-        <Note provider={provider} label="Summary comment" author="bammy" bot action="commented">
+        <Note provider={provider} label="Summary comment" author="sentryward" bot action="commented">
           <ForgeMarkdown provider={provider}>{preview.summaryComment}</ForgeMarkdown>
         </Note>
       )}
       {preview.walkthroughComment && (
-        <Note provider={provider} label="PR summary comment" author="bammy" bot action="commented">
+        <Note provider={provider} label="PR summary comment" author="sentryward" bot action="commented">
           <ForgeMarkdown provider={provider}>{preview.walkthroughComment}</ForgeMarkdown>
         </Note>
       )}

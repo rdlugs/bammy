@@ -36,7 +36,7 @@ export function LoginPage() {
       <Card>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Welcome back</CardTitle>
-          <CardDescription>Log in to your Bammy account</CardDescription>
+          <CardDescription>Log in to your Sentryward account</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={form.handleSubmit(onSubmit)} noValidate>

@@ -12,12 +12,12 @@ export default defineConfig({
     env: {
       GITHUB_HOST: "github.com",
       GITHUB_APP_ID: "123",
-      GITHUB_APP_SLUG: "bammy-test",
+      GITHUB_APP_SLUG: "sentryward-test",
       GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
       GITHUB_APP_CLIENT_ID: "client-id",
       GITHUB_APP_CLIENT_SECRET: "client-secret",
       GITHUB_WEBHOOK_SECRET: "webhook-secret",
-      API_PUBLIC_URL: "https://bammy.example.com",
+      API_PUBLIC_URL: "https://sentryward.example.com",
     },
   },
 });

@@ -60,7 +60,7 @@ export function RegisterPage() {
       return (
         <RegistrationUnavailable
           title="Registration is closed"
-          description="This Bammy instance is not accepting new accounts. Ask an admin for access."
+          description="This Sentryward instance is not accepting new accounts. Ask an admin for access."
         />
       )
     }
@@ -68,7 +68,7 @@ export function RegisterPage() {
       return (
         <RegistrationUnavailable
           title="Invite required"
-          description="Accounts on this Bammy instance are created from invite links. Ask an admin to invite you."
+          description="Accounts on this Sentryward instance are created from invite links. Ask an admin to invite you."
         />
       )
     }
@@ -80,7 +80,7 @@ export function RegisterPage() {
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Create an account</CardTitle>
           <CardDescription>
-            {registration?.firstUser ? "You are the first user, so you will be this instance's admin" : "Get started with Bammy"}
+            {registration?.firstUser ? "You are the first user, so you will be this instance's admin" : "Get started with Sentryward"}
           </CardDescription>
         </CardHeader>
         <CardContent>

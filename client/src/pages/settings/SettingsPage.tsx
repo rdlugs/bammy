@@ -56,7 +56,7 @@ export function SettingsPage() {
         </TabsList>
         <TabsContent value="profile">
           <div className="flex flex-col gap-6">
-            <Section title="Profile picture" description="Shown next to your name across Bammy.">
+            <Section title="Profile picture" description="Shown next to your name across Sentryward.">
               <AvatarForm user={user} />
             </Section>
             <Section title="Profile" description="Your name and the email you sign in with.">

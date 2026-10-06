@@ -144,7 +144,7 @@ describe("POST /api/connections/github", () => {
 });
 
 describe("POST /api/connections/:provider", () => {
-  it("404s for a provider Bammy does not know", async () => {
+  it("404s for a provider Sentryward does not know", async () => {
     const res = await request(app).post("/api/connections/bitbucket").set("Cookie", cookie).send({ token: "x" });
     expect(res.status).toBe(404);
   });
@@ -340,7 +340,7 @@ describe("GitHub App installation", () => {
 
     expect(res.status).toBe(302);
     const location = new URL(res.headers.location!);
-    expect(location.origin + location.pathname).toBe("https://github.com/apps/bammy-test/installations/new");
+    expect(location.origin + location.pathname).toBe("https://github.com/apps/sentryward-test/installations/new");
     expect(jwt.verify(location.searchParams.get("state")!, env.JWT_SECRET)).toMatchObject({ sub: userId, workspaceId });
   });
 

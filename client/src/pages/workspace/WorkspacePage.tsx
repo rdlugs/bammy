@@ -400,7 +400,7 @@ function AddMemberDialog({ workspace }: { workspace: Workspace }) {
           <DialogHeader>
             <DialogTitle>Add a member to {workspace.name}</DialogTitle>
             <DialogDescription>
-              Adds someone who already has a Bammy account. They get access right away. To bring in someone new, send
+              Adds someone who already has a Sentryward account. They get access right away. To bring in someone new, send
               an invite instead.
             </DialogDescription>
           </DialogHeader>

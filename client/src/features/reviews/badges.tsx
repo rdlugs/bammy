@@ -44,7 +44,7 @@ export function StatusBadge({ status, reason }: { status: JobStatus; reason?: st
 const TRIGGER = {
   manual: { label: "Started from the dashboard", icon: MousePointerClick },
   webhook: { label: "Started by a push or a new pull request", icon: Webhook },
-  comment: { label: "Started by a /bammy review comment", icon: MessageSquare },
+  comment: { label: "Started by a /sentryward review comment", icon: MessageSquare },
 } satisfies Record<Trigger, { label: string; icon: unknown }>
 
 export function TriggerIcon({ trigger }: { trigger: Trigger }) {
