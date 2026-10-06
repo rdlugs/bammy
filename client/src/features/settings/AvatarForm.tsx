@@ -1,4 +1,4 @@
-import { useRef, type ChangeEvent } from "react"
+import { useRef, useState, type ChangeEvent } from "react"
 import { ImageUp, Loader2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { UserAvatar } from "@/components/UserAvatar"
@@ -11,18 +11,25 @@ export function AvatarForm({ user }: { user: User }) {
   const input = useRef<HTMLInputElement>(null)
   const upload = useUploadAvatar()
   const remove = useRemoveAvatar()
-  const busy = upload.isPending || remove.isPending
+  // Conversion runs in the browser before the upload; it counts as busy too, so
+  // Remove and a second pick stay disabled from selection through to the end.
+  const [converting, setConverting] = useState(false)
+  const busy = converting || upload.isPending || remove.isPending
 
   async function onPick(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     // Cleared so picking the same file again still fires a change.
     event.target.value = ""
     if (!file) return
+    setConverting(true)
     try {
-      await upload.mutateAsync(await toAvatarJpeg(file))
+      const image = await toAvatarJpeg(file)
+      await upload.mutateAsync(image)
       toast.success("Profile picture updated")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update the picture")
+    } finally {
+      setConverting(false)
     }
   }
 
@@ -41,7 +48,7 @@ export function AvatarForm({ user }: { user: User }) {
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => input.current?.click()}>
-            {upload.isPending ? <Loader2 className="animate-spin" /> : <ImageUp />}
+            {converting || upload.isPending ? <Loader2 className="animate-spin" /> : <ImageUp />}
             Upload picture
           </Button>
           {user.avatarUpdatedAt && (

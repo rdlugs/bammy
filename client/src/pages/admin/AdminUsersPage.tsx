@@ -309,8 +309,8 @@ function RemoveUserDialog({ user, onOpenChange }: { user: User | null; onOpenCha
             <DialogHeader>
               <DialogTitle>Remove {user.name}?</DialogTitle>
               <DialogDescription>
-                This deletes {user.email} along with their connections, repositories, review history and API keys. It
-                cannot be undone.
+                This deletes {user.email} along with their personal connections, repositories, review history and API
+                keys. Data in teams they belong to stays, and ownership passes to another member. It cannot be undone.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -388,7 +388,7 @@ function UsersCard({ currentUserId }: { currentUserId: string }) {
       <Card>
         <CardHeader>
           <CardTitle>Users</CardTitle>
-          <CardDescription>Admins can manage users and invites. Everyone's repositories stay private to them.</CardDescription>
+          <CardDescription>Admins can manage users and invites. Personal data stays private to each user; team data is shared with that team's members.</CardDescription>
         </CardHeader>
         <CardContent>
           {isPending ? (

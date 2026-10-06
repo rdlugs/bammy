@@ -21,7 +21,15 @@ export const mailer = {
     if (!env.SMTP_URL) {
       throw new Error("SMTP is not configured");
     }
-    transport ??= nodemailer.createTransport(env.SMTP_URL);
+    // Short timeouts so an unresponsive SMTP host fails fast and the callers'
+    // fallbacks (createInvite still returns the link, resendInvite reports the
+    // failure) are reached promptly instead of waiting on nodemailer's minutes.
+    transport ??= nodemailer.createTransport({
+      url: env.SMTP_URL,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 10_000,
+    });
     await transport.sendMail({ from: env.MAIL_FROM, ...mail });
   },
 };

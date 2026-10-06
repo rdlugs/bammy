@@ -5,8 +5,16 @@ import { AuthContext, type Session, type User, type Workspace } from "./auth-con
 import type { LoginInput, RegisterInput } from "./schemas"
 
 const ME_QUERY_KEY = ["auth", "me"] as const
-const WORKSPACES_QUERY_KEY = ["auth", "workspaces"] as const
+export const WORKSPACES_QUERY_KEY = ["auth", "workspaces"] as const
 const STORED_WORKSPACE = "bammy.workspace"
+
+// The team you are acting in was deleted or you were removed from it, so its
+// id in the workspace header no longer resolves. The query client refreshes
+// the workspace list on this, which drops the vanished workspace and lets the
+// fallback below move you to your personal one.
+export function isStaleWorkspaceError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404 && error.message === "Workspace not found"
+}
 
 // Storage can be unavailable (private windows, blocked site data); the
 // personal workspace is the fallback either way.

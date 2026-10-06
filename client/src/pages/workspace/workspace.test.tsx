@@ -5,7 +5,7 @@ import { App } from "@/App"
 import { fetchReviewMarkdown } from "@/features/reviews/api"
 import { setApiWorkspace } from "@/lib/api"
 import { jsonResponse, renderWithProviders } from "@/test/renderWithProviders"
-import { mockApi, teamWorkspace, testUser } from "@/test/apiRoutes"
+import { mockApi, personalWorkspace, teamWorkspace, testUser } from "@/test/apiRoutes"
 import { listItem } from "@/test/fixtures"
 
 const header = (init?: RequestInit) => (init?.headers as Record<string, string> | undefined)?.["x-bammy-workspace"]
@@ -53,6 +53,26 @@ describe("workspace switching", () => {
     localStorage.setItem("bammy.workspace", "gone")
     renderWithProviders(<App />, { route: "/reviews" })
     expect(await screen.findByRole("button", { name: "Switch workspace" })).toHaveTextContent("Personal")
+  })
+
+  it("falls back to the personal workspace when a team request reports it is gone", async () => {
+    // Acting in the team: its data now 404s (removed or deleted) and the list
+    // no longer carries it, so the refresh on that error drops back to personal.
+    localStorage.setItem("bammy.workspace", teamWorkspace.id)
+    const fetchSpy = mockApi({
+      "GET /api/workspaces": { workspaces: [personalWorkspace] },
+      "GET /api/reviews": (init?: RequestInit) =>
+        header(init) === teamWorkspace.id
+          ? jsonResponse(404, { message: "Workspace not found" })
+          : jsonResponse(200, { reviews: [], total: 0 }),
+    })
+    renderWithProviders(<App />, { route: "/reviews" })
+
+    // The button exists immediately showing Acme, so wait for the fallback to land.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Switch workspace" })).toHaveTextContent("Personal"))
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => String(url).startsWith("/api/reviews") && header(init) === undefined),
+    ).toBe(true)
   })
 
   it("sends the workspace with the markdown download", async () => {

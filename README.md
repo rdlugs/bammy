@@ -136,17 +136,18 @@ deferred; do not expose this Compose setup publicly.
 The first account registered on an instance becomes its **admin**, and so does
 the oldest account on an install that predates roles. Admins see **Users** in the
 sidebar, where they can promote or demote admins, remove users and create invite
-links. An instance always keeps at least one admin. Each user's connections,
-repositories and reviews stay private to them; being an admin does not grant
-access to them.
+links. An instance always keeps at least one admin. A user's personal-workspace
+connections, repositories and reviews stay private to them; data in a team
+workspace is shared with that team's members. Being an admin does not by itself
+grant access to either.
 
 `REGISTRATION_MODE` in `.env` controls who can create an account:
 
 | Value | Who can register |
 | ----- | ---------------- |
 | `open` (default) | Anyone who can reach the client |
-| `invite` | Only people with an invite link from an admin |
-| `closed` | Nobody; admins can still create invites, but they cannot be used until the mode allows them |
+| `invite` | Only people with an invite link. A team invite also works here, admitting the new account and placing it in that team |
+| `closed` | No new accounts; admins can still create invites, but they cannot register anyone until the mode allows it. Existing signed-in users can still accept a team invite to join a workspace |
 
 An invite link works once and expires after 7 days. Adding an email limits the
 link to that address. When `SMTP_URL` (for example

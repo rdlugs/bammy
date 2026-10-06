@@ -42,6 +42,32 @@ describe("profile picture", () => {
     expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument()
   })
 
+  it("stays busy while the picked image is still being converted", async () => {
+    // createImageBitmap is held open so the conversion is observably in flight.
+    let resolveBitmap!: (value: { width: number; height: number; close: () => void }) => void
+    vi.stubGlobal("createImageBitmap", vi.fn(() => new Promise((resolve) => (resolveBitmap = resolve))))
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as never)
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(function (callback, type) {
+      callback(new Blob(["jpeg-bytes"], { type: type ?? "image/png" }))
+    })
+    const uploaded = { ...testUser, avatarUpdatedAt: "2026-10-06T00:00:00.000Z" }
+    mockApi({ "PUT /api/settings/avatar": () => jsonResponse(200, { user: uploaded }) })
+    renderWithProviders(<App />, { route: "/settings" })
+
+    const upload = await screen.findByRole("button", { name: "Upload picture" })
+    await userEvent.upload(
+      await screen.findByLabelText("Profile picture file"),
+      new File(["png"], "me.png", { type: "image/png" }),
+    )
+
+    // Conversion has not resolved yet, so picking again is blocked.
+    expect(upload).toBeDisabled()
+    resolveBitmap({ width: 400, height: 200, close: vi.fn() })
+
+    expect(await screen.findByText("Profile picture updated")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Upload picture" })).toBeEnabled()
+  })
+
   it("rejects a file that is not an image without uploading", async () => {
     const fetchSpy = mockApi({})
     renderWithProviders(<App />, { route: "/settings" })
