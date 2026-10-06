@@ -8,6 +8,47 @@ While Bammy is pre-1.0, minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- Instance admins. The first account on an empty install becomes the admin (on
+  an existing install, the oldest account does). Admins manage users from the
+  **Users** page, promote or demote other admins, and create instance invites.
+  An instance always keeps at least one admin.
+- `REGISTRATION_MODE` (`open`, `invite` or `closed`) controls who can create an
+  account. The first account is always allowed.
+- Invite links that work once and expire after 7 days, optionally limited to one
+  email. Tokens are stored only as hashes. With `SMTP_URL` and `MAIL_FROM` set,
+  invites are emailed, and resending one rotates its link and renews its expiry.
+- Team workspaces with their own forge connections, repositories, reviews,
+  findings, global review config and LLM keys. Members have an `owner`, `admin`
+  or `member` role: admins manage settings and members, and only owners grant,
+  revoke or hold ownership. A team always keeps at least one owner.
+- Team invites, accepted by existing users or used to register a new account,
+  and adding existing accounts to a team directly from a searchable picker.
+- A workspace switcher in the sidebar, a **Team** page (`/workspace`) with
+  members, pending invites and settings, and a **User Management** sidebar group.
+- Profile pictures, shown across the dashboard and in member lists.
+
+### Changed
+
+- Existing connections, LLM keys and global review configs move into each user's
+  new personal workspace, so nothing changes for single-user installs.
+- API requests choose a workspace with the `x-bammy-workspace` header. Without
+  it they act on the caller's personal workspace, so existing scripts keep
+  working. The GitHub App install link takes `?workspace=` instead.
+- `WORKER_USER_CONCURRENCY` now limits running reviews per workspace rather than
+  per user.
+- Switching workspaces clears the dashboard's cached data, so nothing from one
+  team shows in another.
+
+### Security
+
+- Deleting an account locks the team memberships involved, so two owners leaving
+  at the same moment cannot leave a team without an owner.
+- Adding a team member by email, and the add-member picker, show team admins
+  which emails have accounts on the instance. This is deliberate, so existing
+  users can be added in one step.
+
 ## [0.1.0-alpha.2] - 2026-10-05
 
 ### Security
