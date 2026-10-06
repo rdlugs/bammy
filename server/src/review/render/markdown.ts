@@ -8,11 +8,11 @@ import { summarize } from "./json.ts";
 export { SUMMARY_MARKER };
 
 // Forges fetch the image themselves, so it must be a public absolute URL.
-const LOGO_URL = "https://raw.githubusercontent.com/rdlugs/bammy/main/client/public/bammy-32.png";
+const LOGO_URL = "https://raw.githubusercontent.com/rdlugs/sentryward/main/client/public/sentryward-32.png";
 
-// The only place Bammy names itself in what it posts: a small credit at the
+// The only place Sentryward names itself in what it posts: a small credit at the
 // bottom of every comment, so the content reads as the review, not the tool.
-export const BRAND_FOOTER = `<sub><img src="${LOGO_URL}" alt="" width="14" height="14" align="absmiddle"> Bammy</sub>`;
+export const BRAND_FOOTER = `<sub><img src="${LOGO_URL}" alt="" width="14" height="14" align="absmiddle"> Sentryward</sub>`;
 
 const VERDICT_LINE = {
   pass: "✅ **Pass**",
@@ -46,11 +46,11 @@ const OMISSION_TEXT: Record<Omission["reason"], string> = {
   chunk_failed: "review pass failed",
 };
 
-// Model text is posted under Bammy's name, so it must not ping people, close
-// HTML it did not open, or forge Bammy's own markers.
+// Model text is posted under Sentryward's name, so it must not ping people, close
+// HTML it did not open, or forge Sentryward's own markers.
 export function sanitize(text: string): string {
   return text
-    .replace(/<!--\s*bammy:/gi, "<!-- (quoted) bammy:")
+    .replace(/<!--\s*sentryward:/gi, "<!-- (quoted) sentryward:")
     .replace(/(^|[^\w`])@(?=[\w-])/g, "$1@​");
 }
 

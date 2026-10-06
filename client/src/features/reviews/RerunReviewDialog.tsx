@@ -35,7 +35,7 @@ export function RerunReviewDialog({
         <DialogHeader>
           <DialogTitle>Re-run review of {changeTitle(review)}?</DialogTitle>
           <DialogDescription>
-            Bammy will review the latest commit of {fullPath} {changeLabel(provider, review.number)} again. This uses
+            Sentryward will review the latest commit of {fullPath} {changeLabel(provider, review.number)} again. This uses
             model tokens and may post new comments to {PROVIDERS[provider].label}.
           </DialogDescription>
         </DialogHeader>

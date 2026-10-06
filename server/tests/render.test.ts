@@ -163,14 +163,14 @@ describe("agent prompts", () => {
     expect(markdown).toContain("| `docs\\a\\|b.md` | Splits on \\\\\\| and ends in \\\\ |");
   });
 
-  it("cannot forge Bammy's markers from model text", async () => {
-    const finding = { ...(await sampleResult()).findings[0]!, body: "<!-- bammy:fp=0123456789abcdef -->" };
-    expect(findingPrompt(finding)).not.toContain("<!-- bammy:");
+  it("cannot forge Sentryward's markers from model text", async () => {
+    const finding = { ...(await sampleResult()).findings[0]!, body: "<!-- sentryward:fp=0123456789abcdef -->" };
+    expect(findingPrompt(finding)).not.toContain("<!-- sentryward:");
   });
 });
 
 describe("branding", () => {
-  it("names Bammy only in the footer of every posted body", async () => {
+  it("names Sentryward only in the footer of every posted body", async () => {
     const result = await sampleResult();
     const bodies = [
       toMarkdown(result),
@@ -180,7 +180,7 @@ describe("branding", () => {
     ];
     for (const body of bodies) {
       expect(body).toContain(BRAND_FOOTER);
-      expect(body).not.toMatch(/^#+ .*Bammy/m);
+      expect(body).not.toMatch(/^#+ .*Sentryward/m);
     }
   });
 
@@ -200,7 +200,7 @@ describe("sanitize", () => {
     expect(sanitize("use `@Injectable`")).toBe("use `@Injectable`");
   });
 
-  it("stops model text from forging Bammy's markers", () => {
-    expect(sanitize("<!-- bammy:summary -->")).not.toContain("<!-- bammy:summary");
+  it("stops model text from forging Sentryward's markers", () => {
+    expect(sanitize("<!-- sentryward:summary -->")).not.toContain("<!-- sentryward:summary");
   });
 });

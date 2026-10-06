@@ -9,7 +9,7 @@ datasource db {
   extensions = [citext]
 }
 
-// Instance-wide role. Admins manage who can use this Bammy install; it grants
+// Instance-wide role. Admins manage who can use this Sentryward install; it grants
 // no access to other users' repositories or reviews.
 enum InstanceRole {
   admin
@@ -228,7 +228,7 @@ model Repository {
   settings               Json          @default("{}")
   // When set, `settings` is ignored and only the workspace's global config applies.
   followGlobal           Boolean       @default(true) @map("follow_global")
-  // GitLab project hook Bammy registered, and the secret GitLab sends with it.
+  // GitLab project hook Sentryward registered, and the secret GitLab sends with it.
   webhookId              String?       @map("webhook_id")
   encryptedWebhookSecret String?       @map("encrypted_webhook_secret")
   createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz

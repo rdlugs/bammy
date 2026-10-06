@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Questions and ideas
-    url: https://github.com/rdlugs/bammy/discussions
+    url: https://github.com/rdlugs/sentryward/discussions
     about: Ask usage questions and discuss ideas before opening an issue.
   - name: Report a vulnerability
-    url: https://github.com/rdlugs/bammy/security/advisories/new
+    url: https://github.com/rdlugs/sentryward/security/advisories/new
     about: Report security issues privately, not in a public issue.

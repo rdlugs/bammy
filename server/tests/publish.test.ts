@@ -266,7 +266,7 @@ describe("walkthrough placement and labels", () => {
   });
 
   it("takes an earlier version's block out of the description and keeps the author's text", async () => {
-    const earlier = `Fixes the login bug.\n\n${DESCRIPTION_START}\n## Bammy summary\n\nOld.\n${DESCRIPTION_END}\n`;
+    const earlier = `Fixes the login bug.\n\n${DESCRIPTION_START}\n## Sentryward summary\n\nOld.\n${DESCRIPTION_END}\n`;
     const { calls } = await publish({}, { description: earlier });
     expect(calls.descriptions).toEqual(["Fixes the login bug."]);
   });

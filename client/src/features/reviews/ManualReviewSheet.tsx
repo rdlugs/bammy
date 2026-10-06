@@ -89,7 +89,7 @@ function RepoPicker({ onDone }: { onDone: () => void }) {
       ) : (
         <div className="min-h-0 flex-1" />
       )}
-      {/* For a change Bammy's list does not show, e.g. one past the newest few hundred. */}
+      {/* For a change Sentryward's list does not show, e.g. one past the newest few hundred. */}
       <div className="border-t p-4">
         <ReviewUrlForm onQueued={onDone} />
       </div>

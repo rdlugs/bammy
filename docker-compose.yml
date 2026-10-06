@@ -1,4 +1,4 @@
-name: bammy
+name: sentryward
 
 services:
   db:

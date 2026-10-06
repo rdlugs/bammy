@@ -51,7 +51,7 @@ export async function renameWorkspace(req: Request, res: Response) {
   res.json({ workspace: { ...workspace, personal: false, role: access.role } });
 }
 
-// Everything in the workspace cascades from its row; Bammy's hooks are taken
+// Everything in the workspace cascades from its row; Sentryward's hooks are taken
 // off the forge first, while the credentials still work.
 export async function deleteWorkspace(req: Request, res: Response) {
   const { id } = workspaceParamsSchema.parse(req.params);
@@ -117,7 +117,7 @@ export async function addMember(req: Request, res: Response) {
     select: { id: true, name: true, email: true, avatarUpdatedAt: true },
   });
   if (!user) {
-    throw new HttpError(400, "Validation failed", { email: ["No Bammy account uses this email; invite them instead"] });
+    throw new HttpError(400, "Validation failed", { email: ["No Sentryward account uses this email; invite them instead"] });
   }
   // The unique (user, workspace) key catches an existing member and a
   // concurrent add alike.

@@ -11,7 +11,7 @@ import { ConnectionsPanel } from "./ConnectionsPanel"
 import { RecentReviewsTimeline } from "./RecentReviewsTimeline"
 import { StatusHero } from "./StatusHero"
 
-const DOCS_URL = "https://github.com/rdlugs/bammy#readme"
+const DOCS_URL = "https://github.com/rdlugs/sentryward#readme"
 
 function IconTile({ icon: Icon }: { icon: LucideIcon }) {
   return (

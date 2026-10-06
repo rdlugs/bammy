@@ -101,9 +101,9 @@ export function WorkspaceSwitcher() {
               aria-label="Switch workspace"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <img src="/bammy.svg" alt="" className="size-8 shrink-0 rounded-lg" />
+              <img src="/sentryward-192.png" alt="" className="size-8 shrink-0" />
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">Bammy</span>
+                <span className="truncate font-medium">Sentryward</span>
                 <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
                   <Icon className="size-3 shrink-0" aria-hidden />
                   {workspace.personal ? "Personal" : workspace.name}

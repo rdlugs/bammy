@@ -30,7 +30,7 @@ export function RepositoriesPage() {
     <PageShell>
       <PageHeader
         title="Repositories"
-        description="Connect GitHub or GitLab accounts and choose which repositories Bammy reviews."
+        description="Connect GitHub or GitLab accounts and choose which repositories Sentryward reviews."
       />
       <Tabs className="flex-1" value={tab} onValueChange={(value) => setParams({ tab: value }, { replace: true })}>
         <TabsList>

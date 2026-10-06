@@ -2,14 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Bammy is an AI code reviewer for GitHub PRs and GitLab MRs: a React SPA (`client/`), an Express 5 + Prisma 7 API (`server/`), a review worker (same `server/` codebase, `src/worker`), and PostgreSQL 17. README.md documents the API endpoints, forge setup, publishing behaviour and the `.bammy.yaml` format.
+Sentryward is an AI code reviewer for GitHub PRs and GitLab MRs: a React SPA (`client/`), an Express 5 + Prisma 7 API (`server/`), a review worker (same `server/` codebase, `src/worker`), and PostgreSQL 17. README.md documents the API endpoints, forge setup, publishing behaviour and the `.sentryward.yaml` format.
 
 ## Commands
 
 Everything runs in Docker Compose (`cp .env.example .env`, set `JWT_SECRET` and `ENCRYPTION_KEY`, then `docker compose up --build`). Run tests and tooling inside the containers:
 
 ```sh
-docker compose exec server npm test                      # migrates bammy_test, then vitest run
+docker compose exec server npm test                      # migrates sentryward_test, then vitest run
 docker compose exec server npm test -- tests/repos.test.ts   # single file
 docker compose exec server npm test -- -t "name of test"     # single test by name
 docker compose exec server npm run typecheck
@@ -23,7 +23,7 @@ docker compose exec client npm run lint                  # oxlint
 docker compose exec server npx prisma migrate dev --name <change>
 ```
 
-- Server tests hit a real Postgres database (`bammy_test`, created by `docker/postgres/init-test-db.sh`) and run with `fileParallelism: false`. `server/vitest.config.ts` injects a throwaway GitHub App config.
+- Server tests hit a real Postgres database (`sentryward_test`, created by `docker/postgres/init-test-db.sh`) and run with `fileParallelism: false`. `server/vitest.config.ts` injects a throwaway GitHub App config.
 - The `server` container applies migrations and regenerates the Prisma client on start; the client is generated into `server/src/generated/prisma` (an anonymous volume, so regenerate inside the container, not on the host).
 - The server runs TypeScript directly with `tsx` (no build step). Imports use explicit `.ts` extensions.
 
@@ -37,7 +37,7 @@ The webhook router is mounted **before** `express.json()` because signature chec
 
 ### Review jobs
 
-Reviews are rows in `review_jobs`, queued by the API (manual URL, rerun, webhook, or `/bammy review` comment) and executed by the worker:
+Reviews are rows in `review_jobs`, queued by the API (manual URL, rerun, webhook, or `/sentryward review` comment) and executed by the worker:
 
 - `worker/index.ts`: poll loop; `worker/queue.ts` claims jobs with `FOR UPDATE SKIP LOCKED`, enforces per-user concurrency, recovers stale locks.
 - `worker/runJob.ts`: loads repo + connection, fetches the change from the forge, resolves config, decides skip reasons (trigger settings are checked here, not in the webhook handler), runs the review, publishes, stores the result. Dependencies are injectable (`RunJobDeps`) for tests.
@@ -45,12 +45,12 @@ Reviews are rows in `review_jobs`, queued by the API (manual URL, rerun, webhook
 
 ### `server/src/review/` (the engine, no DB or HTTP framework)
 
-- `config/`: layered config resolution (trigger overrides > `.bammy.yaml` from the PR's **base** revision > dashboard repo settings > profile > defaults), with per-field source tracking.
+- `config/`: layered config resolution (trigger overrides > `.sentryward.yaml` from the PR's **base** revision > dashboard repo settings > profile > defaults), with per-field source tracking.
 - `diff/`, `context/`: diff parsing, language detection, ignore globs, token budgeting and chunking.
 - `llm/`: prompts, zod output schemas, and `providers.ts`, which wraps the Vercel AI SDK behind a `Generate` function. Models are named `provider/model` (`anthropic`, `openai`, `google`). Keys come from env or the user's stored keys (`services/llm.ts`).
 - `validate/`, `core/`: finding validation (drop/demote), severity, verdict, fingerprints (dedupe across runs via hidden markers in forge comments).
 - `render/`: markdown/JSON output; the summary comment is exactly `GET /api/reviews/:id/markdown`.
-- `publish/`: inline comments, summary comment, `bammy/review` commit status, each step independent.
+- `publish/`: inline comments, summary comment, `sentryward/review` commit status, each step independent.
 - `forge/`: per-forge adapters (fetch change, publish, hooks) and `providers.ts` (`FORGE_INFO`: URL parsing, suggestion syntax).
 
 ### Two forge layers

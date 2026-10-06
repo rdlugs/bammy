@@ -20,14 +20,14 @@ describe("DensityToggle", () => {
 
     await chooseDensity("Compact")
     expect(document.documentElement.dataset.density).toBe("compact")
-    expect(localStorage.getItem("bammy-density")).toBe("compact")
+    expect(localStorage.getItem("sentryward-density")).toBe("compact")
 
     await chooseDensity("Spacious")
     expect(document.documentElement.dataset.density).toBe("spacious")
-    expect(localStorage.getItem("bammy-density")).toBe("spacious")
+    expect(localStorage.getItem("sentryward-density")).toBe("spacious")
 
     await chooseDensity("Comfortable")
     expect(document.documentElement.dataset.density).toBe("comfortable")
-    expect(localStorage.getItem("bammy-density")).toBe("comfortable")
+    expect(localStorage.getItem("sentryward-density")).toBe("comfortable")
   })
 })

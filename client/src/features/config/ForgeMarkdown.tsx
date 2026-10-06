@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { ForgeProvider } from "./api"
 
 // GitHub and GitLab render comment markdown with their own sanitising: raw
-// HTML such as <details> and <sub> survives, HTML comments (Bammy's hidden
+// HTML such as <details> and <sub> survives, HTML comments (Sentryward's hidden
 // markers) do not show. The default schema is GitHub's.
 const schema = {
   ...defaultSchema,

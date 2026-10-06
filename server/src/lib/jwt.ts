@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 import type { CookieOptions } from "express";
 import { env } from "../config/env.ts";
 
-export const AUTH_COOKIE = "bammy_token";
+export const AUTH_COOKIE = "sentryward_token";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 type TokenPayload = { sub: string };

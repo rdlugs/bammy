@@ -91,10 +91,10 @@ Verify each finding against the current code and only fix it if it still applies
 
 **📝 Notes**
 
-- .bammy.yaml was ignored: review: unknown setting nope
+- .sentryward.yaml was ignored: review: unknown setting nope
 
 <sub>Reviewed `head` with anthropic/claude-sonnet-5-5 · 1 review pass · 1 file reviewed</sub>
 
-<sub><img src="https://raw.githubusercontent.com/rdlugs/bammy/main/client/public/bammy-32.png" alt="" width="14" height="14" align="absmiddle"> Bammy</sub>
+<sub><img src="https://raw.githubusercontent.com/rdlugs/sentryward/main/client/public/sentryward-32.png" alt="" width="14" height="14" align="absmiddle"> Sentryward</sub>
 
-<!-- bammy:summary -->
+<!-- sentryward:summary -->

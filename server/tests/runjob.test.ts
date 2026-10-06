@@ -138,7 +138,7 @@ describe("runJob", () => {
   it("reviews the change and stores result, verdict, config and the actual head", async () => {
     const job = await claimedJob();
     const { runDeps, reads } = deps(
-      { "base:.bammy.yaml": "output:\n  walkthrough: true\n" },
+      { "base:.sentryward.yaml": "output:\n  walkthrough: true\n" },
       { code_review: { findings: [modelFinding()] }, walkthrough: WALKTHROUGH },
     );
 
@@ -151,9 +151,9 @@ describe("runJob", () => {
     expect(result.findings).toHaveLength(1);
     // blockOn came from the saved repository settings.
     expect(result.verdict.blockOn).toBe("major");
-    expect(stored.resolvedConfig).toMatchObject({ repoFile: ".bammy.yaml", sources: { "review.blockOn": "repoSettings" } });
+    expect(stored.resolvedConfig).toMatchObject({ repoFile: ".sentryward.yaml", sources: { "review.blockOn": "repoSettings" } });
     // The repository file is read at the base revision, never the head.
-    expect(reads).toEqual(["change", "base:.bammy.yaml"]);
+    expect(reads).toEqual(["change", "base:.sentryward.yaml"]);
     // The findings table follows the run, with the change's author.
     const findings = await prisma.finding.findMany({ where: { repositoryId, number: 42 } });
     expect(findings).toHaveLength(1);
@@ -449,7 +449,7 @@ describe("runJob issues and cache", () => {
     // file at a sha never changes, so a new one needs an emptied cache here.)
     cache.clear();
     const second = await claimedJob();
-    const fresh = deps({ "base:.bammy.yaml": "review:\n  disable_cache: true\n" }, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, undefined, { cache });
+    const fresh = deps({ "base:.sentryward.yaml": "review:\n  disable_cache: true\n" }, { code_review: { findings: [] }, walkthrough: WALKTHROUGH }, undefined, { cache });
     await runJob(second, fresh.runDeps);
     expect(fresh.reads.filter((read) => read.startsWith("change"))).toEqual(["change:cached", "change"]);
 
@@ -555,7 +555,7 @@ describe("runJob with automatic triggers", () => {
   it("records a skipped webhook job without calling the model or the forge", async () => {
     await enqueue({ repositoryId, number: 42, headSha: "oldhead", trigger: "webhook" });
     const job = (await claimNext())!;
-    const { runDeps, model, published } = deps({ "base:.bammy.yaml": "triggers:\n  on_push: false\n" }, {});
+    const { runDeps, model, published } = deps({ "base:.sentryward.yaml": "triggers:\n  on_push: false\n" }, {});
 
     await runJob(job, runDeps);
 

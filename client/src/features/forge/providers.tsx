@@ -72,7 +72,7 @@ export const PROVIDERS: Record<Provider, ProviderDefinition> = {
     hosting: {
       cloud: {
         label: "GitHub.com",
-        hint: "Install the Bammy GitHub App on the accounts and repositories to review.",
+        hint: "Install the Sentryward GitHub App on the accounts and repositories to review.",
         method: { type: "app", name: "GitHub App", installHref: "/api/connections/github/install" },
       },
       selfHosted: {

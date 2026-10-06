@@ -1,7 +1,7 @@
 import { parse } from "yaml";
 import { configOverrideSchema, type ConfigOverride } from "./schema.ts";
 
-export const REPO_CONFIG_FILES = [".bammy.yaml", ".bammy.yml"] as const;
+export const REPO_CONFIG_FILES = [".sentryward.yaml", ".sentryward.yml"] as const;
 const MAX_BYTES = 64 * 1024;
 
 export interface RepoFileResult {

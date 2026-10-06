@@ -20,7 +20,7 @@ export async function loadWorkspaceConnection(workspaceId: string, id: string): 
 }
 
 // Translates a forge failure into something the user can act on. A forge
-// refusing our credentials is a broken connection, not a 401 from Bammy.
+// refusing our credentials is a broken connection, not a 401 from Sentryward.
 export function toHttpError(err: unknown, providerId: string): unknown {
   if (!(err instanceof ForgeError)) {
     return err;

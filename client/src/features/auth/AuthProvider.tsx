@@ -6,7 +6,7 @@ import type { LoginInput, RegisterInput } from "./schemas"
 
 const ME_QUERY_KEY = ["auth", "me"] as const
 export const WORKSPACES_QUERY_KEY = ["auth", "workspaces"] as const
-const STORED_WORKSPACE = "bammy.workspace"
+const STORED_WORKSPACE = "sentryward.workspace"
 
 // The team you are acting in was deleted or you were removed from it, so its
 // id in the workspace header no longer resolves. The query client refreshes

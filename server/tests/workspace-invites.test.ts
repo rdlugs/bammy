@@ -57,7 +57,7 @@ describe("creating team invites", () => {
     const { res } = await invite({ email: "grace@example.com" });
 
     expect(res.body.emailed).toBe(true);
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: "grace@example.com", subject: "Join Acme on Bammy" }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: "grace@example.com", subject: "Join Acme on Sentryward" }));
   });
 
   it("refuses to invite someone who is already a member", async () => {
@@ -104,7 +104,7 @@ describe("resending team invites", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.invite).toMatchObject({ id, email: "grace@example.com", role: "member" });
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: "grace@example.com", subject: "Join Acme on Bammy" }));
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: "grace@example.com", subject: "Join Acme on Sentryward" }));
     const newToken = /\/invite\/([\w-]+)/.exec(send.mock.calls[0]![0].text)![1]!;
     expect((await show(token)).status).toBe(404);
     expect((await show(newToken)).body.invite).toMatchObject({ workspace: { name: "Acme" } });

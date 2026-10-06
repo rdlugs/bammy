@@ -25,7 +25,7 @@ import {
 export interface GitLabAdapterOptions {
   host: string;
   token: () => Promise<string>;
-  // The username Bammy posts as (the token's user), to find its own notes.
+  // The username Sentryward posts as (the token's user), to find its own notes.
   selfLogin?: string;
   fetch?: FetchLike;
 }

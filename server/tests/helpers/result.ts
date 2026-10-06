@@ -24,7 +24,7 @@ export async function sampleResult(): Promise<ReviewResult> {
   });
   const { config } = resolveConfig({ trigger: { review: { fullFile: true } } });
   return runReview(
-    { changeSet, config, warnings: [".bammy.yaml was ignored: review: unknown setting nope"] },
+    { changeSet, config, warnings: [".sentryward.yaml was ignored: review: unknown setting nope"] },
     { generate, now: () => new Date("2026-10-04T12:00:00Z") },
   );
 }

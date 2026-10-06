@@ -50,7 +50,7 @@ The underlying advisories reported by npm are
 - [x] Review and explicitly accept or remediate the dependency audit findings for
   the alpha release.
 - [x] Obtain a passing hosted CI run after an authorized commit and push
-  ([run 37313406503](https://github.com/rdlugs/bammy/actions/runs/37313406503)).
+  ([run 37313406503](https://github.com/rdlugs/sentryward/actions/runs/37313406503)).
 - [ ] Announce alpha status, AI review limitations, and development-only Docker
   infrastructure. `NODE_ENV=production` changes backend behavior, not deployment
   infrastructure.

@@ -1,8 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { HttpError } from "./httpError.ts";
 
-// "/bammy review" at the start of any line of a comment.
-export const REVIEW_COMMAND = /^\/bammy\s+review\b/im;
+// "/sentryward review" at the start of any line of a comment.
+export const REVIEW_COMMAND = /^\/sentryward\s+review\b/im;
 
 // Equal-length digests so the comparison takes the same time whatever the input.
 export function safeEqual(a: string, b: string): boolean {

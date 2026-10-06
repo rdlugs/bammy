@@ -132,7 +132,7 @@ const PREVIEW = {
   },
   status: { state: "failure", description: "1 finding at or above critical" },
   summaryComment:
-    "## Summary\n\nAdds a lookup endpoint.\n\n⛔ **Blocked**: 1 finding at or above critical.\n\n<details>\n<summary>Actionable comments (1)</summary>\n\n- SQL\n\n</details>\n\n<!-- bammy:summary -->\n",
+    "## Summary\n\nAdds a lookup endpoint.\n\n⛔ **Blocked**: 1 finding at or above critical.\n\n<details>\n<summary>Actionable comments (1)</summary>\n\n- SQL\n\n</details>\n\n<!-- sentryward:summary -->\n",
   walkthroughComment: null,
   inline: [
     {
@@ -531,7 +531,7 @@ describe("Configuration page", () => {
     )
 
     expect(await within(preview).findByRole("heading", { name: /Add user lookup endpoint/ })).toHaveTextContent("#42")
-    // Bammy never writes to the description, so the preview leaves it out.
+    // Sentryward never writes to the description, so the preview leaves it out.
     expect(within(preview).queryByRole("region", { name: "Pull request description" })).not.toBeInTheDocument()
     expect(within(preview).getByRole("list", { name: "Labels" })).toHaveTextContent("Medium blast radius")
     // The summary view is shown first, without the inline threads.
@@ -540,10 +540,10 @@ describe("Configuration page", () => {
     expect(within(preview).queryByRole("region", { name: "Inline comments" })).not.toBeInTheDocument()
     expect(within(summary).getByRole("heading", { name: "Summary" })).toBeInTheDocument()
     expect(summary).toHaveTextContent("Adds a lookup endpoint.")
-    // Bammy no longer offers to write into the PR/MR description.
+    // Sentryward no longer offers to write into the PR/MR description.
     expect(screen.queryByRole("combobox", { name: "Comment location" })).not.toBeInTheDocument()
     // Hidden markers stay hidden, as on the forge.
-    expect(preview).not.toHaveTextContent("bammy:summary")
+    expect(preview).not.toHaveTextContent("sentryward:summary")
     expect(within(preview).getByRole("region", { name: "Commit status" })).toHaveTextContent(
       "Failing: 1 finding at or above critical",
     )
@@ -620,10 +620,10 @@ describe("Configuration page", () => {
     renderWithProviders(<App />, { route: "/configuration?tab=display" })
 
     const preview = await screen.findByRole("region", { name: "Review preview" })
-    expect(await within(preview).findByText(/Bammy posts no summary to the change/)).toBeInTheDocument()
+    expect(await within(preview).findByText(/Sentryward posts no summary to the change/)).toBeInTheDocument()
     expect(within(preview).queryByText("No description provided.")).not.toBeInTheDocument()
     await choosePreviewView(preview, "In-line")
-    expect(within(preview).getByText("Bammy posts no inline comments on the diff.")).toBeInTheDocument()
+    expect(within(preview).getByText("Sentryward posts no inline comments on the diff.")).toBeInTheDocument()
   })
 
   it("sends the finding settings, and holds the preview while a value is invalid", async () => {

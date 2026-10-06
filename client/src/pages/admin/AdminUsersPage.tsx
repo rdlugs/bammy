@@ -243,7 +243,7 @@ function EditUserDialog({ user, onOpenChange }: { user: User | null; onOpenChang
           <form onSubmit={form.handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
             <DialogHeader>
               <DialogTitle>Edit {user.name}</DialogTitle>
-              <DialogDescription>Admins can use and manage this Bammy instance; members can only use it.</DialogDescription>
+              <DialogDescription>Admins can use and manage this Sentryward instance; members can only use it.</DialogDescription>
             </DialogHeader>
             <TextField control={form.control} name="name" label="Name" autoComplete="off" />
             <TextField control={form.control} name="email" label="Email" type="email" autoComplete="off" />
@@ -636,7 +636,7 @@ export function AdminUsersPage() {
 
   return (
     <PageShell>
-      <PageHeader title="Users" description="Who can use this Bammy instance." />
+      <PageHeader title="Users" description="Who can use this Sentryward instance." />
       <Tabs className="flex-1" value={tab} onValueChange={(value) => setParams({ tab: value }, { replace: true })}>
         <TabsList>
           {TAB_ITEMS.map((item) => (

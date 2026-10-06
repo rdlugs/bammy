@@ -60,7 +60,7 @@ export async function githubWebhook(req: Request, res: Response) {
   res.status(outcome.status ?? 202).json(outcome.body);
 }
 
-// A hook Bammy registered on one repository, for any forge.
+// A hook Sentryward registered on one repository, for any forge.
 export async function repoWebhook(req: Request, res: Response) {
   const definition = providerFor(String(req.params.provider));
   const repo = await prisma.repository.findUnique({

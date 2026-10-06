@@ -72,7 +72,7 @@ describe("previewPublication", () => {
     expect(all.summaryComment).not.toContain("#7");
     // The summary goes in the description by default, not the comment.
     expect(all.summaryComment).not.toContain("High-level summary");
-    expect(all.pr.description).toContain("<!-- bammy:summary:start -->\n## High-level summary");
+    expect(all.pr.description).toContain("<!-- sentryward:summary:start -->\n## High-level summary");
     expect(all.pr.description).toMatch(/^Closes #12\n\n/);
 
     const none = await previewPublication(

@@ -71,9 +71,9 @@ describe("GitHubAdapter", () => {
 
   it("returns null for a file missing at a ref", async () => {
     const { adapter: gh } = adapter([
-      { url: /\/contents\/\.bammy\.yaml\?ref=base1$/, status: 404, body: { message: "Not Found" } },
+      { url: /\/contents\/\.sentryward\.yaml\?ref=base1$/, status: 404, body: { message: "Not Found" } },
     ]);
-    expect(await gh.getFileAtRef("acme/web", ".bammy.yaml", "base1")).toBeNull();
+    expect(await gh.getFileAtRef("acme/web", ".sentryward.yaml", "base1")).toBeNull();
   });
 
   it("reads raw file content at a ref", async () => {
@@ -215,10 +215,10 @@ describe("GitHubAdapter", () => {
       { method: "DELETE", url: /\/repos\/acme\/web\/hooks\/77$/, status: 404, body: { message: "Not Found" } },
     ]);
 
-    expect(await gh.createHook(repo, "https://bammy.example.com/hook", "s3cret")).toBe("77");
+    expect(await gh.createHook(repo, "https://sentryward.example.com/hook", "s3cret")).toBe("77");
     expect(JSON.parse(calls[0]!.body!)).toMatchObject({
       events: ["pull_request", "issue_comment"],
-      config: { url: "https://bammy.example.com/hook", secret: "s3cret", content_type: "json" },
+      config: { url: "https://sentryward.example.com/hook", secret: "s3cret", content_type: "json" },
     });
     await expect(gh.deleteHook(repo, "77")).resolves.toBeUndefined();
   });
@@ -481,9 +481,9 @@ describe("GitLabAdapter", () => {
 
   it("returns null for a file missing at a ref", async () => {
     const { adapter: gl, calls } = adapter([
-      { url: /\/repository\/files\/config%2F\.bammy\.yaml\/raw\?ref=b$/, status: 404, body: {} },
+      { url: /\/repository\/files\/config%2F\.sentryward\.yaml\/raw\?ref=b$/, status: 404, body: {} },
     ]);
-    expect(await gl.getFileAtRef("team/app", "config/.bammy.yaml", "b")).toBeNull();
+    expect(await gl.getFileAtRef("team/app", "config/.sentryward.yaml", "b")).toBeNull();
     expect(calls).toHaveLength(1);
   });
 });

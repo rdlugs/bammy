@@ -2,10 +2,10 @@
 
 ## Supported versions and private reports
 
-Bammy is alpha software. Security fixes target the latest code on `main`; there
+Sentryward is alpha software. Security fixes target the latest code on `main`; there
 are no supported stable release branches yet.
 
-Use [GitHub private vulnerability reporting](https://github.com/rdlugs/bammy/security/advisories/new)
+Use [GitHub private vulnerability reporting](https://github.com/rdlugs/sentryward/security/advisories/new)
 to report a vulnerability. Include the affected revision, reproduction steps,
 impact, and a minimal example with secrets removed. Do not open public issues or
 include working credentials. Maintainers review reports and coordinate fixes and
@@ -57,7 +57,7 @@ the credentials and payload sent to it, so configure only endpoints you trust.
 Model listing and connection verification also contact those endpoints.
 
 Provider retention and training policies depend on the service and account terms.
-Bammy cannot guarantee those policies. Ollama can keep inference local, but forge
+Sentryward cannot guarantee those policies. Ollama can keep inference local, but forge
 access and any configured publishing still involve the forge.
 
 Enabled publishing can create inline comments, summaries, labels, commit statuses,

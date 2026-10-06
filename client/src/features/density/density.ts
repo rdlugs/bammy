@@ -3,7 +3,7 @@ export const DENSITIES = ["compact", "comfortable", "spacious"] as const
 
 export type Density = (typeof DENSITIES)[number]
 
-const STORAGE_KEY = "bammy-density"
+const STORAGE_KEY = "sentryward-density"
 
 // Storage can throw (private mode, blocked site data), so density silently
 // falls back to the default instead of breaking the app.

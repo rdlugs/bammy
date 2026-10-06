@@ -8,7 +8,7 @@ import { jsonResponse, renderWithProviders } from "@/test/renderWithProviders"
 import { mockApi, personalWorkspace, teamWorkspace, testUser } from "@/test/apiRoutes"
 import { listItem } from "@/test/fixtures"
 
-const header = (init?: RequestInit) => (init?.headers as Record<string, string> | undefined)?.["x-bammy-workspace"]
+const header = (init?: RequestInit) => (init?.headers as Record<string, string> | undefined)?.["x-sentryward-workspace"]
 
 const owner = { id: "9", name: "Grace Hopper", email: "grace@example.com", role: "owner", joinedAt: "2026-10-01T00:00:00Z", avatarUpdatedAt: null }
 const self = { id: testUser.id, name: testUser.name, email: testUser.email, role: "admin", joinedAt: "2026-10-02T00:00:00Z", avatarUpdatedAt: null }
@@ -40,17 +40,17 @@ describe("workspace switching", () => {
         true,
       ),
     )
-    expect(localStorage.getItem("bammy.workspace")).toBe(teamWorkspace.id)
+    expect(localStorage.getItem("sentryward.workspace")).toBe(teamWorkspace.id)
   })
 
   it("restores the remembered workspace and drops one you are no longer in", async () => {
-    localStorage.setItem("bammy.workspace", teamWorkspace.id)
+    localStorage.setItem("sentryward.workspace", teamWorkspace.id)
     mockApi({ "GET /api/reviews": { reviews: [], total: 0 } })
     const first = renderWithProviders(<App />, { route: "/reviews" })
     expect(await screen.findByRole("button", { name: "Switch workspace" })).toHaveTextContent("Acme")
     first.unmount()
 
-    localStorage.setItem("bammy.workspace", "gone")
+    localStorage.setItem("sentryward.workspace", "gone")
     renderWithProviders(<App />, { route: "/reviews" })
     expect(await screen.findByRole("button", { name: "Switch workspace" })).toHaveTextContent("Personal")
   })
@@ -58,7 +58,7 @@ describe("workspace switching", () => {
   it("falls back to the personal workspace when a team request reports it is gone", async () => {
     // Acting in the team: its data now 404s (removed or deleted) and the list
     // no longer carries it, so the refresh on that error drops back to personal.
-    localStorage.setItem("bammy.workspace", teamWorkspace.id)
+    localStorage.setItem("sentryward.workspace", teamWorkspace.id)
     const fetchSpy = mockApi({
       "GET /api/workspaces": { workspaces: [personalWorkspace] },
       "GET /api/reviews": (init?: RequestInit) =>
@@ -89,7 +89,7 @@ describe("workspace switching", () => {
 
 describe("team page", () => {
   function teamApi(routes: Record<string, unknown> = {}) {
-    localStorage.setItem("bammy.workspace", teamWorkspace.id)
+    localStorage.setItem("sentryward.workspace", teamWorkspace.id)
     return mockApi({
       "GET /api/workspaces/w-team/members": { members: [owner, self, plain] },
       "GET /api/workspaces/w-team/invites": { invites: [] },
@@ -134,7 +134,7 @@ describe("team page", () => {
   })
 
   it("shows a plain member only the Members tab, even when another is asked for", async () => {
-    localStorage.setItem("bammy.workspace", teamWorkspace.id)
+    localStorage.setItem("sentryward.workspace", teamWorkspace.id)
     mockApi({
       "GET /api/auth/me": { user: testUser, workspaces: [{ ...teamWorkspace, role: "member" }] },
       "GET /api/workspaces/w-team/members": { members: [owner, { ...self, role: "member" }, plain] },
@@ -182,7 +182,7 @@ describe("team page", () => {
 
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Switch workspace" })).toHaveTextContent("Personal")
-    expect(localStorage.getItem("bammy.workspace")).toBe("w-personal")
+    expect(localStorage.getItem("sentryward.workspace")).toBe("w-personal")
   })
 
   describe("tables", () => {

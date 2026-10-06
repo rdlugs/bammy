@@ -19,7 +19,7 @@ export const CONFIG_TABS = [
     value: "display",
     label: "Display",
     icon: MessageSquare,
-    description: "What Bammy posts back to the pull or merge request, and where.",
+    description: "What Sentryward posts back to the pull or merge request, and where.",
   },
   {
     value: "triggers",

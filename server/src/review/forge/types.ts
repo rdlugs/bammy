@@ -60,7 +60,7 @@ export interface ForgeAdapter {
   searchIssues(project: string, terms: string[]): Promise<IssueContext[]>;
 }
 
-// Webhooks Bammy registers on one repository, for forges (or connection kinds)
+// Webhooks Sentryward registers on one repository, for forges (or connection kinds)
 // that do not deliver events through an app.
 export interface HookTarget {
   externalId: string;
@@ -111,16 +111,16 @@ export interface CommitStatus {
   targetUrl?: string;
 }
 
-export const STATUS_CONTEXT = "bammy/review";
+export const STATUS_CONTEXT = "sentryward/review";
 
 export interface ForgePublisher {
   postInlineComments(ref: ForgeRef, comments: InlineComment[]): Promise<InlineResult>;
-  // Fingerprints in Bammy's own inline comments on this change, read from their
+  // Fingerprints in Sentryward's own inline comments on this change, read from their
   // hidden markers, so a lost database row never means a duplicate comment.
   listPostedFingerprints(ref: ForgeRef): Promise<Set<string>>;
-  // Creates Bammy's summary comment, or edits the one it posted before.
+  // Creates Sentryward's summary comment, or edits the one it posted before.
   upsertSummaryComment(ref: ForgeRef, body: string): Promise<string>;
-  // The same for any comment Bammy owns, found by the hidden marker in its body.
+  // The same for any comment Sentryward owns, found by the hidden marker in its body.
   upsertComment(ref: ForgeRef, marker: string, body: string): Promise<string>;
   // Rewrites the PR/MR description from its current text.
   updateDescription(ref: ForgeRef, transform: (description: string) => string): Promise<void>;

@@ -28,11 +28,11 @@ const comment = (fingerprint: string, extra: Partial<InlineComment> = {}): Inlin
 
 const github = (routes: StubRoute[]) => {
   const stub = fetchStub(routes);
-  return { ...stub, gh: new GitHubAdapter({ host: "github.com", token: async () => "t", selfLogin: "bammy[bot]", fetch: stub.fetch }) };
+  return { ...stub, gh: new GitHubAdapter({ host: "github.com", token: async () => "t", selfLogin: "sentryward[bot]", fetch: stub.fetch }) };
 };
 const gitlab = (routes: StubRoute[]) => {
   const stub = fetchStub(routes);
-  return { ...stub, gl: new GitLabAdapter({ host: "gitlab.com", token: async () => "t", selfLogin: "bammy-bot", fetch: stub.fetch }) };
+  return { ...stub, gl: new GitLabAdapter({ host: "gitlab.com", token: async () => "t", selfLogin: "sentryward-bot", fetch: stub.fetch }) };
 };
 const body = (call: { body?: string }) => JSON.parse(call.body ?? "{}");
 
@@ -43,8 +43,8 @@ describe("GitHub publishing", () => {
       {
         url: /\/pulls\/42\/reviews\/7\/comments/,
         body: [
-          { id: 101, body: comment("aaaaaaaaaaaaaaaa").body, user: { login: "bammy[bot]" } },
-          { id: 102, body: comment("bbbbbbbbbbbbbbbb").body, user: { login: "bammy[bot]" } },
+          { id: 101, body: comment("aaaaaaaaaaaaaaaa").body, user: { login: "sentryward[bot]" } },
+          { id: 102, body: comment("bbbbbbbbbbbbbbbb").body, user: { login: "sentryward[bot]" } },
         ],
       },
     ]);
@@ -98,7 +98,7 @@ describe("GitHub publishing", () => {
         url: /\/issues\/42\/comments\?per_page=100$/,
         body: [
           { id: 1, body: `quoted ${SUMMARY_MARKER}`, user: { login: "mallory" } },
-          { id: 2, body: `old ${SUMMARY_MARKER}`, user: { login: "bammy[bot]" } },
+          { id: 2, body: `old ${SUMMARY_MARKER}`, user: { login: "sentryward[bot]" } },
         ],
       },
       { method: "PATCH", url: /\/issues\/comments\/2$/, body: { id: 2 } },
@@ -123,7 +123,7 @@ describe("GitHub publishing", () => {
       {
         url: /\/pulls\/42\/comments\?per_page=100$/,
         body: [
-          { id: 1, body: fingerprintMarker("aaaaaaaaaaaaaaaa"), user: { login: "bammy[bot]" } },
+          { id: 1, body: fingerprintMarker("aaaaaaaaaaaaaaaa"), user: { login: "sentryward[bot]" } },
           { id: 2, body: fingerprintMarker("bbbbbbbbbbbbbbbb"), user: { login: "mallory" } },
         ],
       },
@@ -131,12 +131,12 @@ describe("GitHub publishing", () => {
     expect(await gh.listPostedFingerprints(ghRef)).toEqual(new Set(["aaaaaaaaaaaaaaaa"]));
   });
 
-  it("sets the bammy/review status on the head commit", async () => {
+  it("sets the sentryward/review status on the head commit", async () => {
     const { gh, calls } = github([{ method: "POST", url: /\/statuses\/head$/, body: {} }]);
     await gh.setCommitStatus(ghRef, { state: "failure", description: "x".repeat(200), targetUrl: "http://app/r/1" });
     expect(body(calls[0]!)).toEqual({
       state: "failure",
-      context: "bammy/review",
+      context: "sentryward/review",
       description: "x".repeat(140),
       target_url: "http://app/r/1",
     });
@@ -217,9 +217,9 @@ describe("GitLab publishing", () => {
       {
         url: /\/merge_requests\/42\/notes\?per_page=100&sort=asc$/,
         body: [
-          { id: 1, body: SUMMARY_MARKER, system: true, author: { username: "bammy-bot" } },
+          { id: 1, body: SUMMARY_MARKER, system: true, author: { username: "sentryward-bot" } },
           { id: 2, body: SUMMARY_MARKER, system: false, author: { username: "mallory" } },
-          { id: 3, body: SUMMARY_MARKER, system: false, author: { username: "bammy-bot" } },
+          { id: 3, body: SUMMARY_MARKER, system: false, author: { username: "sentryward-bot" } },
         ],
       },
       { method: "PUT", url: /\/notes\/3$/, body: { id: 3 } },
@@ -233,7 +233,7 @@ describe("GitLab publishing", () => {
     await gl.setCommitStatus(glRef, { state: "error", description: "Review incomplete" });
     await gl.setCommitStatus(glRef, { state: "pending", description: "Review in progress" });
     expect(calls.map((c) => body(c).state)).toEqual(["failed", "running"]);
-    expect(body(calls[0]!).name).toBe("bammy/review");
+    expect(body(calls[0]!).name).toBe("sentryward/review");
   });
 
   it("adds and removes labels in one update", async () => {

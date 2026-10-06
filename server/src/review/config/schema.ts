@@ -10,7 +10,7 @@ export type ProfileName = z.infer<typeof profileNameSchema>;
 // live in DEFAULT_CONFIG so a layer never fills in fields it did not set.
 // There is deliberately no API key or token here. Endpoints exist only in the
 // dashboard layers (see dashboardOverrideSchema): a repository file must never
-// be able to point Bammy's credentials somewhere else.
+// be able to point Sentryward's credentials somewhere else.
 // The model id may itself contain slashes and parentheses, as router ids such
 // as "openai/cx/gpt-5.6-sol(medium)" do; the provider is what precedes the first slash.
 const modelString = z
@@ -114,7 +114,7 @@ const triggersShape = {
   drafts: z.boolean(),
   // Whether automatic reviews include the walkthrough. A requested review always may.
   summary: z.enum(SUMMARY_TRIGGERS),
-  // Allow "/bammy review" in a comment to request a review.
+  // Allow "/sentryward review" in a comment to request a review.
   command: z.boolean(),
   // Stop a review in progress once its PR/MR is closed or merged.
   abortOnClose: z.boolean(),

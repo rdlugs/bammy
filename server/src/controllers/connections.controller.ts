@@ -243,7 +243,7 @@ export async function deleteConnection(req: Request, res: Response) {
   if (!connection) {
     throw new HttpError(404, "Connection not found");
   }
-  // Take Bammy's hooks off the forge while the token still works.
+  // Take Sentryward's hooks off the forge while the token still works.
   for (const repo of connection.repositories) {
     await removeWebhook(repo, connection).catch(() => undefined);
   }

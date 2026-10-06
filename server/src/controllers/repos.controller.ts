@@ -143,7 +143,7 @@ export async function updateRepo(req: Request, res: Response) {
 export async function deleteRepo(req: Request, res: Response) {
   const { id } = repoIdParamSchema.parse(req.params);
   const repo = await loadOwnedRepo(req.workspaceId!, id);
-  // Take Bammy's hook off the forge while the row still holds its id.
+  // Take Sentryward's hook off the forge while the row still holds its id.
   await removeWebhook(repo, repo.connection).catch(() => undefined);
   await prisma.repository.delete({ where: { id } });
   res.status(204).end();
@@ -169,7 +169,7 @@ export async function getRepoConfig(req: Request, res: Response) {
 }
 
 // Open pull/merge requests, for picking one to review by hand. Read live from
-// the forge; Bammy only knows about changes it has already reviewed.
+// the forge; Sentryward only knows about changes it has already reviewed.
 export async function listRepoChanges(req: Request, res: Response) {
   const { id } = repoIdParamSchema.parse(req.params);
   const repo = await loadOwnedRepo(req.workspaceId!, id);
