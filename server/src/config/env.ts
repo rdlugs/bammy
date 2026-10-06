@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+// Docker Compose passes an unset variable as "", which means "not configured".
+const optionalString = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -29,11 +33,23 @@ const envSchema = z.object({
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
-  // Running reviews one user may have at once, so one busy account cannot
-  // take every worker slot.
+  // Running reviews one workspace may have at once, so one busy team cannot
+  // take every worker slot. Named from before workspaces existed.
   WORKER_USER_CONCURRENCY: z.coerce.number().int().positive().default(2),
   WORKER_LOCK_TIMEOUT_MS: z.coerce.number().int().positive().default(15 * 60 * 1000),
   WORKER_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  // Who may create an account: anyone, only holders of an invite link, or
+  // nobody. The first account on an empty install is always allowed.
+  REGISTRATION_MODE: z.enum(["open", "invite", "closed"]).default("open"),
+  // Optional mail transport for invites, e.g. smtp://user:pass@host:587. Without
+  // it invites are still created and their link is shown to copy.
+  SMTP_URL: optionalString(z.string().url()),
+  MAIL_FROM: optionalString(z.string()),
 });
 
-export const env = envSchema.parse(process.env);
+const parsedEnvSchema = envSchema.refine((data) => !data.SMTP_URL || data.MAIL_FROM, {
+  message: "MAIL_FROM is required when SMTP_URL is set",
+  path: ["MAIL_FROM"],
+});
+
+export const env = parsedEnvSchema.parse(process.env);

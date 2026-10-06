@@ -63,6 +63,14 @@ import { ConnectionDetailsSheet } from "@/features/forge/ConnectionDetailsSheet"
 import { ConnectionStatusBadge } from "@/features/forge/ConnectionStatusBadge"
 import { PROVIDER_IDS, PROVIDERS, type TokenMethod } from "@/features/forge/providers"
 import type { Provider } from "@/features/reviews/types"
+import { apiWorkspace } from "@/lib/api"
+
+// The install starts with a browser navigation, which cannot carry the
+// workspace header, so a team workspace goes in the query instead.
+function installHref(href: string) {
+  const workspace = apiWorkspace()
+  return workspace ? `${href}?${new URLSearchParams({ workspace })}` : href
+}
 
 function tokenSchema(method: TokenMethod) {
   const shape: Record<string, z.ZodString> = {
@@ -186,7 +194,7 @@ function compareConnections(
     case "active":
       return statusRank(statuses[a.id]) - statusRank(statuses[b.id])
     case "addedBy":
-      return a.user.name.localeCompare(b.user.name)
+      return (a.createdBy?.name ?? "").localeCompare(b.createdBy?.name ?? "")
     case "createdAt":
       return Date.parse(a.createdAt) - Date.parse(b.createdAt)
   }
@@ -253,8 +261,8 @@ function ConnectionsTable({
                 <TableCell>
                   <ConnectionStatusBadge status={statuses[connection.id]} />
                 </TableCell>
-                <TableCell className="text-muted-foreground" title={connection.user.email}>
-                  {connection.user.name}
+                <TableCell className="text-muted-foreground" title={connection.createdBy?.email}>
+                  {connection.createdBy?.name ?? "Removed user"}
                 </TableCell>
                 <TableCell className="text-muted-foreground" title={new Date(connection.createdAt).toLocaleString()}>
                   {formatDate(connection.createdAt)}
@@ -350,7 +358,13 @@ function ConnectedAccounts({ connections, onAdd }: { connections: Connection[]; 
     () =>
       connections.filter(
         (connection) =>
-          matchesQuery(query, connection.accountLogin, connection.host, connection.user.name, connection.user.email) &&
+          matchesQuery(
+            query,
+            connection.accountLogin,
+            connection.host,
+            connection.createdBy?.name ?? "",
+            connection.createdBy?.email ?? "",
+          ) &&
           (forge === ALL || forgeKey(connection) === forge) &&
           // Connections still being checked match no specific status.
           (status === ALL || statuses[connection.id] === status),
@@ -517,7 +531,7 @@ function AddConnectionSheet({
             {method.type === "app" ? (
               availableApps.includes(providerId) ? (
                 <Button asChild>
-                  <a href={method.installHref}>Install {method.name}</a>
+                  <a href={installHref(method.installHref)}>Install {method.name}</a>
                 </Button>
               ) : (
                 <p className="text-sm text-muted-foreground">The {method.name} is not configured on this server.</p>

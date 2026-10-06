@@ -37,7 +37,7 @@ dashboard tracks reviews and findings across runs.
 - [Highlights](#highlights)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
-- [Getting started](#getting-started): [runtime environment](#docker-runtime-environment), [first review](#run-your-first-review), [troubleshooting](#troubleshooting)
+- [Getting started](#getting-started): [runtime environment](#docker-runtime-environment), [users and invites](#users-and-invites), [first review](#run-your-first-review), [troubleshooting](#troubleshooting)
 - [Forge connections](#forge-connections), [publishing](#publishing-to-the-forge), [automatic reviews](#automatic-reviews)
 - [Review configuration](#review-configuration): [LLM connections](#llm-connections-and-custom-endpoints), [Ollama](#ollama), [`.bammy.yaml`](#bammyyaml-reference)
 - [API](#api)
@@ -131,9 +131,31 @@ commands, disable watchers, build/serve the frontend, or provide HTTPS. The clie
 still runs Vite's development server. Production deployment infrastructure is
 deferred; do not expose this Compose setup publicly.
 
+### Users and invites
+
+The first account registered on an instance becomes its **admin**, and so does
+the oldest account on an install that predates roles. Admins see **Users** in the
+sidebar, where they can promote or demote admins, remove users and create invite
+links. An instance always keeps at least one admin. Each user's connections,
+repositories and reviews stay private to them; being an admin does not grant
+access to them.
+
+`REGISTRATION_MODE` in `.env` controls who can create an account:
+
+| Value | Who can register |
+| ----- | ---------------- |
+| `open` (default) | Anyone who can reach the client |
+| `invite` | Only people with an invite link from an admin |
+| `closed` | Nobody; admins can still create invites, but they cannot be used until the mode allows them |
+
+An invite link works once and expires after 7 days. Adding an email limits the
+link to that address. When `SMTP_URL` (for example
+`smtp://user:pass@smtp.example.com:587`) and `MAIL_FROM` are set, the link is
+also emailed; otherwise copy it from the dialog, which shows it only once.
+
 ### Run your first review
 
-1. Open the client URL and register an account.
+1. Open the client URL and register an account. The first account is the admin.
 2. In **LLM Connections**, add and verify a model provider key, or configure
    [Ollama](#ollama). External providers may charge for model usage.
 3. In **Configuration**, select that connection and a model available to it.
@@ -317,7 +339,9 @@ language_instructions:
 
 | Method | Path                 | Description |
 | ------ | -------------------- | ----------- |
-| POST   | `/api/auth/register` | `{ name, email, password, confirmPassword }`, sets the auth cookie |
+| POST   | `/api/auth/register` | `{ name, email, password, confirmPassword, inviteToken? }`, sets the auth cookie; `inviteToken` is required when `REGISTRATION_MODE=invite` |
+| GET    | `/api/auth/registration` | `{ mode, firstUser }`, so the register page can say whether it is usable |
+| GET    | `/api/auth/invites/:token` | The invite's email, inviter and expiry, or 404 when invalid, used or expired |
 | POST   | `/api/auth/login`    | `{ email, password }`, sets the auth cookie |
 | POST   | `/api/auth/logout`   | Clears the auth cookie |
 | GET    | `/api/auth/me`       | Current user, or 401 |
@@ -340,8 +364,17 @@ language_instructions:
 | GET    | `/api/config/schema` | Defaults, profiles, severities and categories for the settings UI |
 | GET    | `/api/config/global` | The caller's global review config, and what it resolves to with each value's source |
 | PUT    | `/api/config/global` | `{ settings }`, replaces the global review config; `{}` resets it |
+| PUT    | `/api/settings/avatar` | Raw PNG, JPEG or WebP body (512 KB at most; the dashboard uploads a 256px JPEG); sets the caller's profile picture |
+| DELETE | `/api/settings/avatar` | Removes the caller's profile picture, so their initials show again |
+| GET    | `/api/users/:id/avatar` | A user's profile picture, for any signed-in user; 404 when they have none |
+| GET    | `/api/admin/users`   | Admin only: every user with their role |
+| PATCH  | `/api/admin/users/:id` | Admin only: `{ role: "admin" \| "member" }`; refuses to remove the last admin |
+| DELETE | `/api/admin/users/:id` | Admin only: deletes another user and everything they own |
+| GET    | `/api/admin/invites` | Admin only: pending invites |
+| POST   | `/api/admin/invites` | Admin only: `{ email? }`; returns `{ invite, link, emailed }`, the link is shown only here |
+| DELETE | `/api/admin/invites/:id` | Admin only: revokes a pending invite |
 
-Register and login are rate limited (20 requests per 15 minutes per IP).
+Register, login, the registration mode and invite lookups are rate limited (20 requests per 15 minutes per IP).
 
 </details>
 

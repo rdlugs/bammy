@@ -11,11 +11,30 @@ export class ApiError extends Error {
   }
 }
 
+// The team workspace requests act in, set by AuthProvider. Kept out of query
+// keys on purpose: switching clears the cache instead, so every feature's
+// hooks stay workspace-agnostic. Null means the personal workspace, which the
+// server uses when the header is absent.
+let currentWorkspaceId: string | null = null
+
+export function setApiWorkspace(id: string | null) {
+  currentWorkspaceId = id
+}
+
+export function apiWorkspace(): string | null {
+  return currentWorkspaceId
+}
+
+// For requests that bypass api(), such as raw-text downloads.
+export function workspaceHeaders(): Record<string, string> {
+  return currentWorkspaceId ? { "x-bammy-workspace": currentWorkspaceId } : {}
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...init.headers },
+    headers: { "Content-Type": "application/json", ...workspaceHeaders(), ...init.headers },
   })
 
   if (res.status === 204) {

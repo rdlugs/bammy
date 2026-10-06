@@ -3,7 +3,7 @@ import { HttpError } from "../lib/httpError.ts";
 import { prisma } from "../lib/prisma.ts";
 import { loadReviewConfig } from "../review/config/load.ts";
 import { hostOrigin } from "../review/forge/types.ts";
-import { adapterForConnection, loadOwnedConnection, toHttpError } from "../services/forge.ts";
+import { adapterForConnection, loadWorkspaceConnection, toHttpError } from "../services/forge.ts";
 import { requireStoredLlmConnection } from "../services/llm.ts";
 import { ensureWebhook, removeWebhook } from "../services/webhooks.ts";
 import {
@@ -34,10 +34,10 @@ export async function listRepos(req: Request, res: Response) {
   const { connectionId } = listReposQuerySchema.parse(req.query);
   // Keeps the 404 for a connection the user does not own; the query below is
   // scoped by owner either way.
-  if (connectionId) await loadOwnedConnection(req.userId!, connectionId);
+  if (connectionId) await loadWorkspaceConnection(req.workspaceId!, connectionId);
 
   const stored = await prisma.repository.findMany({
-    where: { connection: { userId: req.userId! }, ...(connectionId && { connectionId }) },
+    where: { connection: { workspaceId: req.workspaceId! }, ...(connectionId && { connectionId }) },
     include: { connection: { select: { accountLogin: true, provider: true, host: true } } },
     orderBy: { fullPath: "asc" },
   });
@@ -62,7 +62,7 @@ export async function listRepos(req: Request, res: Response) {
 // the ones already added.
 export async function listAvailableRepos(req: Request, res: Response) {
   const { connectionId } = availableReposQuerySchema.parse(req.query);
-  const connection = await loadOwnedConnection(req.userId!, connectionId);
+  const connection = await loadWorkspaceConnection(req.workspaceId!, connectionId);
 
   const forgeRepos = await adapterForConnection(connection)
     .listRepos()
@@ -82,7 +82,7 @@ export async function listAvailableRepos(req: Request, res: Response) {
 
 export async function enableRepo(req: Request, res: Response) {
   const { connectionId, externalId } = enableRepoSchema.parse(req.body);
-  const connection = await loadOwnedConnection(req.userId!, connectionId);
+  const connection = await loadWorkspaceConnection(req.workspaceId!, connectionId);
 
   const forgeRepo = await adapterForConnection(connection)
     .getRepo(externalId)
@@ -107,10 +107,10 @@ export async function enableRepo(req: Request, res: Response) {
   res.status(201).json({ repo, webhook });
 }
 
-async function loadOwnedRepo(userId: string, id: string) {
+async function loadOwnedRepo(workspaceId: string, id: string) {
   const repo = await prisma.repository.findFirst({
-    where: { id, connection: { userId } },
-    include: { connection: { include: { user: { select: { reviewSettings: true } } } } },
+    where: { id, connection: { workspaceId } },
+    include: { connection: { include: { workspace: { select: { reviewSettings: true } } } } },
   });
   if (!repo) {
     throw new HttpError(404, "Repository not found");
@@ -121,13 +121,13 @@ async function loadOwnedRepo(userId: string, id: string) {
 export async function updateRepo(req: Request, res: Response) {
   const { id } = repoIdParamSchema.parse(req.params);
   const { enabled, settings, followGlobal } = updateRepoSchema.parse(req.body);
-  const existing = await loadOwnedRepo(req.userId!, id);
+  const existing = await loadOwnedRepo(req.workspaceId!, id);
 
   if (settings?.llm && "connection" in settings.llm) {
     if (!settings.llm.connection) {
       throw new HttpError(400, "Validation failed", { connection: ["Select an LLM connection"] });
     }
-    await requireStoredLlmConnection(req.userId!, settings.llm.connection);
+    await requireStoredLlmConnection(req.workspaceId!, settings.llm.connection);
   }
 
   const updated = await prisma.repository.update({ where: { id }, data: { enabled, settings, followGlobal } });
@@ -142,7 +142,7 @@ export async function updateRepo(req: Request, res: Response) {
 // repository later starts without history.
 export async function deleteRepo(req: Request, res: Response) {
   const { id } = repoIdParamSchema.parse(req.params);
-  const repo = await loadOwnedRepo(req.userId!, id);
+  const repo = await loadOwnedRepo(req.workspaceId!, id);
   // Take Bammy's hook off the forge while the row still holds its id.
   await removeWebhook(repo, repo.connection).catch(() => undefined);
   await prisma.repository.delete({ where: { id } });
@@ -153,13 +153,13 @@ export async function deleteRepo(req: Request, res: Response) {
 // with where each value came from and anything wrong with the repository file.
 export async function getRepoConfig(req: Request, res: Response) {
   const { id } = repoIdParamSchema.parse(req.params);
-  const repo = await loadOwnedRepo(req.userId!, id);
+  const repo = await loadOwnedRepo(req.workspaceId!, id);
 
   const loaded = await loadReviewConfig({
     adapter: adapterForConnection(repo.connection),
     project: repo.fullPath,
     ref: repo.defaultBranch,
-    globalSettings: repo.connection.user.reviewSettings,
+    globalSettings: repo.connection.workspace.reviewSettings,
     repoSettings: repo.settings,
     followGlobal: repo.followGlobal,
   }).catch((err: unknown) => {
@@ -172,7 +172,7 @@ export async function getRepoConfig(req: Request, res: Response) {
 // the forge; Bammy only knows about changes it has already reviewed.
 export async function listRepoChanges(req: Request, res: Response) {
   const { id } = repoIdParamSchema.parse(req.params);
-  const repo = await loadOwnedRepo(req.userId!, id);
+  const repo = await loadOwnedRepo(req.workspaceId!, id);
 
   const changes = await adapterForConnection(repo.connection)
     .listOpenChanges(repo.fullPath)

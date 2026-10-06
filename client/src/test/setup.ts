@@ -5,6 +5,8 @@ import { cleanup } from "@testing-library/react"
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  // The selected workspace is remembered there; each test starts fresh.
+  localStorage.clear()
 })
 
 // jsdom lacks matchMedia, used by the shadcn sidebar's mobile hook

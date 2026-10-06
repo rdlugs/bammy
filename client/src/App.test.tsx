@@ -5,7 +5,7 @@ import { App } from "./App"
 import { jsonResponse, mockFetch, renderWithProviders } from "./test/renderWithProviders"
 import { mockApi } from "./test/apiRoutes"
 
-const user = { id: "1", name: "Ada Lovelace", email: "ada@example.com", createdAt: "" }
+const user = { id: "1", name: "Ada Lovelace", email: "ada@example.com", role: "member", avatarUpdatedAt: null, createdAt: "" }
 
 describe("routing and auth", () => {
   it("redirects an anonymous visitor from /home to the login page", async () => {
@@ -46,7 +46,8 @@ describe("register form", () => {
     expect(screen.getByText("Enter a valid email address")).toBeInTheDocument()
     expect(screen.getByText("Password must be at least 8 characters")).toBeInTheDocument()
     expect(screen.getByText("Passwords do not match")).toBeInTheDocument()
-    expect(fetchSpy).toHaveBeenCalledTimes(1) // only the initial /auth/me check
+    // Only the initial /auth/me and registration-mode checks.
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual(["/api/auth/me", "/api/auth/registration"])
   })
 
   it("registers and lands on Home", async () => {

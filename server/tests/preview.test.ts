@@ -111,6 +111,7 @@ describe("POST /api/config/preview", () => {
   let cookie: string;
 
   beforeEach(async () => {
+    await prisma.workspace.deleteMany();
     await prisma.user.deleteMany();
     ({ cookie } = await createUser());
   });

@@ -6,6 +6,7 @@ import { PageShell } from "@/components/PageShell"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/features/auth/useAuth"
+import { AvatarForm } from "@/features/settings/AvatarForm"
 import { DeleteAccount } from "@/features/settings/DeleteAccount"
 import { PasswordForm } from "@/features/settings/PasswordForm"
 import { ProfileForm } from "@/features/settings/ProfileForm"
@@ -54,9 +55,14 @@ export function SettingsPage() {
           ))}
         </TabsList>
         <TabsContent value="profile">
-          <Section title="Profile" description="Your name and the email you sign in with.">
-            <ProfileForm user={user} />
-          </Section>
+          <div className="flex flex-col gap-6">
+            <Section title="Profile picture" description="Shown next to your name across Bammy.">
+              <AvatarForm user={user} />
+            </Section>
+            <Section title="Profile" description="Your name and the email you sign in with.">
+              <ProfileForm user={user} />
+            </Section>
+          </div>
         </TabsContent>
         <TabsContent value="password">
           <Section title="Password" description="Choose a new password of at least 8 characters.">

@@ -3,29 +3,86 @@ import { prisma } from "../lib/prisma.ts";
 import { hashPassword, verifyPassword } from "../lib/password.ts";
 import { AUTH_COOKIE, authCookieOptions, signToken } from "../lib/jwt.ts";
 import { HttpError } from "../lib/httpError.ts";
-import { loginSchema, registerSchema } from "../schemas/auth.schema.ts";
+import { env } from "../config/env.ts";
+import type { Invite, Prisma } from "../generated/prisma/client.ts";
+import { assertInviteEmail, consumeInvite, findValidInvite, joinWorkspace } from "../services/invites.ts";
+import { createPersonalWorkspace, workspacesFor } from "../services/workspaces.ts";
+import { inviteTokenParamsSchema, loginSchema, registerSchema } from "../schemas/auth.schema.ts";
 
-export const publicUser = { id: true, name: true, email: true, createdAt: true } as const;
+export const publicUser = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  avatarUpdatedAt: true,
+  createdAt: true,
+} as const;
 
 function setAuthCookie(res: Response, userId: string) {
   res.cookie(AUTH_COOKIE, signToken(userId), authCookieOptions);
 }
 
+// Applies REGISTRATION_MODE to everyone but the first account, and returns the
+// invite to spend once the user exists. A token is checked whenever one is
+// given: in open mode a team invite still brings the new user into its workspace.
+async function admitRegistration(
+  tx: Prisma.TransactionClient,
+  email: string,
+  inviteToken?: string,
+): Promise<Invite | null> {
+  const invite = inviteToken ? await findValidInvite(inviteToken, tx) : null;
+  if (inviteToken && !invite) {
+    throw new HttpError(400, "This invite is invalid or has expired");
+  }
+  if (invite) assertInviteEmail(invite, email);
+  if (env.REGISTRATION_MODE === "closed") {
+    throw new HttpError(403, "Registration is closed on this Bammy instance");
+  }
+  if (env.REGISTRATION_MODE === "invite" && !invite) {
+    throw new HttpError(403, "An invite is required to register on this Bammy instance");
+  }
+  return invite;
+}
+
+// Everything the client needs about who is signed in and where they can work.
+async function session(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: publicUser });
+  if (!user) {
+    throw new HttpError(401, "Not authenticated");
+  }
+  return { user, workspaces: await workspacesFor(userId) };
+}
+
 export async function register(req: Request, res: Response) {
-  const { name, email, password } = registerSchema.parse(req.body);
+  const { name, email, password, inviteToken } = registerSchema.parse(req.body);
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     throw new HttpError(409, "An account with this email already exists");
   }
 
-  const user = await prisma.user.create({
-    data: { name, email, passwordHash: await hashPassword(password) },
-    select: publicUser,
+  const passwordHash = await hashPassword(password);
+  // The first account on an empty install bootstraps it as admin. Two people
+  // registering at that same instant would both become admin, which is harmless.
+  // The invite is spent in the same transaction, so only if the user is created.
+  const user = await prisma.$transaction(async (tx) => {
+    const firstUser = (await tx.user.count()) === 0;
+    const invite = firstUser ? null : await admitRegistration(tx, email, inviteToken);
+    const user = await tx.user.create({
+      data: { name, email, passwordHash, role: firstUser ? "admin" : "member" },
+      select: publicUser,
+    });
+    await createPersonalWorkspace(tx, user);
+    if (invite?.workspaceId) {
+      await joinWorkspace(tx, invite, user.id);
+    } else if (invite) {
+      await consumeInvite(tx, invite);
+    }
+    return user;
   });
 
   setAuthCookie(res, user.id);
-  res.status(201).json({ user });
+  res.status(201).json(await session(user.id));
 }
 
 export async function login(req: Request, res: Response) {
@@ -37,7 +94,7 @@ export async function login(req: Request, res: Response) {
   }
 
   setAuthCookie(res, user.id);
-  res.json({ user: { id: user.id, name: user.name, email: user.email, createdAt: user.createdAt } });
+  res.json(await session(user.id));
 }
 
 export function clearAuthCookie(res: Response) {
@@ -51,9 +108,50 @@ export function logout(_req: Request, res: Response) {
 }
 
 export async function me(req: Request, res: Response) {
-  const user = await prisma.user.findUnique({ where: { id: req.userId }, select: publicUser });
+  res.json(await session(req.userId!));
+}
+
+// Lets the register page say up front whether it can be used.
+export async function registration(_req: Request, res: Response) {
+  const firstUser = (await prisma.user.count()) === 0;
+  res.json({ mode: env.REGISTRATION_MODE, firstUser });
+}
+
+export async function showInvite(req: Request, res: Response) {
+  const { token } = inviteTokenParamsSchema.parse(req.params);
+  const valid = await findValidInvite(token);
+  if (!valid) {
+    throw new HttpError(404, "This invite is invalid or has expired");
+  }
+  const invite = await prisma.invite.findUniqueOrThrow({
+    where: { id: valid.id },
+    select: {
+      email: true,
+      role: true,
+      expiresAt: true,
+      invitedBy: { select: { name: true } },
+      workspace: { select: { name: true } },
+    },
+  });
+  res.json({ invite });
+}
+
+// A signed-in user joining a workspace from an invite link.
+export async function acceptInvite(req: Request, res: Response) {
+  const { token } = inviteTokenParamsSchema.parse(req.params);
+  const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { email: true } });
   if (!user) {
     throw new HttpError(401, "Not authenticated");
   }
-  res.json({ user });
+  const workspaceId = await prisma.$transaction(async (tx) => {
+    const invite = await findValidInvite(token, tx);
+    if (!invite) {
+      throw new HttpError(404, "This invite is invalid or has expired");
+    }
+    assertInviteEmail(invite, user.email);
+    await joinWorkspace(tx, invite, req.userId!);
+    return invite.workspaceId!;
+  });
+  const workspace = (await workspacesFor(req.userId!)).find((w) => w.id === workspaceId);
+  res.status(201).json({ workspace });
 }

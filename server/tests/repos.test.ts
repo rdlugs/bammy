@@ -18,12 +18,13 @@ const project = (id: number, path: string) => ({
 });
 
 beforeEach(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
   const created = await createUser();
   cookie = created.cookie;
   const connection = await prisma.forgeConnection.create({
     data: {
-      userId: created.user.id,
+      workspaceId: created.workspace.id,
       provider: "gitlab",
       host: "gitlab.com",
       kind: "token",
@@ -33,7 +34,7 @@ beforeEach(async () => {
   });
   connectionId = connection.id;
   await prisma.llmCredential.create({
-    data: { userId: created.user.id, provider: "openai", encryptedKey: encrypt("sk-openai-test") },
+    data: { workspaceId: created.workspace.id, provider: "openai", encryptedKey: encrypt("sk-openai-test") },
   });
 });
 
@@ -81,13 +82,13 @@ describe("GET /api/repos", () => {
     expect(res.status).toBe(404);
   });
   it("lists every connection's repositories when no connectionId is given", async () => {
-    const userId = (await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } })).userId;
+    const workspaceId = (await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } })).workspaceId;
     const second = await prisma.forgeConnection.create({
-      data: { userId, provider: "gitlab", host: "gitlab.acme.com", kind: "token", accountLogin: "work", encryptedToken: encrypt("glpat") },
+      data: { workspaceId, provider: "gitlab", host: "gitlab.acme.com", kind: "token", accountLogin: "work", encryptedToken: encrypt("glpat") },
     });
     const other = await createUser("other@example.com");
     const foreign = await prisma.forgeConnection.create({
-      data: { userId: other.user.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "x", encryptedToken: encrypt("glpat") },
+      data: { workspaceId: other.workspace.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "x", encryptedToken: encrypt("glpat") },
     });
     const repo = (connection: string, fullPath: string, externalId: string) => ({
       connectionId: connection,
@@ -398,9 +399,9 @@ describe("GET /api/repos/:id/changes", () => {
 
 describe("GET /api/repos/:id/config with the global config", () => {
   async function repoWithGlobal(followGlobal: boolean) {
-    const user = await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } });
-    await prisma.user.update({
-      where: { id: user.userId },
+    const connection = await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } });
+    await prisma.workspace.update({
+      where: { id: connection.workspaceId },
       data: { reviewSettings: { profile: "security", review: { maxFindings: 5, minConfidence: 0.9 } } },
     });
     const repo = await prisma.repository.create({
@@ -574,7 +575,7 @@ describe("GitHub token connections get their own repository hook", () => {
   it("registers a signed hook when enabling and removes it when disabling", async () => {
     const connection = await prisma.forgeConnection.create({
       data: {
-        userId: (await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } })).userId,
+        workspaceId: (await prisma.forgeConnection.findUniqueOrThrow({ where: { id: connectionId } })).workspaceId,
         provider: "github",
         host: "ghe.acme.com",
         kind: "token",

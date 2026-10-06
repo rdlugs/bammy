@@ -31,8 +31,11 @@ function globalConfigBody(saved: unknown) {
 }
 
 export async function getGlobalConfig(req: Request, res: Response) {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: req.userId! }, select: { reviewSettings: true } });
-  res.json(globalConfigBody(user.reviewSettings));
+  const workspace = await prisma.workspace.findUniqueOrThrow({
+    where: { id: req.workspaceId! },
+    select: { reviewSettings: true },
+  });
+  res.json(globalConfigBody(workspace.reviewSettings));
 }
 
 export async function updateGlobalConfig(req: Request, res: Response) {
@@ -40,13 +43,13 @@ export async function updateGlobalConfig(req: Request, res: Response) {
   if (!settings.llm?.connection) {
     throw new HttpError(400, "Validation failed", { connection: ["Select an LLM connection"] });
   }
-  await requireStoredLlmConnection(req.userId!, settings.llm.connection);
-  const user = await prisma.user.update({
-    where: { id: req.userId! },
+  await requireStoredLlmConnection(req.workspaceId!, settings.llm.connection);
+  const workspace = await prisma.workspace.update({
+    where: { id: req.workspaceId! },
     data: { reviewSettings: settings },
     select: { reviewSettings: true },
   });
-  res.json(globalConfigBody(user.reviewSettings));
+  res.json(globalConfigBody(workspace.reviewSettings));
 }
 
 // Renders what a review of a sample change would post with these settings. No

@@ -42,7 +42,7 @@ export async function githubWebhook(req: Request, res: Response) {
   if (!isGithubReviewEvent(event, payload)) return res.status(202).json({ outcome: "ignored" });
   if (!payload.repository || !payload.installation) throw new HttpError(400, "Missing repository or installation");
 
-  // Several Bammy users may share one installation; the earliest enabled
+  // Several workspaces may share one installation; the earliest enabled
   // repository owns automatic reviews so a PR is never reviewed twice.
   const repo = await prisma.repository.findFirst({
     where: {

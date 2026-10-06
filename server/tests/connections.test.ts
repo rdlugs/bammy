@@ -6,14 +6,16 @@ import { env } from "../src/config/env.ts";
 import { decrypt, encrypt } from "../src/lib/crypto.ts";
 import { prisma } from "../src/lib/prisma.ts";
 import { fetchStub } from "./helpers/fetchStub.ts";
-import { createUser } from "./helpers/users.ts";
+import { createTeam, createUser } from "./helpers/users.ts";
 
 let cookie: string;
 let userId: string;
+let workspaceId: string;
 
 beforeEach(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
-  ({ cookie, user: { id: userId } } = await createUser());
+  ({ cookie, user: { id: userId }, workspace: { id: workspaceId } } = await createUser());
 });
 
 afterEach(() => {
@@ -39,7 +41,7 @@ describe("POST /api/connections/gitlab", () => {
     expect(JSON.stringify(res.body)).not.toContain("glpat-secret");
     expect(calls[0]!.headers["private-token"]).toBe("glpat-secret");
 
-    const stored = await prisma.forgeConnection.findFirstOrThrow({ where: { userId } });
+    const stored = await prisma.forgeConnection.findFirstOrThrow({ where: { workspaceId } });
     expect(stored.encryptedToken).not.toContain("glpat-secret");
     expect(decrypt(stored.encryptedToken!)).toBe("glpat-secret");
   });
@@ -51,7 +53,7 @@ describe("POST /api/connections/gitlab", () => {
     const res = await request(app).post("/api/connections/gitlab").set("Cookie", cookie).send({ token: "two" });
 
     expect(res.status).toBe(200);
-    const stored = await prisma.forgeConnection.findMany({ where: { userId } });
+    const stored = await prisma.forgeConnection.findMany({ where: { workspaceId } });
     expect(stored).toHaveLength(1);
     expect(stored[0]!.host).toBe("gitlab.com");
     expect(decrypt(stored[0]!.encryptedToken!)).toBe("two");
@@ -97,7 +99,7 @@ describe("POST /api/connections/github", () => {
     expect(JSON.stringify(res.body)).not.toContain("ghp-secret");
     expect(calls[0]!.headers.authorization).toBe("Bearer ghp-secret");
 
-    const stored = await prisma.forgeConnection.findFirstOrThrow({ where: { userId } });
+    const stored = await prisma.forgeConnection.findFirstOrThrow({ where: { workspaceId } });
     expect(decrypt(stored.encryptedToken!)).toBe("ghp-secret");
   });
 
@@ -110,7 +112,7 @@ describe("POST /api/connections/github", () => {
     const res = await send("two");
 
     expect(res.status).toBe(200);
-    const stored = await prisma.forgeConnection.findMany({ where: { userId } });
+    const stored = await prisma.forgeConnection.findMany({ where: { workspaceId } });
     expect(stored).toHaveLength(1);
     expect(decrypt(stored[0]!.encryptedToken!)).toBe("two");
   });
@@ -153,12 +155,12 @@ describe("GET /api/connections", () => {
     const other = await createUser("other@example.com");
     await prisma.forgeConnection.createMany({
       data: [
-        { userId, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "me", encryptedToken: "v1.x" },
-        { userId: other.user.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "them" },
+        { workspaceId, createdById: userId, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "me", encryptedToken: "v1.x" },
+        { workspaceId: other.workspace.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "them" },
       ],
     });
 
-    const mine = await prisma.forgeConnection.findFirstOrThrow({ where: { userId } });
+    const mine = await prisma.forgeConnection.findFirstOrThrow({ where: { workspaceId } });
     const repo = { connectionId: mine.id, provider: "gitlab", host: "gitlab.com", defaultBranch: "main" } as const;
     await prisma.repository.createMany({
       data: [
@@ -174,7 +176,7 @@ describe("GET /api/connections", () => {
     expect(res.body.connections).toHaveLength(1);
     expect(res.body.connections[0]).toMatchObject({
       accountLogin: "me",
-      user: { name: "Dev", email: "dev@example.com" },
+      createdBy: { name: "Dev", email: "dev@example.com" },
       repositoryCount: 1,
     });
     expect(res.body.connections[0].encryptedToken).toBeUndefined();
@@ -182,10 +184,10 @@ describe("GET /api/connections", () => {
 });
 
 describe("GET /api/connections/:id/status", () => {
-  const gitlabConnection = (owner = userId) =>
+  const gitlabConnection = (owner = workspaceId) =>
     prisma.forgeConnection.create({
       data: {
-        userId: owner,
+        workspaceId: owner,
         provider: "gitlab",
         host: "gitlab.com",
         kind: "token",
@@ -220,7 +222,7 @@ describe("GET /api/connections/:id/status", () => {
 
   it("reports an uninstalled GitHub App as revoked", async () => {
     const connection = await prisma.forgeConnection.create({
-      data: { userId, provider: "github", host: "github.com", kind: "github_app", installationId: "55", accountLogin: "acme" },
+      data: { workspaceId, provider: "github", host: "github.com", kind: "github_app", installationId: "55", accountLogin: "acme" },
     });
     vi.stubGlobal("fetch", fetchStub([{ url: /api\.github\.com\/app\/installations\/55$/, status: 404 }]).fetch);
 
@@ -229,7 +231,7 @@ describe("GET /api/connections/:id/status", () => {
 
   it("404s on someone else's connection and requires authentication", async () => {
     const other = await createUser("other@example.com");
-    const theirs = await gitlabConnection(other.user.id);
+    const theirs = await gitlabConnection(other.workspace.id);
 
     expect((await request(app).get(`/api/connections/${theirs.id}/status`).set("Cookie", cookie)).status).toBe(404);
     expect((await request(app).get(`/api/connections/${theirs.id}/status`)).status).toBe(401);
@@ -240,7 +242,7 @@ describe("GET /api/connections/:id", () => {
   it("returns the connection with its enabled repositories and recent reviews", async () => {
     const connection = await prisma.forgeConnection.create({
       data: {
-        userId,
+        workspaceId,
         provider: "gitlab",
         host: "gitlab.com",
         kind: "token",
@@ -299,7 +301,7 @@ describe("GET /api/connections/:id", () => {
   it("404s on someone else's connection and requires authentication", async () => {
     const other = await createUser("other@example.com");
     const theirs = await prisma.forgeConnection.create({
-      data: { userId: other.user.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "them" },
+      data: { workspaceId: other.workspace.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "them" },
     });
 
     expect((await request(app).get(`/api/connections/${theirs.id}`).set("Cookie", cookie)).status).toBe(404);
@@ -311,10 +313,10 @@ describe("DELETE /api/connections/:id", () => {
   it("deletes the caller's connection and 404s on someone else's", async () => {
     const other = await createUser("other@example.com");
     const mine = await prisma.forgeConnection.create({
-      data: { userId, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "me" },
+      data: { workspaceId, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "me" },
     });
     const theirs = await prisma.forgeConnection.create({
-      data: { userId: other.user.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "them" },
+      data: { workspaceId: other.workspace.id, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "them" },
     });
 
     expect((await request(app).delete(`/api/connections/${theirs.id}`).set("Cookie", cookie)).status).toBe(404);
@@ -324,8 +326,8 @@ describe("DELETE /api/connections/:id", () => {
 });
 
 describe("GitHub App installation", () => {
-  const state = (sub: string, purpose = "github-install") =>
-    jwt.sign({ sub, purpose }, env.JWT_SECRET, { expiresIn: "10m" });
+  const state = (sub: string, purpose = "github-install", stateWorkspace = workspaceId) =>
+    jwt.sign({ sub, purpose, workspaceId: stateWorkspace }, env.JWT_SECRET, { expiresIn: "10m" });
 
   const githubRoutes = (installationIds: number[]) => [
     { method: "POST", url: /github\.com\/login\/oauth\/access_token$/, body: { access_token: "user-tok" } },
@@ -339,7 +341,7 @@ describe("GitHub App installation", () => {
     expect(res.status).toBe(302);
     const location = new URL(res.headers.location!);
     expect(location.origin + location.pathname).toBe("https://github.com/apps/bammy-test/installations/new");
-    expect(jwt.verify(location.searchParams.get("state")!, env.JWT_SECRET)).toMatchObject({ sub: userId });
+    expect(jwt.verify(location.searchParams.get("state")!, env.JWT_SECRET)).toMatchObject({ sub: userId, workspaceId });
   });
 
   it("saves the installation when the OAuth user can access it", async () => {
@@ -351,12 +353,36 @@ describe("GitHub App installation", () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe(`${env.CLIENT_ORIGIN}/repositories?tab=installation&connected=github`);
-    expect(await prisma.forgeConnection.findFirst({ where: { userId } })).toMatchObject({
+    expect(await prisma.forgeConnection.findFirst({ where: { workspaceId } })).toMatchObject({
       provider: "github",
       kind: "github_app",
       installationId: "55",
       accountLogin: "acme",
     });
+  });
+
+  it("refuses the callback when the user is no longer an admin of the workspace in the state", async () => {
+    const team = await createTeam(userId, "Acme");
+    await prisma.membership.updateMany({ where: { workspaceId: team.id }, data: { role: "member" } });
+    vi.stubGlobal("fetch", fetchStub(githubRoutes([55])).fetch);
+
+    const res = await request(app)
+      .get(`/api/connections/github/callback?installation_id=55&code=c&state=${state(userId, "github-install", team.id)}`)
+      .set("Cookie", cookie);
+
+    expect(res.headers.location).toContain("error=github_install_failed");
+    expect(await prisma.forgeConnection.count()).toBe(0);
+  });
+
+  it("stores the installation in the workspace it was started for", async () => {
+    const team = await createTeam(userId, "Acme");
+    vi.stubGlobal("fetch", fetchStub(githubRoutes([55])).fetch);
+
+    await request(app)
+      .get(`/api/connections/github/callback?installation_id=55&code=c&state=${state(userId, "github-install", team.id)}`)
+      .set("Cookie", cookie);
+
+    expect(await prisma.forgeConnection.findFirstOrThrow()).toMatchObject({ workspaceId: team.id, createdById: userId });
   });
 
   it("refuses an installation the OAuth user cannot see", async () => {

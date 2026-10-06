@@ -13,17 +13,13 @@ import { WALKTHROUGH, fakeModel, modelFinding } from "./helpers/model.ts";
 let repositoryId: string;
 
 beforeEach(async () => {
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
-  const user = await prisma.user.create({
-    data: {
-      name: "W",
-      email: "w@example.com",
-      passwordHash: "x",
-      reviewSettings: { llm: { connection: "anthropic" } },
-    },
+  const workspace = await prisma.workspace.create({
+    data: { name: "W", reviewSettings: { llm: { connection: "anthropic" } } },
   });
   const connection = await prisma.forgeConnection.create({
-    data: { userId: user.id, provider: "github", host: "github.com", kind: "github_app", installationId: "1", accountLogin: "acme" },
+    data: { workspaceId: workspace.id, provider: "github", host: "github.com", kind: "github_app", installationId: "1", accountLogin: "acme" },
   });
   const repo = await prisma.repository.create({
     data: {
@@ -469,8 +465,8 @@ describe("runJob issues and cache", () => {
 describe("runJob with the global config", () => {
   it("applies the owner's global config beneath the repository settings", async () => {
     const repo = await prisma.repository.findUniqueOrThrow({ where: { id: repositoryId }, include: { connection: true } });
-    await prisma.user.update({
-      where: { id: repo.connection.userId },
+    await prisma.workspace.update({
+      where: { id: repo.connection.workspaceId },
       data: { reviewSettings: { llm: { connection: "anthropic" }, review: { blockOn: "minor", maxFindings: 5 } } },
     });
     const job = await claimedJob();
@@ -487,8 +483,8 @@ describe("runJob with the global config", () => {
 
   it("ignores the repository settings while the repository follows the global config", async () => {
     const repo = await prisma.repository.update({ where: { id: repositoryId }, data: { followGlobal: true }, include: { connection: true } });
-    await prisma.user.update({
-      where: { id: repo.connection.userId },
+    await prisma.workspace.update({
+      where: { id: repo.connection.workspaceId },
       data: { reviewSettings: { llm: { connection: "anthropic" }, review: { blockOn: "minor" } } },
     });
     const job = await claimedJob();

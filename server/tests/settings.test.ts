@@ -11,6 +11,7 @@ const PASSWORD = "correct-horse";
 
 let cookie: string;
 let userId: string;
+let workspaceId: string;
 
 beforeEach(async () => {
   vi.stubGlobal(
@@ -20,8 +21,9 @@ beforeEach(async () => {
       return new Response(JSON.stringify(body), { status: 200 });
     }),
   );
+  await prisma.workspace.deleteMany();
   await prisma.user.deleteMany();
-  ({ cookie, user: { id: userId } } = await createUser());
+  ({ cookie, user: { id: userId }, workspace: { id: workspaceId } } = await createUser());
   await prisma.user.update({ where: { id: userId }, data: { passwordHash: await hashPassword(PASSWORD) } });
 });
 
@@ -148,10 +150,10 @@ describe("/api/settings/api-keys", () => {
     expect(res.body.key).toMatchObject({ provider: "anthropic", stored: true, last4: "1234" });
     expect(JSON.stringify(res.body)).not.toContain("secret");
 
-    const stored = await prisma.llmCredential.findFirstOrThrow({ where: { userId } });
+    const stored = await prisma.llmCredential.findFirstOrThrow({ where: { workspaceId } });
     expect(stored.encryptedKey).not.toContain("secret");
     expect(decrypt(stored.encryptedKey!)).toBe("sk-ant-secret-1234");
-    expect((await apiKeysFor(userId)).anthropic).toBe("sk-ant-secret-1234");
+    expect((await apiKeysFor(workspaceId)).anthropic).toBe("sk-ant-secret-1234");
 
     const list = await request(app).get("/api/settings/api-keys").set("Cookie", cookie);
     expect(JSON.stringify(list.body)).not.toContain("secret");
@@ -175,7 +177,7 @@ describe("/api/settings/api-keys", () => {
     expect(res.status).toBe(200);
     expect(res.body.key).toMatchObject({ provider: "openai", baseUrl: "http://router.test/v1" });
     expect(String(fetchMock.mock.calls[0]![0])).toBe("http://router.test/v1/models");
-    const stored = await prisma.llmCredential.findFirstOrThrow({ where: { userId } });
+    const stored = await prisma.llmCredential.findFirstOrThrow({ where: { workspaceId } });
     expect(stored.baseUrl).toBe("http://router.test/v1");
   });
 
@@ -187,9 +189,9 @@ describe("/api/settings/api-keys", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.key).toMatchObject({ provider: "ollama", stored: true, last4: null });
-    const stored = await prisma.llmCredential.findFirstOrThrow({ where: { userId } });
+    const stored = await prisma.llmCredential.findFirstOrThrow({ where: { workspaceId } });
     expect(stored).toMatchObject({ provider: "ollama", encryptedKey: null });
-    expect(await llmCredentialsFor(userId)).toEqual({
+    expect(await llmCredentialsFor(workspaceId)).toEqual({
       keys: {},
       baseUrls: { ollama: "http://host.docker.internal:11434/v1" },
       connections: { ollama: { apiKey: undefined, baseUrl: "http://host.docker.internal:11434/v1" } },
@@ -206,14 +208,14 @@ describe("/api/settings/api-keys", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.errors.apiKey).toEqual(["The API host rejected this key"]);
-    expect(await prisma.llmCredential.count({ where: { userId } })).toBe(0);
+    expect(await prisma.llmCredential.count({ where: { workspaceId } })).toBe(0);
   });
 
   it("replaces an existing key", async () => {
     await request(app).put("/api/settings/api-keys/openai").set("Cookie", cookie).send({ apiKey: "sk-first-0001" });
     await request(app).put("/api/settings/api-keys/openai").set("Cookie", cookie).send({ apiKey: "sk-second-0002" });
 
-    const stored = await prisma.llmCredential.findMany({ where: { userId } });
+    const stored = await prisma.llmCredential.findMany({ where: { workspaceId } });
     expect(stored).toHaveLength(1);
     expect(decrypt(stored[0]!.encryptedKey!)).toBe("sk-second-0002");
   });
@@ -231,7 +233,7 @@ describe("/api/settings/api-keys", () => {
 
     const res = await request(app).delete("/api/settings/api-keys/google").set("Cookie", cookie);
     expect(res.status).toBe(204);
-    expect(await prisma.llmCredential.count({ where: { userId } })).toBe(0);
+    expect(await prisma.llmCredential.count({ where: { workspaceId } })).toBe(0);
 
     const again = await request(app).delete("/api/settings/api-keys/google").set("Cookie", cookie);
     expect(again.status).toBe(404);
@@ -246,14 +248,14 @@ describe("/api/settings/api-keys", () => {
 
     const res = await request(app).delete("/api/settings/api-keys/anthropic").set("Cookie", cookie);
     expect(res.status).toBe(404);
-    expect(await prisma.llmCredential.count({ where: { userId: other.user.id } })).toBe(1);
+    expect(await prisma.llmCredential.count({ where: { workspaceId: other.workspace.id } })).toBe(1);
   });
 });
 
 describe("GET /api/settings/api-keys/:provider/status", () => {
   async function storeCredential() {
     await prisma.llmCredential.create({
-      data: { userId, provider: "anthropic", encryptedKey: encrypt("sk-ant-secret-1234") },
+      data: { workspaceId, provider: "anthropic", encryptedKey: encrypt("sk-ant-secret-1234") },
     });
   }
 
@@ -303,7 +305,7 @@ describe("GET /api/settings/api-keys/:provider/status", () => {
   it("does not check another user's credential", async () => {
     const other = await createUser("other@example.com");
     await prisma.llmCredential.create({
-      data: { userId: other.user.id, provider: "anthropic", encryptedKey: encrypt("sk-ant-other-1234") },
+      data: { workspaceId: other.workspace.id, provider: "anthropic", encryptedKey: encrypt("sk-ant-other-1234") },
     });
 
     const res = await request(app).get("/api/settings/api-keys/anthropic/status").set("Cookie", cookie);
@@ -326,7 +328,7 @@ describe("GET /api/settings/api-keys/:provider/models", () => {
 
   it("lists the connection's models prefixed with its provider, without exposing the key", async () => {
     await prisma.llmCredential.create({
-      data: { userId, provider: "anthropic", encryptedKey: encrypt("sk-ant-secret-1234") },
+      data: { workspaceId, provider: "anthropic", encryptedKey: encrypt("sk-ant-secret-1234") },
     });
     hostReturns({ data: [{ id: "claude-sonnet-5-5" }, { id: "claude-haiku-4-5" }, { id: "claude-sonnet-5-5" }] });
 
@@ -341,7 +343,7 @@ describe("GET /api/settings/api-keys/:provider/models", () => {
   });
 
   it("keeps only Gemini models that generate content", async () => {
-    await prisma.llmCredential.create({ data: { userId, provider: "google", encryptedKey: encrypt("AIza-key-9999") } });
+    await prisma.llmCredential.create({ data: { workspaceId, provider: "google", encryptedKey: encrypt("AIza-key-9999") } });
     hostReturns({
       models: [
         { name: "models/gemini-3-pro", supportedGenerationMethods: ["generateContent", "countTokens"] },
@@ -356,14 +358,14 @@ describe("GET /api/settings/api-keys/:provider/models", () => {
 
   it("drops OpenAI's non-chat models from its official API but not from a proxy", async () => {
     const data = [{ id: "gpt-5" }, { id: "text-embedding-3-large" }, { id: "whisper-1" }];
-    await prisma.llmCredential.create({ data: { userId, provider: "openai", encryptedKey: encrypt("sk-openai-1234") } });
+    await prisma.llmCredential.create({ data: { workspaceId, provider: "openai", encryptedKey: encrypt("sk-openai-1234") } });
     hostReturns({ data });
 
     const official = await request(app).get("/api/settings/api-keys/openai/models").set("Cookie", cookie);
     expect(official.body).toEqual({ models: ["openai/gpt-5"] });
 
     await prisma.llmCredential.update({
-      where: { userId_provider: { userId, provider: "openai" } },
+      where: { workspaceId_provider: { workspaceId, provider: "openai" } },
       data: { baseUrl: "https://proxy.example.com/v1" },
     });
     const proxied = await request(app).get("/api/settings/api-keys/openai/models").set("Cookie", cookie);
@@ -373,7 +375,7 @@ describe("GET /api/settings/api-keys/:provider/models", () => {
 
   it("answers 400 when the host rejects the key", async () => {
     await prisma.llmCredential.create({
-      data: { userId, provider: "anthropic", encryptedKey: encrypt("sk-ant-secret-1234") },
+      data: { workspaceId, provider: "anthropic", encryptedKey: encrypt("sk-ant-secret-1234") },
     });
     hostReturns({}, 401);
 
@@ -385,7 +387,7 @@ describe("GET /api/settings/api-keys/:provider/models", () => {
   it("returns 404 without a stored credential, including another user's", async () => {
     const other = await createUser("other@example.com");
     await prisma.llmCredential.create({
-      data: { userId: other.user.id, provider: "anthropic", encryptedKey: encrypt("sk-ant-other-1234") },
+      data: { workspaceId: other.workspace.id, provider: "anthropic", encryptedKey: encrypt("sk-ant-other-1234") },
     });
 
     const res = await request(app).get("/api/settings/api-keys/anthropic/models").set("Cookie", cookie);
@@ -405,9 +407,9 @@ describe("DELETE /api/settings/account", () => {
   });
 
   it("deletes the user with everything they own and signs them out", async () => {
-    await prisma.llmCredential.create({ data: { userId, provider: "anthropic", encryptedKey: "x" } });
+    await prisma.llmCredential.create({ data: { workspaceId, provider: "anthropic", encryptedKey: "x" } });
     await prisma.forgeConnection.create({
-      data: { userId, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "dev" },
+      data: { workspaceId, provider: "gitlab", host: "gitlab.com", kind: "token", accountLogin: "dev" },
     });
 
     const res = await request(app).delete("/api/settings/account").set("Cookie", cookie).send({ password: PASSWORD });
@@ -415,10 +417,28 @@ describe("DELETE /api/settings/account", () => {
     expect(res.status).toBe(204);
     expect(res.headers["set-cookie"]?.[0]).toMatch(/bammy_token=;/);
     expect(await prisma.user.count({ where: { id: userId } })).toBe(0);
-    expect(await prisma.llmCredential.count({ where: { userId } })).toBe(0);
-    expect(await prisma.forgeConnection.count({ where: { userId } })).toBe(0);
+    expect(await prisma.llmCredential.count({ where: { workspaceId } })).toBe(0);
+    expect(await prisma.forgeConnection.count({ where: { workspaceId } })).toBe(0);
 
     const me = await request(app).get("/api/auth/me").set("Cookie", cookie);
     expect(me.status).toBe(401);
+  });
+
+  it("refuses to delete the last admin while other users remain", async () => {
+    await prisma.user.update({ where: { id: userId }, data: { role: "admin" } });
+    await createUser("member@example.com");
+
+    const res = await request(app).delete("/api/settings/account").set("Cookie", cookie).send({ password: PASSWORD });
+
+    expect(res.status).toBe(409);
+    expect(await prisma.user.count({ where: { id: userId } })).toBe(1);
+  });
+
+  it("lets the last admin delete their account when they are the only user", async () => {
+    await prisma.user.update({ where: { id: userId }, data: { role: "admin" } });
+
+    const res = await request(app).delete("/api/settings/account").set("Cookie", cookie).send({ password: PASSWORD });
+
+    expect(res.status).toBe(204);
   });
 });

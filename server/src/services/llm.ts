@@ -19,15 +19,15 @@ const ENV_KEYS: ApiKeys = {
   google: env.GOOGLE_GENERATIVE_AI_API_KEY || undefined,
 };
 
-// A key the repository owner stored wins over the server-wide one, so their
-// reviews bill to them.
-export async function apiKeysFor(userId: string): Promise<ApiKeys> {
-  return (await llmCredentialsFor(userId)).keys;
+// A key the repository's workspace stored wins over the server-wide one, so
+// its reviews bill to it.
+export async function apiKeysFor(workspaceId: string): Promise<ApiKeys> {
+  return (await llmCredentialsFor(workspaceId)).keys;
 }
 
-export async function requireStoredLlmConnection(userId: string, provider: ProviderName) {
+export async function requireStoredLlmConnection(workspaceId: string, provider: ProviderName) {
   const connection = await prisma.llmCredential.findUnique({
-    where: { userId_provider: { userId, provider } },
+    where: { workspaceId_provider: { workspaceId, provider } },
     select: { id: true },
   });
   if (!connection) {
@@ -38,9 +38,9 @@ export async function requireStoredLlmConnection(userId: string, provider: Provi
 }
 
 export async function llmCredentialsFor(
-  userId: string,
+  workspaceId: string,
 ): Promise<{ keys: ApiKeys; baseUrls: ProviderBaseUrls; connections: StoredLlmConnections }> {
-  const stored = await prisma.llmCredential.findMany({ where: { userId } });
+  const stored = await prisma.llmCredential.findMany({ where: { workspaceId } });
   const keys: ApiKeys = { ...ENV_KEYS };
   const baseUrls: ProviderBaseUrls = {};
   const connections: StoredLlmConnections = {};
